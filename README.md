@@ -20,6 +20,10 @@ Backend cho hệ thống quản lý kho và sản xuất carcass tại xưởng 
 
 - Xem tài liệu chi tiết tại [docs/backend-business-logic-vi.md](docs/backend-business-logic-vi.md).
 
+## Hướng dẫn làm việc (Claude / Agent)
+
+- Xem hướng dẫn cho AI agent và contributors tại [CLAUDE.md](CLAUDE.md).
+
 ## Branch Rules
 
 Quy tắc nhánh áp dụng chung:
