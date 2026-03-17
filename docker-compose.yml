@@ -2,20 +2,27 @@ services:
   postgres:
     image: postgres:17-alpine
     ports:
-      - "5432:5432"
+      - "${POSTGRES_HOST_PORT:-5433}:5432"
     environment:
       POSTGRES_USER: vmarble
       POSTGRES_PASSWORD: vmarble
       POSTGRES_DB: vmarble
     volumes:
       - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U vmarble -d vmarble"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+      start_period: 2s
 
   app:
     build: .
     ports:
       - "8080:8080"
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
     environment:
       DATABASE_URL: postgres://vmarble:vmarble@postgres:5432/vmarble?sslmode=disable
       PORT: "8080"
