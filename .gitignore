@@ -4,3 +4,7 @@
 .env
 .env.*
 !.env.example
+
+bin/
+tmp/
+*.exe

@@ -1,0 +1,74 @@
+package inventory
+
+import (
+	"context"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/vmarble/warehouse-management-service/internal/domain"
+)
+
+type ReceiveStockInput struct {
+	MaterialID   uuid.UUID       `json:"material_id"`
+	Dimensions   domain.Dimension `json:"dimensions"`
+	CostPerSheet domain.Money    `json:"cost_per_sheet"`
+	Quantity     int             `json:"quantity"`
+	SupplierRef  string          `json:"supplier_ref"`
+}
+
+type InventoryLot struct {
+	ID           uuid.UUID    `json:"id"`
+	MaterialID   uuid.UUID    `json:"material_id"`
+	Quantity     int          `json:"quantity"`
+	CostPerSheet domain.Money `json:"cost_per_sheet"`
+	SupplierRef  string       `json:"supplier_ref"`
+	ReceivedAt   time.Time    `json:"received_at"`
+}
+
+type BoardSheet struct {
+	ID                 uuid.UUID  `json:"id"`
+	LotID              uuid.UUID  `json:"lot_id"`
+	Dimensions         domain.Dimension `json:"dimensions"`
+	CostPerSheet       domain.Money     `json:"cost_per_sheet"`
+	Status             string     `json:"status"`
+	IssuedToWorkOrderID *uuid.UUID `json:"issued_to_work_order_id,omitempty"`
+}
+
+type RecordCutInput struct {
+	SheetID          *uuid.UUID        `json:"sheet_id,omitempty"`
+	RemnantID       *uuid.UUID        `json:"remnant_id,omitempty"`
+	WorkOrderID     uuid.UUID         `json:"work_order_id"`
+	SKUID           uuid.UUID         `json:"sku_id"`
+	UsedDimension   domain.Dimension  `json:"used_dimension"`
+	RemnantDimension *domain.Dimension `json:"remnant_dimension,omitempty"`
+}
+
+type CutResult struct {
+	CuttingRecordID uuid.UUID  `json:"cutting_record_id"`
+	RemnantID       *uuid.UUID `json:"remnant_id,omitempty"`
+}
+
+type Remnant struct {
+	ID              uuid.UUID           `json:"id"`
+	ParentBoardID   uuid.UUID           `json:"parent_board_id"`
+	ParentRemnantID *uuid.UUID          `json:"parent_remnant_id,omitempty"`
+	Dimensions      domain.Dimension    `json:"dimensions"`
+	Status          domain.RemnantStatus `json:"status"`
+	AllocatedToWO   *uuid.UUID          `json:"allocated_to_wo,omitempty"`
+	CreatedAt       time.Time           `json:"created_at"`
+}
+
+type Service interface {
+	ReceiveStock(ctx context.Context, in ReceiveStockInput) (InventoryLot, error)
+	ListLots(ctx context.Context) ([]InventoryLot, error)
+
+	GetSheet(ctx context.Context, sheetID uuid.UUID) (BoardSheet, error)
+	ListAvailableSheets(ctx context.Context) ([]BoardSheet, error)
+
+	RecordCut(ctx context.Context, in RecordCutInput) (CutResult, error)
+
+	FindAvailableRemnants(ctx context.Context, minDim domain.Dimension) ([]Remnant, error)
+	AllocateRemnant(ctx context.Context, remnantID uuid.UUID, workOrderID uuid.UUID) error
+	MarkRemnantWaste(ctx context.Context, remnantID uuid.UUID) error
+	GetRemnantLineage(ctx context.Context, boardSheetID uuid.UUID) ([]Remnant, error)
+}

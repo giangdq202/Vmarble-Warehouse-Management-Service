@@ -1,0 +1,107 @@
+package planning
+
+import (
+	"context"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/vmarble/warehouse-management-service/internal/domain"
+)
+
+type service struct {
+	s store
+}
+
+func NewService(s store) Service {
+	return &service{s: s}
+}
+
+func (svc *service) CreatePlan(ctx context.Context, in CreatePlanInput) (Plan, error) {
+	if len(in.Items) == 0 {
+		return Plan{}, domain.NewBizError(domain.ErrInvalidInput, "at least one item is required")
+	}
+	for _, item := range in.Items {
+		if item.Quantity <= 0 {
+			return Plan{}, domain.NewBizError(domain.ErrInvalidInput, "item quantity must be greater than 0")
+		}
+	}
+
+	now := time.Now()
+	plan := Plan{
+		ID:        uuid.New(),
+		POID:      in.POID,
+		Status:    domain.PlanDraft,
+		Deadline:  in.Deadline,
+		CreatedAt: now,
+	}
+
+	if err := svc.s.insertPlan(ctx, plan); err != nil {
+		return Plan{}, err
+	}
+
+	items := make([]PlanItem, len(in.Items))
+	for i, inItem := range in.Items {
+		items[i] = PlanItem{
+			ID:       uuid.New(),
+			PlanID:   plan.ID,
+			SKUID:    inItem.SKUID,
+			Quantity: inItem.Quantity,
+		}
+	}
+	if err := svc.s.insertPlanItems(ctx, items); err != nil {
+		return Plan{}, err
+	}
+
+	plan.Items = items
+	return plan, nil
+}
+
+func (svc *service) GetPlan(ctx context.Context, planID uuid.UUID) (Plan, error) {
+	plan, err := svc.s.selectPlanByID(ctx, planID)
+	if err != nil {
+		return Plan{}, err
+	}
+	items, err := svc.s.selectPlanItemsByPlanID(ctx, planID)
+	if err != nil {
+		return Plan{}, err
+	}
+	plan.Items = items
+	return plan, nil
+}
+
+func (svc *service) ListPlans(ctx context.Context) ([]Plan, error) {
+	plans, err := svc.s.selectPlans(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for i := range plans {
+		items, err := svc.s.selectPlanItemsByPlanID(ctx, plans[i].ID)
+		if err != nil {
+			return nil, err
+		}
+		plans[i].Items = items
+	}
+	return plans, nil
+}
+
+func (svc *service) ApprovePlan(ctx context.Context, planID uuid.UUID) error {
+	plan, err := svc.s.selectPlanByID(ctx, planID)
+	if err != nil {
+		return err
+	}
+	if plan.Status != domain.PlanDraft {
+		return domain.NewBizError(domain.ErrInvalidTransition, "only draft plans can be approved")
+	}
+	return svc.s.updatePlanStatus(ctx, planID, string(domain.PlanApproved))
+}
+
+func (svc *service) CancelPlan(ctx context.Context, planID uuid.UUID) error {
+	plan, err := svc.s.selectPlanByID(ctx, planID)
+	if err != nil {
+		return err
+	}
+	if plan.Status != domain.PlanDraft {
+		return domain.NewBizError(domain.ErrInvalidTransition, "only draft plans can be canceled")
+	}
+	return svc.s.updatePlanStatus(ctx, planID, string(domain.PlanCanceled))
+}
