@@ -1,7 +1,9 @@
 .PHONY: dev run build test lint migrate-up migrate-down migrate-create docker-up docker-down
 
 APP_NAME := warehouse-server
-DSN      ?= postgres://vmarble:vmarble@localhost:5432/vmarble?sslmode=disable
+PG_PORT  ?= 5433
+DSN      ?= postgres://vmarble:vmarble@localhost:$(PG_PORT)/vmarble?sslmode=disable
+GOOSE    ?= go run github.com/pressly/goose/v3/cmd/goose@v3.24.3
 
 # ── Development ──────────────────────────────────────────────
 
@@ -24,14 +26,14 @@ lint:
 # ── Database Migrations ─────────────────────────────────────
 
 migrate-up:
-	GOOSE_DRIVER=postgres GOOSE_DBSTRING="$(DSN)" goose -dir migrations up
+	GOOSE_DRIVER=postgres GOOSE_DBSTRING="$(DSN)" $(GOOSE) -dir migrations up
 
 migrate-down:
-	GOOSE_DRIVER=postgres GOOSE_DBSTRING="$(DSN)" goose -dir migrations down
+	GOOSE_DRIVER=postgres GOOSE_DBSTRING="$(DSN)" $(GOOSE) -dir migrations down
 
 migrate-create:
 	@read -p "Migration name: " name; \
-	GOOSE_DRIVER=postgres goose -dir migrations create $$name sql
+	GOOSE_DRIVER=postgres $(GOOSE) -dir migrations create $$name sql
 
 # ── Docker ───────────────────────────────────────────────────
 

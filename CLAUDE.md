@@ -67,6 +67,71 @@ Only contains value objects and enums shared across modules:
 
 `internal/platform/` contains infrastructure (postgres, httpkit, auth, config) — never domain logic.
 
+## Coding conventions (must follow)
+
+### Go formatting, imports, naming
+
+- Run `gofmt` on all Go files; keep diffs minimal and focused.
+- Use `goimports`-style grouping (stdlib, third-party, local) and remove unused imports.
+- Package names: short, lowercase, no underscores. Avoid stutter (e.g. `inventory.InventoryService` → prefer `inventory.Service`).
+- Export only what is part of a module contract (`iface.go`) or shared domain (`internal/domain/`). Keep everything else unexported.
+- Prefer explicit names over abbreviations in business logic (`planID` ok, `pID` not).
+
+### Module boundaries and layering
+
+- Modules under `internal/module/<name>/` are black boxes. A module must not import another module package.
+- Cross-module calls must go through dependency interfaces defined in the consuming module’s `deps.go`. Wire adapters only in `cmd/server/main.go`.
+- Keep responsibilities separated:
+  - `handler.go`: HTTP binding (params/body), auth/claims extraction, mapping errors to HTTP, response shaping.
+  - `service.go`: business rules, validation, orchestration, transactions.
+  - `pgstore.go`: SQL, row mapping, DB-specific concerns (queries, constraints).
+- Do not put business rules in `pgstore.go` or `internal/platform/`.
+
+### Context, time, and determinism
+
+- Always accept a `context.Context` in store/service methods that touch IO; handlers must pass `c.Request.Context()`.
+- Do not use `context.Background()` in request flows.
+- Prefer `time.Now()` only at the edges; if you need determinism in tests, inject a clock into service.
+
+### Errors and logging
+
+- Use sentinel errors from `internal/domain/errors.go` and wrap with `NewBizError(sentinel, humanMessage)` for domain/business failures.
+- Do not return raw `pgx`/SQL errors to handlers; translate to sentinel errors where appropriate (e.g. unique violation → `ErrInvalidInput`/`ErrPreconditionFailed` depending on semantics).
+- Add context to errors with wrapping (`fmt.Errorf("...: %w", err)`), but avoid double-wrapping `BizError`.
+- Logging:
+  - Use `log/slog` with structured fields; no `fmt.Printf` in server code.
+  - Do not log PII/secrets (tokens, passwords, full request bodies).
+  - Prefer logging once at the boundary (HTTP middleware/handler) rather than inside tight loops.
+
+### Validation and DTOs
+
+- Validate inputs in `service.go` (business validation) and only do basic shape checks in handlers (missing required fields, malformed JSON).
+- Use explicit input/output DTOs in `iface.go`; avoid leaking DB models/row structs outside `pgstore.go`.
+
+### Database usage (pgx/pgxpool)
+
+- Prefer `QueryRow`/`Scan` for single-row reads; always check `pgx.ErrNoRows` and map to `ErrNotFound`.
+- Use transactions for multi-write operations that must be atomic (especially when enforcing invariants like area conservation).
+- Keep SQL readable and parameterized; never build SQL by string concatenation with user input.
+- Prefer `RETURNING` over follow-up selects when you need created IDs/timestamps.
+
+### Migrations (goose)
+
+- Migrations must be forward/backward safe (`Up` and `Down`), ordered by sequence, and idempotent where possible.
+- Add/modify constraints to enforce invariants at the DB layer when feasible (FKs, CHECKs), but keep authoritative business rules in services.
+
+### HTTP conventions (gin)
+
+- Keep route registration in `handler.go` and expose a constructor + registration method (e.g. `NewHandler(svc).Register(rg)`).
+- Use consistent JSON envelope and error responses via `internal/platform/httpkit` (do not hand-roll).
+- Return appropriate statuses: 400 invalid input, 404 not found, 409 invalid transition/finalized, 412 precondition, 422 business constraint (stock/area).
+
+### Testing and linting
+
+- Tests must be deterministic and table-driven where practical; avoid time-dependent sleeps.
+- Prefer unit tests for `service.go` with store/deps mocked via interfaces; keep integration tests for `pgstore.go` focused.
+- Keep `make lint` clean; do not ignore linter findings unless there is a documented reason.
+
 ## Branch rules (must follow)
 
 - **Never push directly to `main` or `dev`.**
@@ -126,8 +191,8 @@ Always wrap with `NewBizError(sentinel, humanMessage)`.
 1. Create `internal/module/<name>/` with the 5-file pattern.
 2. If it depends on other modules, define dependency interfaces in `deps.go` (exported).
 3. Add a `NewPGStore(pool)` and `NewService(store, ...deps)` constructor.
-4. Add a `NewHandler(svc) http.Handler` that returns a chi.Router.
-5. Wire in `cmd/server/main.go`: create store → service → handler → `r.Mount("/", handler)`.
+4. Add a `NewHandler(svc)` and a `Register(rg *gin.RouterGroup)` method in `handler.go`.
+5. Wire in `cmd/server/main.go`: create store → service → handler → `handler.Register(api)` (where `api` is a `*gin.RouterGroup`).
 6. Add migration(s) in `migrations/` with the next sequence number.
 
 ## Open business decisions (blockers for automation)
