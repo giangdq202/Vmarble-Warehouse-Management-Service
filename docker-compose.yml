@@ -1,0 +1,24 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: vmarble
+      POSTGRES_PASSWORD: vmarble
+      POSTGRES_DB: vmarble
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  app:
+    build: .
+    ports:
+      - "8080:8080"
+    depends_on:
+      - postgres
+    environment:
+      DATABASE_URL: postgres://vmarble:vmarble@postgres:5432/vmarble?sslmode=disable
+      PORT: "8080"
+
+volumes:
+  pgdata:

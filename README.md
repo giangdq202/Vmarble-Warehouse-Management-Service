@@ -16,6 +16,70 @@ Backend cho hệ thống quản lý kho và sản xuất carcass tại xưởng 
 - Costing cơ bản theo SKU.
 - Barcode/QR tracking.
 
+## Tech Stack
+
+- **Language**: Go 1.24
+- **Database**: PostgreSQL 17
+- **Router**: gin-gonic/gin v1.10
+- **DB driver**: jackc/pgx v5
+- **Migrations**: pressly/goose v3
+- **Config**: caarlos0/env v11
+
+## Cài đặt & Chạy
+
+```bash
+# 1. Khởi động Postgres
+make docker-up
+
+# 2. Chạy migration + server
+make dev
+
+# 3. Hoặc chạy riêng
+make migrate-up
+make run
+```
+
+Server mặc định chạy tại `http://localhost:8080`. Health check: `GET /healthz`.
+
+## Lệnh phát triển
+
+| Lệnh | Mô tả |
+|---|---|
+| `make dev` | Docker + migrate + run |
+| `make run` | Chạy server |
+| `make build` | Build binary |
+| `make test` | Chạy tests |
+| `make lint` | Chạy linter |
+| `make migrate-up` | Chạy migration lên |
+| `make migrate-down` | Rollback migration |
+| `make migrate-create` | Tạo migration mới |
+| `make docker-up` | Bật docker compose |
+| `make docker-down` | Tắt docker compose |
+
+## Cấu trúc dự án
+
+```
+cmd/server/         Entry point, wiring tất cả modules
+internal/
+  domain/           Shared primitives (Dimension, Money, Status enums, Errors)
+  module/
+    catalog/        SKU, Material, BOM
+    order/          Purchase Order, Line Items
+    planning/       Production Plan
+    inventory/      Kho, BoardSheet, Remnant, CuttingRecord
+    production/     WorkOrder, ConsumptionRecord
+    costing/        CostingRecord
+    barcode/        Barcode/QR, ScanEvent
+  platform/
+    postgres/       DB pool + migration runner
+    httpkit/        Router, JSON helpers, error mapping
+    auth/           Auth middleware (placeholder)
+    config/         Env config loader
+migrations/         SQL migration files (goose)
+```
+
+Mỗi module tuân theo pattern: `iface.go` (interface + DTOs) → `service.go` (business logic) → `store.go` (repo interface) → `pgstore.go` (Postgres) → `handler.go` (HTTP).
+
 ## Tài liệu nghiệp vụ
 
 - Xem tài liệu chi tiết tại [docs/backend-business-logic-vi.md](docs/backend-business-logic-vi.md).
