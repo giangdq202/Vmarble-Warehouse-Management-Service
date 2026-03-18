@@ -1,16 +1,17 @@
-.PHONY: dev run build test lint migrate-up migrate-down migrate-create docker-up docker-down
+.PHONY: dev run build test lint swagger migrate-up migrate-down migrate-create docker-up docker-down
 
 APP_NAME := warehouse-server
 PG_PORT  ?= 5433
 DSN      ?= postgres://vmarble:vmarble@localhost:$(PG_PORT)/vmarble?sslmode=disable
 GOOSE    ?= go run github.com/pressly/goose/v3/cmd/goose@v3.24.3
+SWAG     ?= go run github.com/swaggo/swag/cmd/swag@v1.8.12
 
 # ── Development ──────────────────────────────────────────────
 
 dev: docker-up migrate-up run
 
 run:
-	go run ./cmd/server
+	DATABASE_URL="$${DATABASE_URL:-"$(DSN)"}" go run ./cmd/server
 
 build:
 	go build -o bin/$(APP_NAME) ./cmd/server
@@ -22,6 +23,11 @@ test:
 
 lint:
 	golangci-lint run ./...
+
+# ── API Docs (Swagger) ───────────────────────────────────────
+
+swagger:
+	$(SWAG) init --parseInternal --parseGoList=false -g main.go -d ./cmd/server,./internal/domain,./internal/module/barcode,./internal/module/catalog,./internal/module/costing,./internal/module/inventory,./internal/module/order,./internal/module/planning,./internal/module/production,./internal/platform/auth,./internal/platform/config,./internal/platform/httpkit,./internal/platform/postgres -o docs
 
 # ── Database Migrations ─────────────────────────────────────
 

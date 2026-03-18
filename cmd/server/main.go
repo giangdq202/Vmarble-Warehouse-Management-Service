@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	swaggerFiles "github.com/swaggo/files"
+	ginSwagger "github.com/swaggo/gin-swagger"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/vmarble/warehouse-management-service/internal/domain"
 	"github.com/vmarble/warehouse-management-service/internal/module/barcode"
@@ -22,8 +24,14 @@ import (
 	"github.com/vmarble/warehouse-management-service/internal/platform/config"
 	"github.com/vmarble/warehouse-management-service/internal/platform/httpkit"
 	"github.com/vmarble/warehouse-management-service/internal/platform/postgres"
+
+	_ "github.com/vmarble/warehouse-management-service/docs"
 )
 
+// @title           VMARBLE Warehouse Management Service API
+// @version         0.1.0
+// @description     Backend API for warehouse & production management.
+// @BasePath        /
 func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
@@ -78,6 +86,10 @@ func main() {
 
 	// ── Gin router ──────────────────────────────────────────
 	r := httpkit.NewRouter()
+
+	// Swagger UI: /swagger/index.html
+	r.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
+
 	api := r.Group("/api/v1")
 
 	catalog.NewHandler(catalogSvc).Register(api)
