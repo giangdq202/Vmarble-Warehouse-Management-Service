@@ -1,0 +1,1657 @@
+basePath: /
+definitions:
+  barcode.Barcode:
+    properties:
+      created_at:
+        type: string
+      dimensions:
+        type: string
+      id:
+        type: string
+      po_id:
+        type: string
+      produced_date:
+        type: string
+      production_plan_id:
+        type: string
+      sku_code:
+        type: string
+      sku_id:
+        type: string
+      sku_name:
+        type: string
+      work_order_id:
+        type: string
+    type: object
+  barcode.GenerateBarcodeInput:
+    properties:
+      dimensions:
+        type: string
+      po_id:
+        type: string
+      produced_date:
+        type: string
+      production_plan_id:
+        type: string
+      sku_code:
+        type: string
+      sku_id:
+        type: string
+      sku_name:
+        type: string
+      work_order_id:
+        type: string
+    type: object
+  barcode.RecordScanInput:
+    properties:
+      barcode_id:
+        type: string
+      checkpoint:
+        $ref: '#/definitions/barcode.ScanCheckpoint'
+      scanned_by:
+        type: string
+    type: object
+  barcode.ScanCheckpoint:
+    enum:
+    - CNC_COMPLETE
+    - FINISHED_GOODS
+    - SHIPPED
+    type: string
+    x-enum-varnames:
+    - CheckpointCNCComplete
+    - CheckpointFinishedGoods
+    - CheckpointShipped
+  barcode.ScanEvent:
+    properties:
+      barcode_id:
+        type: string
+      checkpoint:
+        $ref: '#/definitions/barcode.ScanCheckpoint'
+      id:
+        type: string
+      scanned_at:
+        type: string
+      scanned_by:
+        type: string
+    type: object
+  catalog.BOM:
+    properties:
+      components:
+        items:
+          $ref: '#/definitions/catalog.BOMComponent'
+        type: array
+      sku_id:
+        type: string
+    type: object
+  catalog.BOMComponent:
+    properties:
+      material_id:
+        type: string
+      material_type:
+        $ref: '#/definitions/catalog.MaterialType'
+      quantity_per_unit:
+        type: number
+      unit:
+        type: string
+    type: object
+  catalog.CreateMaterialInput:
+    properties:
+      name:
+        type: string
+      type:
+        $ref: '#/definitions/catalog.MaterialType'
+      unit:
+        type: string
+    type: object
+  catalog.CreateSKUInput:
+    properties:
+      code:
+        type: string
+      dimensions:
+        $ref: '#/definitions/domain.Dimension'
+      name:
+        type: string
+      requires_metal:
+        type: boolean
+    type: object
+  catalog.Material:
+    properties:
+      created_at:
+        type: string
+      id:
+        type: string
+      name:
+        type: string
+      type:
+        $ref: '#/definitions/catalog.MaterialType'
+      unit:
+        type: string
+    type: object
+  catalog.MaterialType:
+    enum:
+    - PLYWOOD
+    - GLUE
+    - METAL
+    - OTHER
+    type: string
+    x-enum-varnames:
+    - MaterialTypePlywood
+    - MaterialTypeGlue
+    - MaterialTypeMetal
+    - MaterialTypeOther
+  catalog.SKU:
+    properties:
+      code:
+        type: string
+      created_at:
+        type: string
+      dimensions:
+        $ref: '#/definitions/domain.Dimension'
+      id:
+        type: string
+      name:
+        type: string
+      requires_metal:
+        type: boolean
+    type: object
+  catalog.SetBOMInput:
+    properties:
+      components:
+        items:
+          $ref: '#/definitions/catalog.BOMComponent'
+        type: array
+      sku_id:
+        type: string
+    type: object
+  costing.CostingRecord:
+    properties:
+      auxiliary_cost:
+        $ref: '#/definitions/domain.Money'
+      created_at:
+        type: string
+      finalized:
+        type: boolean
+      id:
+        type: string
+      material_cost:
+        $ref: '#/definitions/domain.Money'
+      sku_id:
+        type: string
+      total_cost:
+        $ref: '#/definitions/domain.Money'
+      work_order_id:
+        type: string
+    type: object
+  domain.Dimension:
+    properties:
+      length_mm:
+        type: integer
+      width_mm:
+        type: integer
+    type: object
+  domain.Money:
+    properties:
+      amount:
+        type: integer
+      currency:
+        type: string
+    type: object
+  domain.PlanStatus:
+    enum:
+    - DRAFT
+    - APPROVED
+    - CANCELED
+    type: string
+    x-enum-varnames:
+    - PlanDraft
+    - PlanApproved
+    - PlanCanceled
+  domain.RemnantStatus:
+    enum:
+    - AVAILABLE
+    - ALLOCATED
+    - CONSUMED
+    - WASTE
+    type: string
+    x-enum-varnames:
+    - RemnantAvailable
+    - RemnantAllocated
+    - RemnantConsumed
+    - RemnantWaste
+  domain.WorkOrderStatus:
+    enum:
+    - PLANNED
+    - IN_CUTTING
+    - IN_PROCESSING
+    - COMPLETED
+    - COSTED
+    type: string
+    x-enum-varnames:
+    - WOPlanned
+    - WOInCutting
+    - WOInProcessing
+    - WOCompleted
+    - WOCosted
+  inventory.BoardSheet:
+    properties:
+      cost_per_sheet:
+        $ref: '#/definitions/domain.Money'
+      dimensions:
+        $ref: '#/definitions/domain.Dimension'
+      id:
+        type: string
+      issued_to_work_order_id:
+        type: string
+      lot_id:
+        type: string
+      status:
+        type: string
+    type: object
+  inventory.CutResult:
+    properties:
+      cutting_record_id:
+        type: string
+      remnant_id:
+        type: string
+    type: object
+  inventory.InventoryLot:
+    properties:
+      cost_per_sheet:
+        $ref: '#/definitions/domain.Money'
+      id:
+        type: string
+      material_id:
+        type: string
+      quantity:
+        type: integer
+      received_at:
+        type: string
+      supplier_ref:
+        type: string
+    type: object
+  inventory.ReceiveStockInput:
+    properties:
+      cost_per_sheet:
+        $ref: '#/definitions/domain.Money'
+      dimensions:
+        $ref: '#/definitions/domain.Dimension'
+      material_id:
+        type: string
+      quantity:
+        type: integer
+      supplier_ref:
+        type: string
+    type: object
+  inventory.RecordCutInput:
+    properties:
+      remnant_dimension:
+        $ref: '#/definitions/domain.Dimension'
+      remnant_id:
+        type: string
+      sheet_id:
+        type: string
+      sku_id:
+        type: string
+      used_dimension:
+        $ref: '#/definitions/domain.Dimension'
+      work_order_id:
+        type: string
+    type: object
+  inventory.Remnant:
+    properties:
+      allocated_to_wo:
+        type: string
+      created_at:
+        type: string
+      dimensions:
+        $ref: '#/definitions/domain.Dimension'
+      id:
+        type: string
+      parent_board_id:
+        type: string
+      parent_remnant_id:
+        type: string
+      status:
+        $ref: '#/definitions/domain.RemnantStatus'
+    type: object
+  order.CreateLineItemInput:
+    properties:
+      quantity:
+        type: integer
+      selling_price:
+        $ref: '#/definitions/domain.Money'
+      sku_id:
+        type: string
+    type: object
+  order.CreatePOInput:
+    properties:
+      code:
+        type: string
+      expected_delivery:
+        type: string
+      line_items:
+        items:
+          $ref: '#/definitions/order.CreateLineItemInput'
+        type: array
+    type: object
+  order.LineItem:
+    properties:
+      id:
+        type: string
+      po_id:
+        type: string
+      quantity:
+        type: integer
+      selling_price:
+        $ref: '#/definitions/domain.Money'
+      sku_id:
+        type: string
+    type: object
+  order.PO:
+    properties:
+      code:
+        type: string
+      created_at:
+        type: string
+      expected_delivery:
+        type: string
+      id:
+        type: string
+      line_items:
+        items:
+          $ref: '#/definitions/order.LineItem'
+        type: array
+    type: object
+  planning.CreatePlanInput:
+    properties:
+      deadline:
+        type: string
+      items:
+        items:
+          $ref: '#/definitions/planning.PlanItemInput'
+        type: array
+      po_id:
+        type: string
+    type: object
+  planning.Plan:
+    properties:
+      created_at:
+        type: string
+      deadline:
+        type: string
+      id:
+        type: string
+      items:
+        items:
+          $ref: '#/definitions/planning.PlanItem'
+        type: array
+      po_id:
+        type: string
+      status:
+        $ref: '#/definitions/domain.PlanStatus'
+    type: object
+  planning.PlanItem:
+    properties:
+      id:
+        type: string
+      plan_id:
+        type: string
+      quantity:
+        type: integer
+      sku_id:
+        type: string
+    type: object
+  planning.PlanItemInput:
+    properties:
+      quantity:
+        type: integer
+      sku_id:
+        type: string
+    type: object
+  production.ConsumptionRecord:
+    properties:
+      created_at:
+        type: string
+      id:
+        type: string
+      material_id:
+        type: string
+      material_type:
+        type: string
+      quantity:
+        type: number
+      unit:
+        type: string
+      work_order_id:
+        type: string
+    type: object
+  production.CreateWOInput:
+    properties:
+      plan_id:
+        type: string
+      quantity:
+        type: integer
+      sku_id:
+        type: string
+    type: object
+  production.RecordConsumptionInput:
+    properties:
+      material_id:
+        type: string
+      material_type:
+        type: string
+      quantity:
+        type: number
+      unit:
+        type: string
+      work_order_id:
+        type: string
+    type: object
+  production.WorkOrder:
+    properties:
+      created_at:
+        type: string
+      id:
+        type: string
+      plan_id:
+        type: string
+      quantity:
+        type: integer
+      sku_id:
+        type: string
+      status:
+        $ref: '#/definitions/domain.WorkOrderStatus'
+    type: object
+info:
+  contact: {}
+  description: Backend API for warehouse & production management.
+  title: VMARBLE Warehouse Management Service API
+  version: 0.1.0
+paths:
+  /api/v1/barcodes:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: payload
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/barcode.GenerateBarcodeInput'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/barcode.Barcode'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Generate barcode
+      tags:
+      - barcode
+  /api/v1/barcodes/{id}:
+    get:
+      parameters:
+      - description: barcode id (uuid)
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/barcode.Barcode'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Lookup barcode
+      tags:
+      - barcode
+  /api/v1/barcodes/{id}/scans:
+    get:
+      parameters:
+      - description: barcode id (uuid)
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/barcode.ScanEvent'
+            type: array
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: List scan events
+      tags:
+      - barcode
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: barcode id (uuid)
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: payload
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/barcode.RecordScanInput'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/barcode.ScanEvent'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "409":
+          description: Conflict
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Record scan event
+      tags:
+      - barcode
+  /api/v1/costing:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/costing.CostingRecord'
+            type: array
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: List costing records
+      tags:
+      - costing
+  /api/v1/costing/{workOrderID}:
+    get:
+      parameters:
+      - description: work order id (uuid)
+        in: path
+        name: workOrderID
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/costing.CostingRecord'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Get costing record by work order
+      tags:
+      - costing
+  /api/v1/costing/{workOrderID}/compute:
+    post:
+      parameters:
+      - description: work order id (uuid)
+        in: path
+        name: workOrderID
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/costing.CostingRecord'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "409":
+          description: Conflict
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "422":
+          description: Unprocessable Entity
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Compute costing for a work order
+      tags:
+      - costing
+  /api/v1/costing/{workOrderID}/finalize:
+    post:
+      parameters:
+      - description: work order id (uuid)
+        in: path
+        name: workOrderID
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "409":
+          description: Conflict
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Finalize costing for a work order
+      tags:
+      - costing
+  /api/v1/inventory/cuts:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: payload
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/inventory.RecordCutInput'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/inventory.CutResult'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "422":
+          description: Unprocessable Entity
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Record cutting operation
+      tags:
+      - inventory
+  /api/v1/inventory/lots:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/inventory.InventoryLot'
+            type: array
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: List inventory lots
+      tags:
+      - inventory
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: payload
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/inventory.ReceiveStockInput'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/inventory.InventoryLot'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Receive stock (create inventory lot)
+      tags:
+      - inventory
+  /api/v1/inventory/remnants:
+    get:
+      parameters:
+      - description: min length (mm)
+        in: query
+        name: min_length_mm
+        type: integer
+      - description: min width (mm)
+        in: query
+        name: min_width_mm
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/inventory.Remnant'
+            type: array
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Find available remnants
+      tags:
+      - inventory
+  /api/v1/inventory/remnants/{id}/allocate:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: remnant id (uuid)
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: payload
+        in: body
+        name: body
+        required: true
+        schema:
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "409":
+          description: Conflict
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Allocate remnant to work order
+      tags:
+      - inventory
+  /api/v1/inventory/remnants/{id}/waste:
+    post:
+      parameters:
+      - description: remnant id (uuid)
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "409":
+          description: Conflict
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Mark remnant as waste
+      tags:
+      - inventory
+  /api/v1/inventory/sheets:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/inventory.BoardSheet'
+            type: array
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: List available board sheets
+      tags:
+      - inventory
+  /api/v1/inventory/sheets/{id}:
+    get:
+      parameters:
+      - description: sheet id (uuid)
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/inventory.BoardSheet'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Get board sheet
+      tags:
+      - inventory
+  /api/v1/inventory/sheets/{id}/lineage:
+    get:
+      parameters:
+      - description: sheet id (uuid)
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/inventory.Remnant'
+            type: array
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Get remnant lineage by sheet
+      tags:
+      - inventory
+  /api/v1/materials:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/catalog.Material'
+            type: array
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: List materials
+      tags:
+      - catalog
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: payload
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/catalog.CreateMaterialInput'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/catalog.Material'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Create material
+      tags:
+      - catalog
+  /api/v1/materials/{id}:
+    get:
+      parameters:
+      - description: material id (uuid)
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/catalog.Material'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Get material
+      tags:
+      - catalog
+  /api/v1/plans:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/planning.Plan'
+            type: array
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: List production plans
+      tags:
+      - planning
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: payload
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/planning.CreatePlanInput'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/planning.Plan'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Create production plan
+      tags:
+      - planning
+  /api/v1/plans/{id}:
+    get:
+      parameters:
+      - description: plan id (uuid)
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/planning.Plan'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Get production plan
+      tags:
+      - planning
+  /api/v1/plans/{id}/approve:
+    post:
+      parameters:
+      - description: plan id (uuid)
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "409":
+          description: Conflict
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Approve production plan
+      tags:
+      - planning
+  /api/v1/plans/{id}/cancel:
+    post:
+      parameters:
+      - description: plan id (uuid)
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "409":
+          description: Conflict
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Cancel production plan
+      tags:
+      - planning
+  /api/v1/pos:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/order.PO'
+            type: array
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: List POs
+      tags:
+      - order
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: payload
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/order.CreatePOInput'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/order.PO'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Create PO
+      tags:
+      - order
+  /api/v1/pos/{id}:
+    get:
+      parameters:
+      - description: po id (uuid)
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/order.PO'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Get PO
+      tags:
+      - order
+  /api/v1/pos/{id}/line-items:
+    get:
+      parameters:
+      - description: po id (uuid)
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/order.LineItem'
+            type: array
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: List PO line items
+      tags:
+      - order
+  /api/v1/skus:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/catalog.SKU'
+            type: array
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: List SKUs
+      tags:
+      - catalog
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: payload
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/catalog.CreateSKUInput'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/catalog.SKU'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Create SKU
+      tags:
+      - catalog
+  /api/v1/skus/{id}:
+    get:
+      parameters:
+      - description: sku id (uuid)
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/catalog.SKU'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Get SKU
+      tags:
+      - catalog
+  /api/v1/skus/{id}/bom:
+    get:
+      parameters:
+      - description: sku id (uuid)
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/catalog.BOM'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Get BOM for SKU
+      tags:
+      - catalog
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: sku id (uuid)
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: payload
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/catalog.SetBOMInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/catalog.BOM'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Set BOM for SKU
+      tags:
+      - catalog
+  /api/v1/work-orders:
+    get:
+      parameters:
+      - description: filter by plan id (uuid)
+        in: query
+        name: plan_id
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/production.WorkOrder'
+            type: array
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: List work orders
+      tags:
+      - production
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: payload
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/production.CreateWOInput'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/production.WorkOrder'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Create work order
+      tags:
+      - production
+  /api/v1/work-orders/{id}:
+    get:
+      parameters:
+      - description: work order id (uuid)
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/production.WorkOrder'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Get work order
+      tags:
+      - production
+  /api/v1/work-orders/{id}/advance:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: work order id (uuid)
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: payload
+        in: body
+        name: body
+        required: true
+        schema:
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "409":
+          description: Conflict
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Advance work order status
+      tags:
+      - production
+  /api/v1/work-orders/{id}/consumptions:
+    get:
+      parameters:
+      - description: work order id (uuid)
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/production.ConsumptionRecord'
+            type: array
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: List consumption records for work order
+      tags:
+      - production
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: work order id (uuid)
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: payload
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/production.RecordConsumptionInput'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/production.ConsumptionRecord'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "422":
+          description: Unprocessable Entity
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Record material consumption for work order
+      tags:
+      - production
+  /healthz:
+    get:
+      consumes:
+      - application/json
+      description: Liveness probe
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Health check
+      tags:
+      - system
+swagger: "2.0"

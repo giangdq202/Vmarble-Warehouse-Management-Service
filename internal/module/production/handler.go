@@ -26,6 +26,16 @@ func (h *Handler) Register(rg *gin.RouterGroup) {
 	rg.GET("/work-orders/:id/consumptions", h.listConsumptions)
 }
 
+// createWorkOrder godoc
+//
+// @Summary      Create work order
+// @Tags         production
+// @Accept       json
+// @Produce      json
+// @Param        body  body      CreateWOInput  true  "payload"
+// @Success      201   {object}  WorkOrder
+// @Failure      400   {object}  map[string]string
+// @Router       /api/v1/work-orders [post]
 func (h *Handler) create(c *gin.Context) {
 	var in CreateWOInput
 	if !httpkit.Bind(c, &in) {
@@ -39,6 +49,16 @@ func (h *Handler) create(c *gin.Context) {
 	c.JSON(http.StatusCreated, wo)
 }
 
+// listWorkOrders godoc
+//
+// @Summary      List work orders
+// @Tags         production
+// @Produce      json
+// @Param        plan_id  query     string  false  "filter by plan id (uuid)"
+// @Success      200      {array}   WorkOrder
+// @Failure      400      {object}  map[string]string
+// @Failure      500      {object}  map[string]string
+// @Router       /api/v1/work-orders [get]
 func (h *Handler) list(c *gin.Context) {
 	planIDStr := c.Query("plan_id")
 	if planIDStr != "" {
@@ -63,6 +83,16 @@ func (h *Handler) list(c *gin.Context) {
 	c.JSON(http.StatusOK, wos)
 }
 
+// getWorkOrder godoc
+//
+// @Summary      Get work order
+// @Tags         production
+// @Produce      json
+// @Param        id   path      string  true  "work order id (uuid)"
+// @Success      200  {object}  WorkOrder
+// @Failure      400  {object}  map[string]string
+// @Failure      404  {object}  map[string]string
+// @Router       /api/v1/work-orders/{id} [get]
 func (h *Handler) get(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
@@ -77,6 +107,18 @@ func (h *Handler) get(c *gin.Context) {
 	c.JSON(http.StatusOK, wo)
 }
 
+// advanceWorkOrder godoc
+//
+// @Summary      Advance work order status
+// @Tags         production
+// @Accept       json
+// @Produce      json
+// @Param        id    path      string  true  "work order id (uuid)"
+// @Param        body  body      object  true  "payload"  SchemaExample({"status":"IN_CUTTING"})
+// @Success      200   {object}  map[string]string
+// @Failure      400   {object}  map[string]string
+// @Failure      409   {object}  map[string]string
+// @Router       /api/v1/work-orders/{id}/advance [post]
 func (h *Handler) advance(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
@@ -96,6 +138,18 @@ func (h *Handler) advance(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"status": string(body.Status)})
 }
 
+// recordConsumption godoc
+//
+// @Summary      Record material consumption for work order
+// @Tags         production
+// @Accept       json
+// @Produce      json
+// @Param        id    path      string                true  "work order id (uuid)"
+// @Param        body  body      RecordConsumptionInput true  "payload"
+// @Success      201   {object}  ConsumptionRecord
+// @Failure      400   {object}  map[string]string
+// @Failure      422   {object}  map[string]string
+// @Router       /api/v1/work-orders/{id}/consumptions [post]
 func (h *Handler) recordConsumption(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
@@ -115,6 +169,16 @@ func (h *Handler) recordConsumption(c *gin.Context) {
 	c.JSON(http.StatusCreated, cr)
 }
 
+// listConsumptions godoc
+//
+// @Summary      List consumption records for work order
+// @Tags         production
+// @Produce      json
+// @Param        id   path      string  true  "work order id (uuid)"
+// @Success      200  {array}   ConsumptionRecord
+// @Failure      400  {object}  map[string]string
+// @Failure      404  {object}  map[string]string
+// @Router       /api/v1/work-orders/{id}/consumptions [get]
 func (h *Handler) listConsumptions(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {

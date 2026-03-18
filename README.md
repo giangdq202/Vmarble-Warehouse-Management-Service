@@ -31,6 +31,9 @@ Backend cho hệ thống quản lý kho và sản xuất carcass tại xưởng 
 # 1. Khởi động Postgres
 make docker-up
 
+# (Khuyến nghị) 1.5. Tạo file env local
+cp .env.example .env
+
 # 2. Chạy migration + server
 make dev
 
@@ -41,6 +44,15 @@ make run
 
 Server mặc định chạy tại `http://localhost:8080`. Health check: `GET /healthz`.
 
+## API Docs (Swagger)
+
+- Swagger UI: `http://localhost:8080/swagger/index.html`
+- Regenerate swagger spec:
+
+```bash
+make swagger
+```
+
 ## Lệnh phát triển
 
 | Lệnh | Mô tả |
@@ -50,6 +62,7 @@ Server mặc định chạy tại `http://localhost:8080`. Health check: `GET /h
 | `make build` | Build binary |
 | `make test` | Chạy tests |
 | `make lint` | Chạy linter |
+| `make swagger` | Generate swagger spec (docs/) |
 | `make migrate-up` | Chạy migration lên |
 | `make migrate-down` | Rollback migration |
 | `make migrate-create` | Tạo migration mới |

@@ -29,6 +29,16 @@ func (h *Handler) Register(rg *gin.RouterGroup) {
 	rg.GET("/skus/:id/bom", h.getBOM)
 }
 
+// createMaterial godoc
+//
+// @Summary      Create material
+// @Tags         catalog
+// @Accept       json
+// @Produce      json
+// @Param        body  body      CreateMaterialInput  true  "payload"
+// @Success      201   {object}  Material
+// @Failure      400   {object}  map[string]string
+// @Router       /api/v1/materials [post]
 func (h *Handler) createMaterial(c *gin.Context) {
 	var in CreateMaterialInput
 	if !httpkit.Bind(c, &in) {
@@ -42,6 +52,14 @@ func (h *Handler) createMaterial(c *gin.Context) {
 	c.JSON(http.StatusCreated, m)
 }
 
+// listMaterials godoc
+//
+// @Summary      List materials
+// @Tags         catalog
+// @Produce      json
+// @Success      200  {array}   Material
+// @Failure      500  {object}  map[string]string
+// @Router       /api/v1/materials [get]
 func (h *Handler) listMaterials(c *gin.Context) {
 	materials, err := h.svc.ListMaterials(c.Request.Context())
 	if err != nil {
@@ -51,6 +69,16 @@ func (h *Handler) listMaterials(c *gin.Context) {
 	c.JSON(http.StatusOK, materials)
 }
 
+// getMaterial godoc
+//
+// @Summary      Get material
+// @Tags         catalog
+// @Produce      json
+// @Param        id   path      string  true  "material id (uuid)"
+// @Success      200  {object}  Material
+// @Failure      400  {object}  map[string]string
+// @Failure      404  {object}  map[string]string
+// @Router       /api/v1/materials/{id} [get]
 func (h *Handler) getMaterial(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
@@ -65,6 +93,16 @@ func (h *Handler) getMaterial(c *gin.Context) {
 	c.JSON(http.StatusOK, m)
 }
 
+// createSKU godoc
+//
+// @Summary      Create SKU
+// @Tags         catalog
+// @Accept       json
+// @Produce      json
+// @Param        body  body      CreateSKUInput  true  "payload"
+// @Success      201   {object}  SKU
+// @Failure      400   {object}  map[string]string
+// @Router       /api/v1/skus [post]
 func (h *Handler) createSKU(c *gin.Context) {
 	var in CreateSKUInput
 	if !httpkit.Bind(c, &in) {
@@ -78,6 +116,14 @@ func (h *Handler) createSKU(c *gin.Context) {
 	c.JSON(http.StatusCreated, s)
 }
 
+// listSKUs godoc
+//
+// @Summary      List SKUs
+// @Tags         catalog
+// @Produce      json
+// @Success      200  {array}   SKU
+// @Failure      500  {object}  map[string]string
+// @Router       /api/v1/skus [get]
 func (h *Handler) listSKUs(c *gin.Context) {
 	skus, err := h.svc.ListSKUs(c.Request.Context())
 	if err != nil {
@@ -87,6 +133,16 @@ func (h *Handler) listSKUs(c *gin.Context) {
 	c.JSON(http.StatusOK, skus)
 }
 
+// getSKU godoc
+//
+// @Summary      Get SKU
+// @Tags         catalog
+// @Produce      json
+// @Param        id   path      string  true  "sku id (uuid)"
+// @Success      200  {object}  SKU
+// @Failure      400  {object}  map[string]string
+// @Failure      404  {object}  map[string]string
+// @Router       /api/v1/skus/{id} [get]
 func (h *Handler) getSKU(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
@@ -101,6 +157,18 @@ func (h *Handler) getSKU(c *gin.Context) {
 	c.JSON(http.StatusOK, s)
 }
 
+// setBOM godoc
+//
+// @Summary      Set BOM for SKU
+// @Tags         catalog
+// @Accept       json
+// @Produce      json
+// @Param        id    path      string        true  "sku id (uuid)"
+// @Param        body  body      SetBOMInput   true  "payload"
+// @Success      200   {object}  BOM
+// @Failure      400   {object}  map[string]string
+// @Failure      404   {object}  map[string]string
+// @Router       /api/v1/skus/{id}/bom [put]
 func (h *Handler) setBOM(c *gin.Context) {
 	skuID, err := uuid.Parse(c.Param("id"))
 	if err != nil {
@@ -120,6 +188,16 @@ func (h *Handler) setBOM(c *gin.Context) {
 	c.JSON(http.StatusOK, bom)
 }
 
+// getBOM godoc
+//
+// @Summary      Get BOM for SKU
+// @Tags         catalog
+// @Produce      json
+// @Param        id   path      string  true  "sku id (uuid)"
+// @Success      200  {object}  BOM
+// @Failure      400  {object}  map[string]string
+// @Failure      404  {object}  map[string]string
+// @Router       /api/v1/skus/{id}/bom [get]
 func (h *Handler) getBOM(c *gin.Context) {
 	skuID, err := uuid.Parse(c.Param("id"))
 	if err != nil {
