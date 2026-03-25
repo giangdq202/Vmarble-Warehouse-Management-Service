@@ -126,3 +126,4 @@ Quy tắc nhánh áp dụng chung:
 3. Tạo PR vào `dev` và merge khi đạt yêu cầu kiểm tra.
 4. Khi đủ tính năng release, tạo PR từ `dev` sang `main`.
 5. Có approve hợp lệ rồi mới merge vào `main`.
+\n<!-- Webhook test: Wed Mar 25 12:48:07 +07 2026 -->
