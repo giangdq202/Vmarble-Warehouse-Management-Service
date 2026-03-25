@@ -1,0 +1,37 @@
+# docker-compose.staging.yml
+# File này nằm trên SERVER tại: /opt/vwms-staging/docker-compose.staging.yml
+# KHÔNG commit credentials vào đây — dùng .env.staging (xem .env.staging.example)
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER:     ${POSTGRES_USER:-vmarble}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB:       ${POSTGRES_DB:-vmarble}
+    volumes:
+      - pgdata_staging:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-vmarble} -d ${POSTGRES_DB:-vmarble}"]
+      interval: 5s
+      timeout:  3s
+      retries:  20
+      start_period: 5s
+
+  app:
+    # APP_IMAGE được inject bởi deploy.sh khi chạy docker compose
+    # Fallback về staging-latest nếu chạy thủ công
+    image: ${APP_IMAGE:-ghcr.io/giangdq202/vmarble-warehouse-managment-service:staging-latest}
+    restart: unless-stopped
+    ports:
+      - "0.0.0.0:8080:8080"
+    env_file:
+      - .env.staging
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  pgdata_staging:
+    name: vwms_staging_pgdata

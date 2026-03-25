@@ -101,6 +101,13 @@ Mỗi module tuân theo pattern: `iface.go` (interface + DTOs) → `service.go` 
 
 - Xem hướng dẫn cho AI agent và contributors tại [CLAUDE.md](CLAUDE.md).
 
+## Staging & CD
+
+- **Staging server**: `IP`
+- **Trigger**: Mỗi khi có push (merge PR) vào nhánh `dev` → GitHub Actions tự động build & deploy
+- **Thông báo**: Discord webhook sau mỗi sự kiện build/deploy
+- **Hướng dẫn setup**: [docs/runbooks/staging-cd.md](docs/runbooks/staging-cd.md)
+
 ## Branch Rules
 
 Quy tắc nhánh áp dụng chung:
