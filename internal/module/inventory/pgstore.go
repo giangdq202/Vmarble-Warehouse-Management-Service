@@ -3,6 +3,7 @@ package inventory
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -192,6 +193,78 @@ func (s *pgStore) updateRemnantStatus(ctx context.Context, id uuid.UUID, status 
 	}
 	if tag.RowsAffected() == 0 {
 		return domain.NewBizError(domain.ErrNotFound, "remnant not found")
+	}
+	return nil
+}
+
+func (s *pgStore) recordCutAtomically(ctx context.Context, op cutWriteOp) error {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin transaction: %w", err)
+	}
+	defer func() {
+		if err != nil {
+			_ = tx.Rollback(ctx)
+		}
+	}()
+
+	// 1. Update source status (sheet XOR remnant).
+	if op.SheetUpdate != nil {
+		tag, execErr := tx.Exec(ctx,
+			`UPDATE board_sheets SET status = $1, issued_to_wo_id = $2 WHERE id = $3`,
+			op.SheetUpdate.Status, op.SheetUpdate.IssuedToWO, op.SheetUpdate.ID)
+		if execErr != nil {
+			err = execErr
+			return fmt.Errorf("update sheet status: %w", err)
+		}
+		if tag.RowsAffected() == 0 {
+			err = domain.NewBizError(domain.ErrNotFound, "board sheet not found")
+			return err
+		}
+	} else if op.RemnantUpdate != nil {
+		tag, execErr := tx.Exec(ctx,
+			`UPDATE remnants SET status = $1, allocated_to_wo_id = NULL WHERE id = $2`,
+			string(op.RemnantUpdate.Status), op.RemnantUpdate.ID)
+		if execErr != nil {
+			err = execErr
+			return fmt.Errorf("update remnant status: %w", err)
+		}
+		if tag.RowsAffected() == 0 {
+			err = domain.NewBizError(domain.ErrNotFound, "remnant not found")
+			return err
+		}
+	}
+
+	// 2. Insert cutting record.
+	cr := op.Record
+	if _, execErr := tx.Exec(ctx,
+		`INSERT INTO cutting_records (id, sheet_id, remnant_source_id, work_order_id, sku_id, used_length_mm, used_width_mm, created_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+		cr.ID, cr.SheetID, cr.RemnantSourceID,
+		cr.WorkOrderID, cr.SKUID,
+		cr.UsedLengthMM, cr.UsedWidthMM, cr.CreatedAt,
+	); execErr != nil {
+		err = execErr
+		return fmt.Errorf("insert cutting record: %w", err)
+	}
+
+	// 3. Insert new remnant if the cut produced leftover material.
+	if op.NewRemnant != nil {
+		r := op.NewRemnant
+		if _, execErr := tx.Exec(ctx,
+			`INSERT INTO remnants (id, parent_board_id, parent_remnant_id, length_mm, width_mm, status, allocated_to_wo_id, created_at)
+			 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+			r.ID, r.ParentBoardID, r.ParentRemnantID,
+			r.Dimensions.LengthMM, r.Dimensions.WidthMM,
+			string(r.Status), r.AllocatedToWO, r.CreatedAt,
+		); execErr != nil {
+			err = execErr
+			return fmt.Errorf("insert remnant: %w", err)
+		}
+	}
+
+	if err = tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit transaction: %w", err)
 	}
 	return nil
 }

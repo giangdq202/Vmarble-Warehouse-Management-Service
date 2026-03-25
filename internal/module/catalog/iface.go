@@ -2,6 +2,7 @@ package catalog
 
 import (
 	"context"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/vmarble/warehouse-management-service/internal/domain"
@@ -21,7 +22,7 @@ type Material struct {
 	Type      MaterialType `json:"type"`
 	Name      string       `json:"name"`
 	Unit      string       `json:"unit"`
-	CreatedAt string       `json:"created_at"`
+	CreatedAt time.Time    `json:"created_at"`
 }
 
 type CreateMaterialInput struct {
@@ -31,12 +32,12 @@ type CreateMaterialInput struct {
 }
 
 type SKU struct {
-	ID           uuid.UUID       `json:"id"`
-	Code         string          `json:"code"`
-	Name         string          `json:"name"`
-	Dimensions   domain.Dimension `json:"dimensions"`
-	RequiresMetal bool           `json:"requires_metal"`
-	CreatedAt    string          `json:"created_at"`
+	ID            uuid.UUID        `json:"id"`
+	Code          string           `json:"code"`
+	Name          string           `json:"name"`
+	Dimensions    domain.Dimension `json:"dimensions"`
+	RequiresMetal bool             `json:"requires_metal"`
+	CreatedAt     time.Time        `json:"created_at"`
 }
 
 type CreateSKUInput struct {
