@@ -42,7 +42,7 @@ func (s *service) CreateMaterial(ctx context.Context, in CreateMaterialInput) (M
 		Type:      in.Type,
 		Name:      in.Name,
 		Unit:      in.Unit,
-		CreatedAt: time.Now().UTC().Format(time.RFC3339),
+		CreatedAt: time.Now().UTC(),
 	}
 	if err := s.st.insertMaterial(ctx, m); err != nil {
 		return Material{}, err
@@ -72,7 +72,7 @@ func (s *service) CreateSKU(ctx context.Context, in CreateSKUInput) (SKU, error)
 		Name:          in.Name,
 		Dimensions:    in.Dimensions,
 		RequiresMetal: in.RequiresMetal,
-		CreatedAt:     time.Now().UTC().Format(time.RFC3339),
+		CreatedAt:     time.Now().UTC(),
 	}
 	if err := s.st.insertSKU(ctx, sku); err != nil {
 		return SKU{}, err
