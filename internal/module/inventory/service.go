@@ -125,23 +125,26 @@ func (s *service) RecordCut(ctx context.Context, in RecordCutInput) (CutResult, 
 		UsedWidthMM:  in.UsedDimension.WidthMM,
 		CreatedAt:    time.Now().UTC(),
 	}
+
+	op := cutWriteOp{Record: cr}
+
 	if in.SheetID != nil {
 		cr.SheetID = in.SheetID
-		if err := s.st.updateSheetStatus(ctx, *in.SheetID, "ISSUED", &in.WorkOrderID); err != nil {
-			return CutResult{}, err
+		op.Record = cr
+		op.SheetUpdate = &sheetStatusUpdate{
+			ID:         *in.SheetID,
+			Status:     "ISSUED",
+			IssuedToWO: &in.WorkOrderID,
 		}
 	} else {
 		cr.RemnantSourceID = in.RemnantID
-		if err := s.st.updateRemnantStatus(ctx, *in.RemnantID, domain.RemnantConsumed, nil); err != nil {
-			return CutResult{}, err
+		op.Record = cr
+		op.RemnantUpdate = &remnantStatusUpdate{
+			ID:     *in.RemnantID,
+			Status: domain.RemnantConsumed,
 		}
 	}
 
-	if err := s.st.insertCuttingRecord(ctx, cr); err != nil {
-		return CutResult{}, err
-	}
-
-	result := CutResult{CuttingRecordID: cr.ID}
 	if in.RemnantDimension != nil {
 		newRemnant := Remnant{
 			ID:              uuid.New(),
@@ -151,12 +154,17 @@ func (s *service) RecordCut(ctx context.Context, in RecordCutInput) (CutResult, 
 			Status:          domain.RemnantAvailable,
 			CreatedAt:       time.Now().UTC(),
 		}
-		if err := s.st.insertRemnant(ctx, newRemnant); err != nil {
-			return CutResult{}, err
-		}
-		result.RemnantID = &newRemnant.ID
+		op.NewRemnant = &newRemnant
 	}
 
+	if err := s.st.recordCutAtomically(ctx, op); err != nil {
+		return CutResult{}, err
+	}
+
+	result := CutResult{CuttingRecordID: cr.ID}
+	if op.NewRemnant != nil {
+		result.RemnantID = &op.NewRemnant.ID
+	}
 	return result, nil
 }
 
