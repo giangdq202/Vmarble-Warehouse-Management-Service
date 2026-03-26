@@ -23,7 +23,7 @@ services:
 
   app:
     # APP_IMAGE is injected by deploy.sh during deployment
-    image: ${APP_IMAGE:-ghcr.io/giangdq202/vmarble-warehouse-managment-service:staging-latest}
+    image: ${APP_IMAGE:-ghcr.io/giangdq202/vmarble-warehouse-management-service:staging-latest}
     restart: unless-stopped
     ports:
       - "127.0.0.1:8080:8080"
