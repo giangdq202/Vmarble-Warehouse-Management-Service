@@ -173,6 +173,11 @@ func (s *service) FindAvailableRemnants(ctx context.Context, minDim domain.Dimen
 }
 
 func (s *service) AllocateRemnant(ctx context.Context, remnantID uuid.UUID, workOrderID uuid.UUID) error {
+	// Optimistic pre-check: give an early ErrInvalidInput when the remnant is
+	// clearly not AVAILABLE before we even open a transaction. The authoritative
+	// check happens inside allocateRemnantAtomically under a row-level lock
+	// (SELECT … FOR UPDATE), so concurrent callers that pass this guard can
+	// still be rejected by ErrPreconditionFailed from the store layer.
 	remnant, err := s.st.selectRemnantByID(ctx, remnantID)
 	if err != nil {
 		return err
@@ -180,10 +185,12 @@ func (s *service) AllocateRemnant(ctx context.Context, remnantID uuid.UUID, work
 	if remnant.Status != domain.RemnantAvailable {
 		return domain.NewBizError(domain.ErrInvalidInput, "remnant is not available for allocation")
 	}
-	return s.st.updateRemnantStatus(ctx, remnantID, domain.RemnantAllocated, &workOrderID)
+	return s.st.allocateRemnantAtomically(ctx, remnantID, workOrderID)
 }
 
 func (s *service) MarkRemnantWaste(ctx context.Context, remnantID uuid.UUID) error {
+	// Optimistic pre-check: give an early ErrInvalidInput for clearly invalid
+	// states. The authoritative check under lock is in markRemnantWasteAtomically.
 	remnant, err := s.st.selectRemnantByID(ctx, remnantID)
 	if err != nil {
 		return err
@@ -191,7 +198,7 @@ func (s *service) MarkRemnantWaste(ctx context.Context, remnantID uuid.UUID) err
 	if remnant.Status != domain.RemnantAvailable && remnant.Status != domain.RemnantAllocated {
 		return domain.NewBizError(domain.ErrInvalidInput, "remnant cannot be marked waste")
 	}
-	return s.st.updateRemnantStatus(ctx, remnantID, domain.RemnantWaste, nil)
+	return s.st.markRemnantWasteAtomically(ctx, remnantID)
 }
 
 func (s *service) GetRemnantLineage(ctx context.Context, boardSheetID uuid.UUID) ([]Remnant, error) {

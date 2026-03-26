@@ -26,11 +26,24 @@ type store interface {
 	updateRemnantStatus(ctx context.Context, id uuid.UUID, status domain.RemnantStatus, allocatedToWO *uuid.UUID) error
 
 	// recordCutAtomically executes all cut-related writes inside a single DB
-	// transaction: updating the source sheet/remnant status, inserting the
-	// cutting record, and optionally inserting a new remnant.
-	// The caller (service) must have already validated all business invariants
-	// (BR-K03 area conservation, source status checks) before calling this.
+	// transaction. It acquires a row-level lock (SELECT … FOR UPDATE) on the
+	// source sheet or remnant first, re-validates the status under the lock to
+	// prevent double-allocation, then applies the writes atomically.
+	// BR-K03 area-conservation must still be validated by the caller (service)
+	// before calling this, using the unlocked read that happens in RecordCut.
 	recordCutAtomically(ctx context.Context, op cutWriteOp) error
+
+	// allocateRemnantAtomically acquires a row-level lock on the remnant, checks
+	// that it is still AVAILABLE, and transitions it to ALLOCATED — all in one
+	// transaction. Returns ErrPreconditionFailed if the remnant is no longer
+	// available by the time the lock is acquired.
+	allocateRemnantAtomically(ctx context.Context, remnantID uuid.UUID, workOrderID uuid.UUID) error
+
+	// markRemnantWasteAtomically acquires a row-level lock on the remnant, checks
+	// that it is in a wasteable state (AVAILABLE or ALLOCATED), and transitions
+	// it to WASTE — all in one transaction. Returns ErrPreconditionFailed if the
+	// remnant is in a non-wasteable status when the lock is acquired.
+	markRemnantWasteAtomically(ctx context.Context, remnantID uuid.UUID) error
 }
 
 // cutWriteOp carries the pre-validated, ready-to-persist data for a single cut
