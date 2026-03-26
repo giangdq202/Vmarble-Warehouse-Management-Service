@@ -27,7 +27,7 @@ services:
     image: ${APP_IMAGE:-ghcr.io/giangdq202/vmarble-warehouse-managment-service:staging-latest}
     restart: unless-stopped
     ports:
-      - "0.0.0.0:8080:8080"
+      - "127.0.0.1:8080:8080"
     env_file:
       - .env.staging
     depends_on:
