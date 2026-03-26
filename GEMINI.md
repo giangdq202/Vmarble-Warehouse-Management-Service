@@ -43,10 +43,18 @@ Each module (e.g., `catalog`) must adhere to a 5-file structure:
   - DB table/column names: `snake_case`.
   - JSON tags: `snake_case`.
 
-## 5. Database Strategy on Staging/Prod (Fix-forward)
-- **Never use `migrate-down`** on Staging or Production environments.
-- All database errors or schema changes must be handled by creating a **new migration file** (Fix-forward) to ensure traceability.
-- Staging DB access is only allowed via **SSH Tunnel** (Port `5432` mapped to `127.0.0.1` on the server).
+## 5. Database & API Strategy on Staging/Prod (Security)
+- **Zero Public Ports**: No ports (except SSH 22) are exposed to the public Internet on Staging.
+- **Mandatory SSH Tunnel**: Access to both **PostgreSQL (5432)** and **Backend API (8080)** is only allowed via SSH Tunnel.
+- **SSH Config Example**:
+  ```ssh
+  Host staging
+      HostName 163.61.182.158
+      User root
+      LocalForward 5432 127.0.0.1:5432
+      LocalForward 8080 127.0.0.1:8080
+  ```
+- **Fix-forward Migration**: Never use `migrate-down` on Staging or Production. All changes must be handled by creating a new migration file.
 
 ## 6. Collaboration Conventions
 ### Branch Naming
