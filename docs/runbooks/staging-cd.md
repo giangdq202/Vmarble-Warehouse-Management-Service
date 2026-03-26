@@ -175,23 +175,16 @@ APP_IMAGE="ghcr.io/giangdq202/vmarble-warehouse-managment-service:sha-<prev>" \
   docker compose -f docker-compose.staging.yml --env-file .env.staging up -d app
 ```
 
-### Rollback DB migration (chỉ dùng khi khẩn cấp)
+### Xử lý lỗi Database Migration (Fix-forward)
 
-```bash
-ssh root@$STAGING_HOST
+Theo triết lý phát triển của dự án, chúng ta **không thực hiện rollback database** (lệnh `down`) trên các môi trường staging/production để đảm bảo tính truy vết (traceability) và an toàn dữ liệu.
 
-# Xem trạng thái migrations
-/opt/vwms-staging/rollback-db.sh status
+Nếu một migration gây lỗi, quy trình xử lý như sau:
+1. **Rollback Code:** Nếu lỗi gây sập app, thực hiện rollback code về version trước đó (xem mục trên).
+2. **Tạo Migration mới:** Tạo một file migration mới (ví dụ: `000x_fix_error_in_000y.sql`) để thực hiện các lệnh SQL sửa lỗi hoặc revert thay đổi.
+3. **Deploy:** Merge migration mới vào nhánh `dev` để hệ thống tự động apply lên server.
 
-# Rollback 1 migration gần nhất
-/opt/vwms-staging/rollback-db.sh down 1
-
-# Rollback N migrations
-/opt/vwms-staging/rollback-db.sh down <N>
-```
-
-> ⚠️ **Lưu ý:** Rollback DB chỉ cần thiết khi migration có thay đổi destructive (DROP/RENAME).
-> Migrations additive (ADD TABLE/COLUMN) không cần rollback DB khi rollback code.
+> 💡 **Lợi ích:** Mọi thay đổi và sai sót đều được lưu vết trong lịch sử Git và bảng `goose_db_version`.
 
 ---
 
