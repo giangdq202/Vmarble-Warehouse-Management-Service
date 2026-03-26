@@ -1,6 +1,6 @@
 # docker-compose.staging.yml
-# File này nằm trên SERVER tại: /opt/vwms-staging/docker-compose.staging.yml
-# KHÔNG commit credentials vào đây — dùng .env.staging (xem .env.staging.example)
+# This file resides on the STAGING SERVER at: /opt/vwms-staging/docker-compose.staging.yml
+# DO NOT commit credentials here — use .env.staging
 
 services:
   postgres:
@@ -22,8 +22,7 @@ services:
       start_period: 5s
 
   app:
-    # APP_IMAGE được inject bởi deploy.sh khi chạy docker compose
-    # Fallback về staging-latest nếu chạy thủ công
+    # APP_IMAGE is injected by deploy.sh during deployment
     image: ${APP_IMAGE:-ghcr.io/giangdq202/vmarble-warehouse-managment-service:staging-latest}
     restart: unless-stopped
     ports:
