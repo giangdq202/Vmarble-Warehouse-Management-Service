@@ -63,6 +63,12 @@ type mockStore struct {
 	recordCutAtomicallyCalled bool
 	recordCutAtomicallyOp     cutWriteOp
 	recordCutAtomicallyErr    error
+
+	// allocateRemnantAtomically
+	allocateRemnantAtomicallyErr error
+
+	// markRemnantWasteAtomically
+	markRemnantWasteAtomicallyErr error
 }
 
 func (m *mockStore) insertLot(_ context.Context, _ InventoryLot) error {
@@ -105,6 +111,12 @@ func (m *mockStore) recordCutAtomically(_ context.Context, op cutWriteOp) error 
 	m.recordCutAtomicallyCalled = true
 	m.recordCutAtomicallyOp = op
 	return m.recordCutAtomicallyErr
+}
+func (m *mockStore) allocateRemnantAtomically(_ context.Context, _ uuid.UUID, _ uuid.UUID) error {
+	return m.allocateRemnantAtomicallyErr
+}
+func (m *mockStore) markRemnantWasteAtomically(_ context.Context, _ uuid.UUID) error {
+	return m.markRemnantWasteAtomicallyErr
 }
 
 // ── helpers ──────────────────────────────────────────────────────────────────

@@ -208,26 +208,63 @@ func (s *pgStore) recordCutAtomically(ctx context.Context, op cutWriteOp) error 
 		}
 	}()
 
-	// 1. Update source status (sheet XOR remnant).
+	// 1. Lock the source row and re-validate its status inside the transaction.
+	//    SELECT … FOR UPDATE blocks any concurrent writer that holds or tries to
+	//    acquire a lock on the same row, eliminating the TOCTOU window between
+	//    the service-layer read and this write.
 	if op.SheetUpdate != nil {
+		var lockedStatus string
+		lockErr := tx.QueryRow(ctx,
+			`SELECT status FROM board_sheets WHERE id = $1 FOR UPDATE`,
+			op.SheetUpdate.ID).Scan(&lockedStatus)
+		if errors.Is(lockErr, pgx.ErrNoRows) {
+			err = domain.NewBizError(domain.ErrNotFound, "board sheet not found")
+			return err
+		}
+		if lockErr != nil {
+			err = fmt.Errorf("lock board sheet: %w", lockErr)
+			return err
+		}
+		if lockedStatus != "AVAILABLE" {
+			err = domain.NewBizError(domain.ErrPreconditionFailed, "board sheet is no longer available")
+			return err
+		}
+
 		tag, execErr := tx.Exec(ctx,
 			`UPDATE board_sheets SET status = $1, issued_to_wo_id = $2 WHERE id = $3`,
 			op.SheetUpdate.Status, op.SheetUpdate.IssuedToWO, op.SheetUpdate.ID)
 		if execErr != nil {
-			err = execErr
-			return fmt.Errorf("update sheet status: %w", err)
+			err = fmt.Errorf("update sheet status: %w", execErr)
+			return err
 		}
 		if tag.RowsAffected() == 0 {
 			err = domain.NewBizError(domain.ErrNotFound, "board sheet not found")
 			return err
 		}
 	} else if op.RemnantUpdate != nil {
+		var lockedStatus string
+		lockErr := tx.QueryRow(ctx,
+			`SELECT status FROM remnants WHERE id = $1 FOR UPDATE`,
+			op.RemnantUpdate.ID).Scan(&lockedStatus)
+		if errors.Is(lockErr, pgx.ErrNoRows) {
+			err = domain.NewBizError(domain.ErrNotFound, "remnant not found")
+			return err
+		}
+		if lockErr != nil {
+			err = fmt.Errorf("lock remnant: %w", lockErr)
+			return err
+		}
+		if domain.RemnantStatus(lockedStatus) != domain.RemnantAvailable {
+			err = domain.NewBizError(domain.ErrPreconditionFailed, "remnant is no longer available")
+			return err
+		}
+
 		tag, execErr := tx.Exec(ctx,
 			`UPDATE remnants SET status = $1, allocated_to_wo_id = NULL WHERE id = $2`,
 			string(op.RemnantUpdate.Status), op.RemnantUpdate.ID)
 		if execErr != nil {
-			err = execErr
-			return fmt.Errorf("update remnant status: %w", err)
+			err = fmt.Errorf("update remnant status: %w", execErr)
+			return err
 		}
 		if tag.RowsAffected() == 0 {
 			err = domain.NewBizError(domain.ErrNotFound, "remnant not found")
@@ -244,8 +281,8 @@ func (s *pgStore) recordCutAtomically(ctx context.Context, op cutWriteOp) error 
 		cr.WorkOrderID, cr.SKUID,
 		cr.UsedLengthMM, cr.UsedWidthMM, cr.CreatedAt,
 	); execErr != nil {
-		err = execErr
-		return fmt.Errorf("insert cutting record: %w", err)
+		err = fmt.Errorf("insert cutting record: %w", execErr)
+		return err
 	}
 
 	// 3. Insert new remnant if the cut produced leftover material.
@@ -258,9 +295,110 @@ func (s *pgStore) recordCutAtomically(ctx context.Context, op cutWriteOp) error 
 			r.Dimensions.LengthMM, r.Dimensions.WidthMM,
 			string(r.Status), r.AllocatedToWO, r.CreatedAt,
 		); execErr != nil {
-			err = execErr
-			return fmt.Errorf("insert remnant: %w", err)
+			err = fmt.Errorf("insert remnant: %w", execErr)
+			return err
 		}
+	}
+
+	if err = tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit transaction: %w", err)
+	}
+	return nil
+}
+
+// allocateRemnantAtomically locks the remnant row, confirms it is still
+// AVAILABLE, then transitions it to ALLOCATED in a single transaction.
+// Concurrent callers that lose the lock race receive ErrPreconditionFailed.
+func (s *pgStore) allocateRemnantAtomically(ctx context.Context, remnantID uuid.UUID, workOrderID uuid.UUID) error {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin transaction: %w", err)
+	}
+	defer func() {
+		if err != nil {
+			_ = tx.Rollback(ctx)
+		}
+	}()
+
+	var lockedStatus string
+	lockErr := tx.QueryRow(ctx,
+		`SELECT status FROM remnants WHERE id = $1 FOR UPDATE`,
+		remnantID).Scan(&lockedStatus)
+	if errors.Is(lockErr, pgx.ErrNoRows) {
+		err = domain.NewBizError(domain.ErrNotFound, "remnant not found")
+		return err
+	}
+	if lockErr != nil {
+		err = fmt.Errorf("lock remnant: %w", lockErr)
+		return err
+	}
+	if domain.RemnantStatus(lockedStatus) != domain.RemnantAvailable {
+		err = domain.NewBizError(domain.ErrPreconditionFailed, "remnant is no longer available for allocation")
+		return err
+	}
+
+	tag, execErr := tx.Exec(ctx,
+		`UPDATE remnants SET status = $1, allocated_to_wo_id = $2 WHERE id = $3`,
+		string(domain.RemnantAllocated), workOrderID, remnantID)
+	if execErr != nil {
+		err = fmt.Errorf("update remnant status: %w", execErr)
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		err = domain.NewBizError(domain.ErrNotFound, "remnant not found")
+		return err
+	}
+
+	if err = tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit transaction: %w", err)
+	}
+	return nil
+}
+
+// markRemnantWasteAtomically locks the remnant row, confirms it is in a
+// wasteable state (AVAILABLE or ALLOCATED), then transitions it to WASTE in a
+// single transaction. Concurrent callers that lose the lock race receive
+// ErrPreconditionFailed.
+func (s *pgStore) markRemnantWasteAtomically(ctx context.Context, remnantID uuid.UUID) error {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin transaction: %w", err)
+	}
+	defer func() {
+		if err != nil {
+			_ = tx.Rollback(ctx)
+		}
+	}()
+
+	var lockedStatus string
+	lockErr := tx.QueryRow(ctx,
+		`SELECT status FROM remnants WHERE id = $1 FOR UPDATE`,
+		remnantID).Scan(&lockedStatus)
+	if errors.Is(lockErr, pgx.ErrNoRows) {
+		err = domain.NewBizError(domain.ErrNotFound, "remnant not found")
+		return err
+	}
+	if lockErr != nil {
+		err = fmt.Errorf("lock remnant: %w", lockErr)
+		return err
+	}
+
+	ls := domain.RemnantStatus(lockedStatus)
+	if ls != domain.RemnantAvailable && ls != domain.RemnantAllocated {
+		err = domain.NewBizError(domain.ErrPreconditionFailed, "remnant cannot be marked waste in its current state")
+		return err
+	}
+
+	tag, execErr := tx.Exec(ctx,
+		`UPDATE remnants SET status = $1, allocated_to_wo_id = NULL WHERE id = $2`,
+		string(domain.RemnantWaste), remnantID)
+	if execErr != nil {
+		err = fmt.Errorf("update remnant status: %w", execErr)
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		err = domain.NewBizError(domain.ErrNotFound, "remnant not found")
+		return err
 	}
 
 	if err = tx.Commit(ctx); err != nil {
