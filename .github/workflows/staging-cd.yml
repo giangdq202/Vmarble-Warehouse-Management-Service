@@ -167,7 +167,6 @@ jobs:
             --arg msg  "$MSG" \
             --arg tag  "${{ needs.build.outputs.image_tag }}" \
             --arg who  "${{ github.actor }}" \
-            --arg url  "${{ vars.STAGING_URL }}" \
             --arg run  "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
             '{embeds:[{
               title: "🚀 Deploy thành công — staging",
@@ -176,7 +175,6 @@ jobs:
                 {name:"Commit",  value:("`"+$sha+"` "+$msg), inline:false},
                 {name:"Image",   value:("`"+$tag+"`"),        inline:false},
                 {name:"Tác giả", value:$who,                  inline:true},
-                {name:"Staging", value:$url,                  inline:true},
                 {name:"Run log", value:("[#${{ github.run_number }}]("+$run+")"), inline:false}
               ]
             }]}' \
