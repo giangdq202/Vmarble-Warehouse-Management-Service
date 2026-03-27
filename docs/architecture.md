@@ -2,7 +2,7 @@
 
 ## High-level design
 
-The system is a **modular monolith** written in Go 1.24, backed by PostgreSQL 17. Each business domain lives in its own module under `internal/module/`. Modules are isolated black boxes that never import each other directly.
+The system is a **modular monolith** written in Go 1.25, backed by PostgreSQL 17. Each business domain lives in its own module under `internal/module/`. Modules are isolated black boxes that never import each other directly.
 
 ## System diagram
 
@@ -55,13 +55,15 @@ The system is a **modular monolith** written in Go 1.24, backed by PostgreSQL 17
 Modules communicate through dependency interfaces (`deps.go`) wired in `cmd/server/main.go`. No module directly imports another.
 
 ```
-catalog  ──(no deps)──
-order    ──depends on──► catalog (SKU lookup)
-planning ──depends on──► catalog (SKU validation)
-inventory──depends on──► catalog (material lookup)
-production─depends on──► inventory (stock check), catalog (metal flag)
-costing  ──depends on──► production (work order status), inventory (area data)
-barcode  ──depends on──► production (scan checkpoints)
+catalog   ──(no deps)──
+order     ──(no deps)── stores sku_id as raw UUID, no catalog validation
+planning  ──(no deps)── stores sku_id as raw UUID, no catalog validation
+inventory ──(no deps)── stores material_id as raw UUID, no catalog lookup
+production──depends on──► planning (plan approval check via PlanChecker)
+                        ► catalog  (metal flag via SKUChecker)
+costing   ──depends on──► production (work order status via WorkOrderReader)
+                        ► DB directly (cutting & consumption data via raw pool adapters)
+barcode   ──(no deps)── stores work_order_id as raw UUID, no production lookup
 ```
 
 ## Layering within each module
@@ -124,7 +126,7 @@ Key rules:
 
 | Concern | Choice | Rationale |
 |---|---|---|
-| Language | Go 1.24 | Strong typing, fast compilation, stdlib quality |
+| Language | Go 1.25 | Strong typing, fast compilation, stdlib quality |
 | Database | PostgreSQL 17 | ACID, JSON support, mature ecosystem |
 | HTTP | gin-gonic/gin | Performance, middleware ecosystem |
 | DB driver | pgx/v5 (pgxpool) | Native Go driver, connection pooling |
