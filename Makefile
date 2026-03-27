@@ -1,4 +1,4 @@
-.PHONY: dev run build test lint swagger migrate-up migrate-down migrate-create docker-up docker-down
+.PHONY: dev run build test test-integration lint swagger migrate-up migrate-down migrate-create docker-up docker-down
 
 APP_NAME := warehouse-server
 PG_PORT  ?= 5433
@@ -20,6 +20,13 @@ build:
 
 test:
 	go test ./... -race -count=1
+
+# test-integration runs all tests tagged with `integration`.
+# Requires Docker to be running — testcontainers spins up a dedicated
+# PostgreSQL 17 container automatically and tears it down after the run.
+# No manual DB setup is needed; the container is fully isolated from dev.
+test-integration:
+	go test -tags integration ./... -race -count=1 -timeout 180s -v
 
 lint:
 	golangci-lint run ./...
