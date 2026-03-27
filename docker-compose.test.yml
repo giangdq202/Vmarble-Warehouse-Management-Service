@@ -1,0 +1,35 @@
+# docker-compose.test.yml
+#
+# Optional: provides a standalone PostgreSQL instance for running integration
+# tests *without* testcontainers (e.g. when Docker socket access is restricted
+# in CI or you want a persistent test DB across multiple runs).
+#
+# Normal usage: `make test-integration` is self-contained — testcontainers-go
+# starts and stops its own container automatically. You do NOT need this file
+# for the standard workflow.
+#
+# Manual usage (persistent test DB):
+#   docker compose -f docker-compose.test.yml up -d
+#   TEST_DATABASE_URL=postgres://vmarble:vmarble@localhost:5434/vmarble_test?sslmode=disable \
+#     go test -tags integration ./... -race -count=1 -timeout 180s -v
+#   docker compose -f docker-compose.test.yml down -v
+
+services:
+  postgres_test:
+    image: postgres:17-alpine
+    ports:
+      - "127.0.0.1:5434:5432"   # port 5434 avoids collision with dev DB (5433)
+    environment:
+      POSTGRES_USER: vmarble
+      POSTGRES_PASSWORD: vmarble
+      POSTGRES_DB: vmarble_test
+    # No named volume — tests should always start from a clean schema.
+    # The DB is ephemeral; migrations run automatically via testhelper.StartTestDB.
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U vmarble -d vmarble_test"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+      start_period: 2s
