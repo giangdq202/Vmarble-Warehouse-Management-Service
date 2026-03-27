@@ -800,3 +800,515 @@ func TestMarkRemnantWaste_FromWaste_IsInvalidInput(t *testing.T) {
 		t.Errorf("expected ErrInvalidInput for WASTE remnant, got %v", err)
 	}
 }
+
+// ── MarkRemnantWaste — missing branches ───────────────────────────────────────
+
+func TestMarkRemnantWaste_NotFound_PropagatesError(t *testing.T) {
+	st := &mockStore{selectRemnantByIDErr: domain.NewBizError(domain.ErrNotFound, "remnant not found")}
+	svc := NewService(st)
+
+	err := svc.MarkRemnantWaste(context.Background(), uuid.New())
+	if !errors.Is(err, domain.ErrNotFound) {
+		t.Errorf("expected ErrNotFound to propagate, got %v", err)
+	}
+}
+
+func TestMarkRemnantWaste_AtomicStoreError_Propagates(t *testing.T) {
+	boardID := uuid.New()
+	remID := uuid.New()
+	dbErr := errors.New("lock timeout")
+	st := &mockStore{
+		selectRemnantByIDResult:       availableRemnant(remID, boardID),
+		markRemnantWasteAtomicallyErr: dbErr,
+	}
+	svc := NewService(st)
+
+	err := svc.MarkRemnantWaste(context.Background(), remID)
+	if !errors.Is(err, dbErr) {
+		t.Errorf("expected atomic store error to propagate, got %v", err)
+	}
+}
+
+// ── AllocateRemnant — missing branches ───────────────────────────────────────
+
+func TestAllocateRemnant_ConsumedRemnant_IsInvalidInput(t *testing.T) {
+	boardID := uuid.New()
+	remID := uuid.New()
+	r := availableRemnant(remID, boardID)
+	r.Status = domain.RemnantConsumed
+
+	st := &mockStore{selectRemnantByIDResult: r}
+	svc := NewService(st)
+
+	err := svc.AllocateRemnant(context.Background(), remID, uuid.New())
+	if !errors.Is(err, domain.ErrInvalidInput) {
+		t.Errorf("expected ErrInvalidInput for CONSUMED remnant, got %v", err)
+	}
+}
+
+func TestAllocateRemnant_WastedRemnant_IsInvalidInput(t *testing.T) {
+	boardID := uuid.New()
+	remID := uuid.New()
+	r := availableRemnant(remID, boardID)
+	r.Status = domain.RemnantWaste
+
+	st := &mockStore{selectRemnantByIDResult: r}
+	svc := NewService(st)
+
+	err := svc.AllocateRemnant(context.Background(), remID, uuid.New())
+	if !errors.Is(err, domain.ErrInvalidInput) {
+		t.Errorf("expected ErrInvalidInput for WASTE remnant, got %v", err)
+	}
+}
+
+func TestAllocateRemnant_AtomicStoreError_Propagates(t *testing.T) {
+	boardID := uuid.New()
+	remID := uuid.New()
+	dbErr := errors.New("deadlock detected")
+	st := &mockStore{
+		selectRemnantByIDResult:      availableRemnant(remID, boardID),
+		allocateRemnantAtomicallyErr: dbErr,
+	}
+	svc := NewService(st)
+
+	err := svc.AllocateRemnant(context.Background(), remID, uuid.New())
+	if !errors.Is(err, dbErr) {
+		t.Errorf("expected atomic store error to propagate, got %v", err)
+	}
+}
+
+// ── RecordCut — remnant not found path ───────────────────────────────────────
+
+func TestRecordCut_RemnantNotFound_PropagatesError(t *testing.T) {
+	st := &mockStore{
+		selectRemnantByIDErr: domain.NewBizError(domain.ErrNotFound, "remnant not found"),
+	}
+	svc := NewService(st)
+
+	_, err := svc.RecordCut(context.Background(), RecordCutInput{
+		RemnantID:     ptr(uuid.New()),
+		WorkOrderID:   uuid.New(),
+		SKUID:         uuid.New(),
+		UsedDimension: dim100x100,
+	})
+	if !errors.Is(err, domain.ErrNotFound) {
+		t.Errorf("expected ErrNotFound to propagate, got %v", err)
+	}
+}
+
+// ── ListLots ──────────────────────────────────────────────────────────────────
+
+func TestListLots_ReturnsPersisted(t *testing.T) {
+	lot1 := InventoryLot{ID: uuid.New(), MaterialID: uuid.New(), Quantity: 5}
+	lot2 := InventoryLot{ID: uuid.New(), MaterialID: uuid.New(), Quantity: 10}
+	st := &mockStore{selectLotsResult: []InventoryLot{lot1, lot2}}
+	svc := NewService(st)
+
+	lots, err := svc.ListLots(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(lots) != 2 {
+		t.Errorf("len = %d, want 2", len(lots))
+	}
+}
+
+func TestListLots_Empty_ReturnsNil(t *testing.T) {
+	st := &mockStore{selectLotsResult: nil}
+	svc := NewService(st)
+
+	lots, err := svc.ListLots(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(lots) != 0 {
+		t.Errorf("expected empty slice, got %d lots", len(lots))
+	}
+}
+
+func TestListLots_StoreError_Propagates(t *testing.T) {
+	dbErr := errors.New("query failed")
+	st := &mockStore{selectLotsErr: dbErr}
+	svc := NewService(st)
+
+	_, err := svc.ListLots(context.Background())
+	if !errors.Is(err, dbErr) {
+		t.Errorf("expected store error to propagate, got %v", err)
+	}
+}
+
+// ── GetSheet ──────────────────────────────────────────────────────────────────
+
+func TestGetSheet_HappyPath(t *testing.T) {
+	sheetID := uuid.New()
+	want := availableSheet(sheetID)
+	st := &mockStore{selectSheetByIDResult: want}
+	svc := NewService(st)
+
+	got, err := svc.GetSheet(context.Background(), sheetID)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got.ID != want.ID {
+		t.Errorf("got.ID = %v, want %v", got.ID, want.ID)
+	}
+	if got.Status != "AVAILABLE" {
+		t.Errorf("got.Status = %q, want AVAILABLE", got.Status)
+	}
+}
+
+func TestGetSheet_NotFound_PropagatesError(t *testing.T) {
+	st := &mockStore{selectSheetByIDErr: domain.NewBizError(domain.ErrNotFound, "board sheet not found")}
+	svc := NewService(st)
+
+	_, err := svc.GetSheet(context.Background(), uuid.New())
+	if !errors.Is(err, domain.ErrNotFound) {
+		t.Errorf("expected ErrNotFound, got %v", err)
+	}
+}
+
+func TestGetSheet_StoreError_Propagates(t *testing.T) {
+	dbErr := errors.New("connection reset")
+	st := &mockStore{selectSheetByIDErr: dbErr}
+	svc := NewService(st)
+
+	_, err := svc.GetSheet(context.Background(), uuid.New())
+	if !errors.Is(err, dbErr) {
+		t.Errorf("expected store error to propagate, got %v", err)
+	}
+}
+
+// ── ListAvailableSheets ───────────────────────────────────────────────────────
+
+func TestListAvailableSheets_ReturnsOnlyAvailable(t *testing.T) {
+	sh1 := availableSheet(uuid.New())
+	sh2 := availableSheet(uuid.New())
+	st := &mockStore{selectAvailableSheetsResult: []BoardSheet{sh1, sh2}}
+	svc := NewService(st)
+
+	sheets, err := svc.ListAvailableSheets(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(sheets) != 2 {
+		t.Errorf("len = %d, want 2", len(sheets))
+	}
+	for _, s := range sheets {
+		if s.Status != "AVAILABLE" {
+			t.Errorf("sheet %v has status %q, want AVAILABLE", s.ID, s.Status)
+		}
+	}
+}
+
+func TestListAvailableSheets_Empty_ReturnsNil(t *testing.T) {
+	st := &mockStore{selectAvailableSheetsResult: nil}
+	svc := NewService(st)
+
+	sheets, err := svc.ListAvailableSheets(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(sheets) != 0 {
+		t.Errorf("expected empty slice, got %d sheets", len(sheets))
+	}
+}
+
+func TestListAvailableSheets_StoreError_Propagates(t *testing.T) {
+	dbErr := errors.New("timeout")
+	st := &mockStore{selectAvailableSheetsErr: dbErr}
+	svc := NewService(st)
+
+	_, err := svc.ListAvailableSheets(context.Background())
+	if !errors.Is(err, dbErr) {
+		t.Errorf("expected store error to propagate, got %v", err)
+	}
+}
+
+// ── FindAvailableRemnants — BR-K01 stock check ────────────────────────────────
+
+func TestFindAvailableRemnants_HappyPath(t *testing.T) {
+	boardID := uuid.New()
+	r1 := availableRemnant(uuid.New(), boardID)
+	r2 := availableRemnant(uuid.New(), boardID)
+	st := &mockStore{selectAvailableRemnantsResult: []Remnant{r1, r2}}
+	svc := NewService(st)
+
+	remnants, err := svc.FindAvailableRemnants(context.Background(), dim100x100)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(remnants) != 2 {
+		t.Errorf("len = %d, want 2", len(remnants))
+	}
+	for _, r := range remnants {
+		if r.Status != domain.RemnantAvailable {
+			t.Errorf("remnant %v has status %v, want AVAILABLE", r.ID, r.Status)
+		}
+	}
+}
+
+func TestFindAvailableRemnants_NoneMatch_ReturnsEmpty(t *testing.T) {
+	// Store returns empty when no remnants meet the min dimension.
+	st := &mockStore{selectAvailableRemnantsResult: nil}
+	svc := NewService(st)
+
+	remnants, err := svc.FindAvailableRemnants(context.Background(), dim2000x1000)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(remnants) != 0 {
+		t.Errorf("expected empty, got %d remnants", len(remnants))
+	}
+}
+
+func TestFindAvailableRemnants_StoreError_Propagates(t *testing.T) {
+	dbErr := errors.New("index scan failed")
+	st := &mockStore{selectAvailableRemnantsErr: dbErr}
+	svc := NewService(st)
+
+	_, err := svc.FindAvailableRemnants(context.Background(), dim100x100)
+	if !errors.Is(err, dbErr) {
+		t.Errorf("expected store error to propagate, got %v", err)
+	}
+}
+
+// ── GetRemnantLineage — BR-K04 lineage tracing ────────────────────────────────
+
+func TestGetRemnantLineage_HappyPath(t *testing.T) {
+	boardID := uuid.New()
+	// r1 is a direct child of the board sheet.
+	r1 := availableRemnant(uuid.New(), boardID)
+	// r2 is a nested remnant (child of r1) — same parent board.
+	r2 := Remnant{
+		ID:              uuid.New(),
+		ParentBoardID:   boardID,
+		ParentRemnantID: &r1.ID,
+		Dimensions:      dim100x100,
+		Status:          domain.RemnantAvailable,
+	}
+	st := &mockStore{selectRemnantsByBoardSheetResult: []Remnant{r1, r2}}
+	svc := NewService(st)
+
+	lineage, err := svc.GetRemnantLineage(context.Background(), boardID)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(lineage) != 2 {
+		t.Fatalf("len = %d, want 2", len(lineage))
+	}
+	// Verify BR-K04: every remnant in the lineage shares the same parent_board_id.
+	for _, r := range lineage {
+		if r.ParentBoardID != boardID {
+			t.Errorf("remnant %v has ParentBoardID %v, want %v", r.ID, r.ParentBoardID, boardID)
+		}
+	}
+	// Verify nested parent pointer is preserved.
+	nested := lineage[1]
+	if nested.ParentRemnantID == nil || *nested.ParentRemnantID != r1.ID {
+		t.Errorf("nested.ParentRemnantID = %v, want %v", nested.ParentRemnantID, r1.ID)
+	}
+}
+
+func TestGetRemnantLineage_NoRemnants_ReturnsEmpty(t *testing.T) {
+	st := &mockStore{selectRemnantsByBoardSheetResult: nil}
+	svc := NewService(st)
+
+	lineage, err := svc.GetRemnantLineage(context.Background(), uuid.New())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(lineage) != 0 {
+		t.Errorf("expected empty lineage, got %d remnants", len(lineage))
+	}
+}
+
+func TestGetRemnantLineage_StoreError_Propagates(t *testing.T) {
+	dbErr := errors.New("query failed")
+	st := &mockStore{selectRemnantsByBoardSheetErr: dbErr}
+	svc := NewService(st)
+
+	_, err := svc.GetRemnantLineage(context.Background(), uuid.New())
+	if !errors.Is(err, dbErr) {
+		t.Errorf("expected store error to propagate, got %v", err)
+	}
+}
+
+// ── BR-K01: stock check — ReceiveStock sets up AVAILABLE sheets ───────────────
+
+func TestReceiveStock_SheetsAreAvailableAndLinkedToLot(t *testing.T) {
+	// Capture the sheets that get written via insertSheets to verify
+	// BR-K01: every sheet must be AVAILABLE and reference the correct lot.
+	var capturedSheets []BoardSheet
+	capturingSt := &capturingMockStore{
+		onInsertSheets: func(sheets []BoardSheet) { capturedSheets = sheets },
+	}
+	svc := NewService(capturingSt)
+
+	lot, err := svc.ReceiveStock(context.Background(), ReceiveStockInput{
+		MaterialID:   uuid.New(),
+		Dimensions:   dim2000x1000,
+		CostPerSheet: domain.Money{Amount: 80_000, Currency: "VND"},
+		Quantity:     4,
+		SupplierRef:  "SUP-BR-K01",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(capturedSheets) != 4 {
+		t.Fatalf("expected 4 sheets, got %d", len(capturedSheets))
+	}
+	for i, sh := range capturedSheets {
+		if sh.Status != "AVAILABLE" {
+			t.Errorf("sheet[%d].Status = %q, want AVAILABLE", i, sh.Status)
+		}
+		if sh.LotID != lot.ID {
+			t.Errorf("sheet[%d].LotID = %v, want lot.ID %v", i, sh.LotID, lot.ID)
+		}
+		if sh.Dimensions != dim2000x1000 {
+			t.Errorf("sheet[%d].Dimensions = %v, want %v", i, sh.Dimensions, dim2000x1000)
+		}
+		if sh.CostPerSheet.Amount != 80_000 {
+			t.Errorf("sheet[%d].CostPerSheet.Amount = %v, want 80000", i, sh.CostPerSheet.Amount)
+		}
+	}
+}
+
+// capturingMockStore wraps mockStore and allows intercepting insertSheets calls
+// so tests can inspect the exact sheets passed by the service (BR-K01 checks).
+type capturingMockStore struct {
+	mockStore
+	onInsertSheets func([]BoardSheet)
+}
+
+func (c *capturingMockStore) insertSheets(_ context.Context, sheets []BoardSheet) error {
+	if c.onInsertSheets != nil {
+		c.onInsertSheets(sheets)
+	}
+	return c.insertSheetsErr
+}
+
+// ── BR-K03: area conservation — edge cases ───────────────────────────────────
+
+func TestRecordCut_AreaConservation_UsedExceedsByOneMM2(t *testing.T) {
+	// Sheet is 2000×1000 = 2_000_000 mm².
+	// Used is 2_000_001 mm² (exactly 1 mm² over) — must fail.
+	sheetID := uuid.New()
+	st := &mockStore{selectSheetByIDResult: availableSheet(sheetID)}
+	svc := NewService(st)
+
+	// 2001 × 1000 = 2_001_000 mm² > 2_000_000.
+	over := domain.Dimension{LengthMM: 2001, WidthMM: 1000}
+	_, err := svc.RecordCut(context.Background(), RecordCutInput{
+		SheetID:       ptr(sheetID),
+		WorkOrderID:   uuid.New(),
+		SKUID:         uuid.New(),
+		UsedDimension: over,
+	})
+	if !errors.Is(err, domain.ErrAreaConservation) {
+		t.Errorf("expected ErrAreaConservation for 1mm² over, got %v", err)
+	}
+}
+
+func TestRecordCut_AreaConservation_FromRemnant_ExactFit(t *testing.T) {
+	// Remnant is 1000×500 = 500_000 mm².
+	// Used = 500×500 = 250_000; leftover remnant = 500×500 = 250_000.
+	// Total = 500_000 == source. Must succeed.
+	boardID := uuid.New()
+	remID := uuid.New()
+	st := &mockStore{
+		selectRemnantByIDResult: availableRemnant(remID, boardID), // 1000×500
+	}
+	svc := NewService(st)
+
+	half := domain.Dimension{LengthMM: 500, WidthMM: 500}
+	_, err := svc.RecordCut(context.Background(), RecordCutInput{
+		RemnantID:        ptr(remID),
+		WorkOrderID:      uuid.New(),
+		SKUID:            uuid.New(),
+		UsedDimension:    half,
+		RemnantDimension: &half,
+	})
+	if err != nil {
+		t.Errorf("exact-area cut from remnant must succeed, got: %v", err)
+	}
+}
+
+func TestRecordCut_AreaConservation_FromRemnant_Exceeded(t *testing.T) {
+	// Remnant is 1000×500 = 500_000 mm².
+	// Used 600×500 = 300_000; leftover 600×500 = 300_000 → total 600_000 > 500_000.
+	boardID := uuid.New()
+	remID := uuid.New()
+	st := &mockStore{
+		selectRemnantByIDResult: availableRemnant(remID, boardID),
+	}
+	svc := NewService(st)
+
+	big := domain.Dimension{LengthMM: 600, WidthMM: 500}
+	_, err := svc.RecordCut(context.Background(), RecordCutInput{
+		RemnantID:        ptr(remID),
+		WorkOrderID:      uuid.New(),
+		SKUID:            uuid.New(),
+		UsedDimension:    big,
+		RemnantDimension: &big,
+	})
+	if !errors.Is(err, domain.ErrAreaConservation) {
+		t.Errorf("expected ErrAreaConservation, got %v", err)
+	}
+}
+
+// ── BR-K05: status lifecycle ──────────────────────────────────────────────────
+
+func TestRemnantStatusLifecycle_AllTransitionsTable(t *testing.T) {
+	// This table drives service-layer gate checks (the optimistic pre-check in
+	// AllocateRemnant and MarkRemnantWaste) for every status value, confirming
+	// BR-K05 enforcement at the service boundary.
+	type check struct {
+		status      domain.RemnantStatus
+		allocateOK  bool // should AllocateRemnant pre-check pass?
+		markWasteOK bool // should MarkRemnantWaste pre-check pass?
+	}
+
+	cases := []check{
+		{domain.RemnantAvailable, true, true},
+		{domain.RemnantAllocated, false, true},
+		{domain.RemnantConsumed, false, false},
+		{domain.RemnantWaste, false, false},
+	}
+
+	for _, tc := range cases {
+		t.Run(string(tc.status), func(t *testing.T) {
+			boardID := uuid.New()
+			remID := uuid.New()
+			r := availableRemnant(remID, boardID)
+			r.Status = tc.status
+
+			// ── AllocateRemnant pre-check ──────────────────────────────
+			st := &mockStore{selectRemnantByIDResult: r}
+			svc := NewService(st)
+			allocErr := svc.AllocateRemnant(context.Background(), remID, uuid.New())
+			if tc.allocateOK {
+				if allocErr != nil {
+					t.Errorf("AllocateRemnant(%s): unexpected error: %v", tc.status, allocErr)
+				}
+			} else {
+				if !errors.Is(allocErr, domain.ErrInvalidInput) {
+					t.Errorf("AllocateRemnant(%s): expected ErrInvalidInput, got %v", tc.status, allocErr)
+				}
+			}
+
+			// ── MarkRemnantWaste pre-check ─────────────────────────────
+			st2 := &mockStore{selectRemnantByIDResult: r}
+			svc2 := NewService(st2)
+			wasteErr := svc2.MarkRemnantWaste(context.Background(), remID)
+			if tc.markWasteOK {
+				if wasteErr != nil {
+					t.Errorf("MarkRemnantWaste(%s): unexpected error: %v", tc.status, wasteErr)
+				}
+			} else {
+				if !errors.Is(wasteErr, domain.ErrInvalidInput) {
+					t.Errorf("MarkRemnantWaste(%s): expected ErrInvalidInput, got %v", tc.status, wasteErr)
+				}
+			}
+		})
+	}
+}
