@@ -9,3 +9,7 @@
 bin/
 tmp/
 *.exe
+
+# Test coverage artifacts
+*.out
+*.prof
