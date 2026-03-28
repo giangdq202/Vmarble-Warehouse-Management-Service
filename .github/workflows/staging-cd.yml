@@ -17,11 +17,64 @@ env:
 
 jobs:
   # ─────────────────────────────────────────────────────────────────────────
-  # JOB 1: BUILD & PUSH IMAGE LÊN GHCR
+  # JOB 1: LINT & TEST — gate bắt buộc trước khi build image
+  # ─────────────────────────────────────────────────────────────────────────
+  quality:
+    name: "✅ Lint & Test"
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # Lấy Go version từ go.mod (hiện go 1.25.0) — không hardcode để tránh drift
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Run tests
+        run: go test ./... -race -count=1 -coverprofile=coverage.out
+
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: latest
+
+      # ── Thông báo Discord ───────────────────────────────────────────────
+      - name: "[Discord] ❌ Lint/Test thất bại"
+        if: failure()
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: |
+          SHORT="${GITHUB_SHA::7}"
+          MSG=$(echo '${{ github.event.head_commit.message }}' | head -1)
+          jq -cn \
+            --arg sha "$SHORT" \
+            --arg msg "$MSG" \
+            --arg who "${{ github.actor }}" \
+            --arg url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
+            '{embeds:[{
+              title: "❌ Lint/Test thất bại — staging bị chặn",
+              color: 15158332,
+              description: "Pipeline đã dừng. Image sẽ không được build cho đến khi code pass.",
+              fields:[
+                {name:"Commit",  value:("`"+$sha+"` "+$msg), inline:false},
+                {name:"Tác giả", value:$who,                 inline:true},
+                {name:"Log lỗi", value:("[#${{ github.run_number }}]("+$url+")"), inline:true}
+              ]
+            }]}' \
+          | curl -sS -X POST "$DISCORD_WEBHOOK" \
+               -H "Content-Type: application/json" -d @-
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # JOB 2: BUILD & PUSH IMAGE LÊN GHCR (chỉ chạy nếu quality thành công)
   # ─────────────────────────────────────────────────────────────────────────
   build:
     name: "🔨 Build & Push"
     runs-on: ubuntu-latest
+    needs: quality
     permissions:
       contents: read
       packages: write
