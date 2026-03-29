@@ -43,6 +43,30 @@ jobs:
           version: latest
 
       # ── Thông báo Discord ───────────────────────────────────────────────
+      - name: "[Discord] ✅ Lint/Test thành công"
+        if: success()
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: |
+          SHORT="${GITHUB_SHA::7}"
+          MSG=$(echo '${{ github.event.head_commit.message }}' | head -1)
+          jq -cn \
+            --arg sha "$SHORT" \
+            --arg msg "$MSG" \
+            --arg who "${{ github.actor }}" \
+            --arg url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
+            '{embeds:[{
+              title: "✅ Lint/Test thành công",
+              color: 3066993,
+              fields:[
+                {name:"Commit",  value:("`"+$sha+"` "+$msg), inline:false},
+                {name:"Tác giả", value:$who,                 inline:true},
+                {name:"Run log", value:("[#${{ github.run_number }}]("+$url+")"), inline:true}
+              ]
+            }]}' \
+          | curl -sS -X POST "$DISCORD_WEBHOOK" \
+               -H "Content-Type: application/json" -d @-
+
       - name: "[Discord] ❌ Lint/Test thất bại"
         if: failure()
         env:
