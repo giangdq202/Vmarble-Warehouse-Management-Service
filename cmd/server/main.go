@@ -21,6 +21,7 @@ import (
 	"github.com/vmarble/warehouse-management-service/internal/module/order"
 	"github.com/vmarble/warehouse-management-service/internal/module/planning"
 	"github.com/vmarble/warehouse-management-service/internal/module/production"
+	"github.com/vmarble/warehouse-management-service/internal/platform/auth"
 	"github.com/vmarble/warehouse-management-service/internal/platform/config"
 	"github.com/vmarble/warehouse-management-service/internal/platform/httpkit"
 	"github.com/vmarble/warehouse-management-service/internal/platform/postgres"
@@ -91,6 +92,7 @@ func main() {
 	r.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
 
 	api := r.Group("/api/v1")
+	api.Use(auth.Middleware(cfg.AuthSecret))
 
 	catalog.NewHandler(catalogSvc).Register(api)
 	order.NewHandler(orderSvc).Register(api)
