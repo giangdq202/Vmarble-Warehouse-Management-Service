@@ -116,7 +116,7 @@ func (s *pgStore) upsertBOM(ctx context.Context, skuID uuid.UUID, components []B
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback(ctx)
+	defer func() { _ = tx.Rollback(ctx) }()
 
 	_, err = tx.Exec(ctx, `DELETE FROM bom_components WHERE sku_id = $1`, skuID)
 	if err != nil {

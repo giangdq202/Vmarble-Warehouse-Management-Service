@@ -104,11 +104,6 @@ func approvedPlan(planID uuid.UUID) *mockPlanChecker {
 	return &mockPlanChecker{result: PlanInfo{ID: planID, Status: domain.PlanApproved}}
 }
 
-// draftPlan returns a PlanChecker that returns a DRAFT plan.
-func draftPlan(planID uuid.UUID) *mockPlanChecker {
-	return &mockPlanChecker{result: PlanInfo{ID: planID, Status: domain.PlanDraft}}
-}
-
 // skuNoMetal returns a SKUChecker for a SKU that does not require metal.
 func skuNoMetal(skuID uuid.UUID) *mockSKUChecker {
 	return &mockSKUChecker{result: SKUInfo{ID: skuID, RequiresMetal: false}}
