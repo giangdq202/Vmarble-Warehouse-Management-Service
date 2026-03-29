@@ -1,4 +1,4 @@
-name: "Staging CD"
+name: "Staging CI/CD"
 
 # Trigger: mỗi khi có push vào branch dev (bao gồm cả merge PR)
 on:
@@ -40,7 +40,7 @@ jobs:
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v7
         with:
-          version: v2.11.4
+          version: latest
 
       # ── Thông báo Discord ───────────────────────────────────────────────
       - name: "[Discord] ❌ Lint/Test thất bại"

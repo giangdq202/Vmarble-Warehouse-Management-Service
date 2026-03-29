@@ -9,7 +9,7 @@ Pipeline CD tự động deploy BE lên staging server mỗi khi có push (merge
 | **Trigger** | Push vào nhánh `dev` |
 | **Staging server** | Xem secret `STAGING_HOST` trong GitHub Actions |
 | **Image registry** | GitHub Container Registry (GHCR) |
-| **Workflow file** | `.github/workflows/staging-cd.yml` |
+| **Workflow file** | `.github/workflows/staging.yml` |
 | **Deploy script** | `/opt/vwms-staging/deploy.sh` (trên server) |
 
 ---
