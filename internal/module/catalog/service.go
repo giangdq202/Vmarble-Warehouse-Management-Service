@@ -106,7 +106,7 @@ func (s *service) SetBOM(ctx context.Context, in SetBOMInput) (BOM, error) {
 	if err := s.st.upsertBOM(ctx, in.SKUID, in.Components); err != nil {
 		return BOM{}, err
 	}
-	return BOM{SKUID: in.SKUID, Components: in.Components}, nil
+	return BOM(in), nil
 }
 
 func (s *service) GetBOM(ctx context.Context, skuID uuid.UUID) (BOM, error) {

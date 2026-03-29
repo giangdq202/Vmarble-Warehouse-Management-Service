@@ -63,7 +63,7 @@ func (s *pgStore) insertSheets(ctx context.Context, sheets []BoardSheet) error {
 		)
 	}
 	br := s.pool.SendBatch(ctx, batch)
-	defer br.Close()
+	defer func() { _ = br.Close() }()
 	for range sheets {
 		if _, err := br.Exec(); err != nil {
 			return err
