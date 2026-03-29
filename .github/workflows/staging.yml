@@ -209,7 +209,7 @@ jobs:
 
       # ── Thông báo Discord ─────────────────────────────────────────────────
       - name: "[Discord] 🚀 Deploy thành công"
-        if: steps.ssh_deploy.outcome == 'success'
+        if: success() && steps.ssh_deploy.outcome == 'success'
         env:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_URL }}
         run: |
@@ -235,7 +235,7 @@ jobs:
                -H "Content-Type: application/json" -d @-
 
       - name: "[Discord] 💥 Deploy thất bại — Đã rollback"
-        if: steps.ssh_deploy.outcome == 'failure'
+        if: failure() && steps.ssh_deploy.outcome == 'failure'
         env:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_URL }}
         run: |
