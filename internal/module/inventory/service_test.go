@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/vmarble/warehouse-management-service/internal/domain"
+	"github.com/vmarble/warehouse-management-service/internal/platform/httpkit"
 )
 
 // ── mockStore ────────────────────────────────────────────────────────────────
@@ -24,6 +25,11 @@ type mockStore struct {
 	selectLotsResult []InventoryLot
 	selectLotsErr    error
 
+	// selectLotsPaged
+	selectLotsPagedResult []InventoryLot
+	selectLotsPagedTotal  int
+	selectLotsPagedErr    error
+
 	// insertSheets
 	insertSheetsErr error
 
@@ -34,6 +40,11 @@ type mockStore struct {
 	// selectAvailableSheets
 	selectAvailableSheetsResult []BoardSheet
 	selectAvailableSheetsErr    error
+
+	// selectAvailableSheetsPaged
+	selectAvailableSheetsPagedResult []BoardSheet
+	selectAvailableSheetsPagedTotal  int
+	selectAvailableSheetsPagedErr    error
 
 	// updateSheetStatus
 	updateSheetStatusErr error
@@ -77,6 +88,9 @@ func (m *mockStore) insertLot(_ context.Context, _ InventoryLot) error {
 func (m *mockStore) selectLots(_ context.Context) ([]InventoryLot, error) {
 	return m.selectLotsResult, m.selectLotsErr
 }
+func (m *mockStore) selectLotsPaged(_ context.Context, _ httpkit.PageParams) ([]InventoryLot, int, error) {
+	return m.selectLotsPagedResult, m.selectLotsPagedTotal, m.selectLotsPagedErr
+}
 func (m *mockStore) insertSheets(_ context.Context, _ []BoardSheet) error {
 	return m.insertSheetsErr
 }
@@ -85,6 +99,9 @@ func (m *mockStore) selectSheetByID(_ context.Context, _ uuid.UUID) (BoardSheet,
 }
 func (m *mockStore) selectAvailableSheets(_ context.Context) ([]BoardSheet, error) {
 	return m.selectAvailableSheetsResult, m.selectAvailableSheetsErr
+}
+func (m *mockStore) selectAvailableSheetsPaged(_ context.Context, _ httpkit.PageParams) ([]BoardSheet, int, error) {
+	return m.selectAvailableSheetsPagedResult, m.selectAvailableSheetsPagedTotal, m.selectAvailableSheetsPagedErr
 }
 func (m *mockStore) updateSheetStatus(_ context.Context, _ uuid.UUID, _ string, _ *uuid.UUID) error {
 	return m.updateSheetStatusErr
@@ -901,37 +918,43 @@ func TestRecordCut_RemnantNotFound_PropagatesError(t *testing.T) {
 func TestListLots_ReturnsPersisted(t *testing.T) {
 	lot1 := InventoryLot{ID: uuid.New(), MaterialID: uuid.New(), Quantity: 5}
 	lot2 := InventoryLot{ID: uuid.New(), MaterialID: uuid.New(), Quantity: 10}
-	st := &mockStore{selectLotsResult: []InventoryLot{lot1, lot2}}
+	st := &mockStore{
+		selectLotsPagedResult: []InventoryLot{lot1, lot2},
+		selectLotsPagedTotal:  2,
+	}
 	svc := NewService(st)
 
-	lots, err := svc.ListLots(context.Background())
+	result, err := svc.ListLots(context.Background(), httpkit.PageParams{Page: 1, Limit: 10})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(lots) != 2 {
-		t.Errorf("len = %d, want 2", len(lots))
+	if len(result.Items) != 2 {
+		t.Errorf("len = %d, want 2", len(result.Items))
 	}
 }
 
 func TestListLots_Empty_ReturnsNil(t *testing.T) {
-	st := &mockStore{selectLotsResult: nil}
+	st := &mockStore{
+		selectLotsPagedResult: nil,
+		selectLotsPagedTotal:  0,
+	}
 	svc := NewService(st)
 
-	lots, err := svc.ListLots(context.Background())
+	result, err := svc.ListLots(context.Background(), httpkit.PageParams{Page: 1, Limit: 10})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(lots) != 0 {
-		t.Errorf("expected empty slice, got %d lots", len(lots))
+	if len(result.Items) != 0 {
+		t.Errorf("expected empty slice, got %d lots", len(result.Items))
 	}
 }
 
 func TestListLots_StoreError_Propagates(t *testing.T) {
 	dbErr := errors.New("query failed")
-	st := &mockStore{selectLotsErr: dbErr}
+	st := &mockStore{selectLotsPagedErr: dbErr}
 	svc := NewService(st)
 
-	_, err := svc.ListLots(context.Background())
+	_, err := svc.ListLots(context.Background(), httpkit.PageParams{Page: 1, Limit: 10})
 	if !errors.Is(err, dbErr) {
 		t.Errorf("expected store error to propagate, got %v", err)
 	}
@@ -983,17 +1006,20 @@ func TestGetSheet_StoreError_Propagates(t *testing.T) {
 func TestListAvailableSheets_ReturnsOnlyAvailable(t *testing.T) {
 	sh1 := availableSheet(uuid.New())
 	sh2 := availableSheet(uuid.New())
-	st := &mockStore{selectAvailableSheetsResult: []BoardSheet{sh1, sh2}}
+	st := &mockStore{
+		selectAvailableSheetsPagedResult: []BoardSheet{sh1, sh2},
+		selectAvailableSheetsPagedTotal:  2,
+	}
 	svc := NewService(st)
 
-	sheets, err := svc.ListAvailableSheets(context.Background())
+	result, err := svc.ListAvailableSheets(context.Background(), httpkit.PageParams{Page: 1, Limit: 10})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(sheets) != 2 {
-		t.Errorf("len = %d, want 2", len(sheets))
+	if len(result.Items) != 2 {
+		t.Errorf("len = %d, want 2", len(result.Items))
 	}
-	for _, s := range sheets {
+	for _, s := range result.Items {
 		if s.Status != "AVAILABLE" {
 			t.Errorf("sheet %v has status %q, want AVAILABLE", s.ID, s.Status)
 		}
@@ -1001,24 +1027,27 @@ func TestListAvailableSheets_ReturnsOnlyAvailable(t *testing.T) {
 }
 
 func TestListAvailableSheets_Empty_ReturnsNil(t *testing.T) {
-	st := &mockStore{selectAvailableSheetsResult: nil}
+	st := &mockStore{
+		selectAvailableSheetsPagedResult: nil,
+		selectAvailableSheetsPagedTotal:  0,
+	}
 	svc := NewService(st)
 
-	sheets, err := svc.ListAvailableSheets(context.Background())
+	result, err := svc.ListAvailableSheets(context.Background(), httpkit.PageParams{Page: 1, Limit: 10})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(sheets) != 0 {
-		t.Errorf("expected empty slice, got %d sheets", len(sheets))
+	if len(result.Items) != 0 {
+		t.Errorf("expected empty slice, got %d sheets", len(result.Items))
 	}
 }
 
 func TestListAvailableSheets_StoreError_Propagates(t *testing.T) {
 	dbErr := errors.New("timeout")
-	st := &mockStore{selectAvailableSheetsErr: dbErr}
+	st := &mockStore{selectAvailableSheetsPagedErr: dbErr}
 	svc := NewService(st)
 
-	_, err := svc.ListAvailableSheets(context.Background())
+	_, err := svc.ListAvailableSheets(context.Background(), httpkit.PageParams{Page: 1, Limit: 10})
 	if !errors.Is(err, dbErr) {
 		t.Errorf("expected store error to propagate, got %v", err)
 	}
@@ -1310,5 +1339,200 @@ func TestRemnantStatusLifecycle_AllTransitionsTable(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// ── ListLots (paginated) ──────────────────────────────────────────────────────
+
+func TestListLots_ReturnsPagedResult(t *testing.T) {
+	lots := []InventoryLot{
+		{ID: uuid.New(), SupplierRef: "SUP-001"},
+		{ID: uuid.New(), SupplierRef: "SUP-002"},
+	}
+	st := &mockStore{
+		selectLotsPagedResult: lots,
+		selectLotsPagedTotal:  2,
+	}
+	svc := NewService(st)
+
+	p := httpkit.PageParams{Page: 1, Limit: 10}
+	result, err := svc.ListLots(context.Background(), p)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(result.Items) != 2 {
+		t.Errorf("items = %d, want 2", len(result.Items))
+	}
+	if result.TotalItems != 2 {
+		t.Errorf("total_items = %d, want 2", result.TotalItems)
+	}
+	if result.TotalPages != 1 {
+		t.Errorf("total_pages = %d, want 1", result.TotalPages)
+	}
+	if result.CurrentPage != 1 {
+		t.Errorf("current_page = %d, want 1", result.CurrentPage)
+	}
+}
+
+func TestListLots_SearchNoResults_ReturnsEmptyItems(t *testing.T) {
+	st := &mockStore{
+		selectLotsPagedResult: nil,
+		selectLotsPagedTotal:  0,
+	}
+	svc := NewService(st)
+
+	p := httpkit.PageParams{Page: 1, Limit: 10, Search: "SUP-DOES-NOT-EXIST"}
+	result, err := svc.ListLots(context.Background(), p)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(result.Items) != 0 {
+		t.Errorf("items = %d, want 0 for no-match search", len(result.Items))
+	}
+	if result.TotalItems != 0 {
+		t.Errorf("total_items = %d, want 0", result.TotalItems)
+	}
+	if result.TotalPages != 1 {
+		t.Errorf("total_pages = %d, want at least 1", result.TotalPages)
+	}
+}
+
+func TestListLots_LastPage_CorrectMetadata(t *testing.T) {
+	// 12 total, limit 5 → 3 pages; last page has 2 items
+	lastPageLots := []InventoryLot{
+		{ID: uuid.New(), SupplierRef: "SUP-011"},
+		{ID: uuid.New(), SupplierRef: "SUP-012"},
+	}
+	st := &mockStore{
+		selectLotsPagedResult: lastPageLots,
+		selectLotsPagedTotal:  12,
+	}
+	svc := NewService(st)
+
+	p := httpkit.PageParams{Page: 3, Limit: 5}
+	result, err := svc.ListLots(context.Background(), p)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.TotalItems != 12 {
+		t.Errorf("total_items = %d, want 12", result.TotalItems)
+	}
+	if result.TotalPages != 3 {
+		t.Errorf("total_pages = %d, want 3", result.TotalPages)
+	}
+	if result.CurrentPage != 3 {
+		t.Errorf("current_page = %d, want 3", result.CurrentPage)
+	}
+	if len(result.Items) != 2 {
+		t.Errorf("items on last page = %d, want 2", len(result.Items))
+	}
+}
+
+func TestListLots_StoreError_Propagated(t *testing.T) {
+	storeErr := errors.New("db down")
+	st := &mockStore{selectLotsPagedErr: storeErr}
+	svc := NewService(st)
+
+	_, err := svc.ListLots(context.Background(), httpkit.PageParams{Page: 1, Limit: 10})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !errors.Is(err, storeErr) {
+		t.Errorf("got %v, want %v", err, storeErr)
+	}
+}
+
+// ── ListAvailableSheets (paginated) ───────────────────────────────────────────
+
+func TestListAvailableSheets_ReturnsPagedResult(t *testing.T) {
+	sheets := []BoardSheet{
+		{ID: uuid.New(), Status: "AVAILABLE"},
+		{ID: uuid.New(), Status: "AVAILABLE"},
+		{ID: uuid.New(), Status: "AVAILABLE"},
+	}
+	st := &mockStore{
+		selectAvailableSheetsPagedResult: sheets,
+		selectAvailableSheetsPagedTotal:  3,
+	}
+	svc := NewService(st)
+
+	p := httpkit.PageParams{Page: 1, Limit: 10}
+	result, err := svc.ListAvailableSheets(context.Background(), p)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(result.Items) != 3 {
+		t.Errorf("items = %d, want 3", len(result.Items))
+	}
+	if result.TotalItems != 3 {
+		t.Errorf("total_items = %d, want 3", result.TotalItems)
+	}
+	if result.TotalPages != 1 {
+		t.Errorf("total_pages = %d, want 1", result.TotalPages)
+	}
+}
+
+func TestListAvailableSheets_Empty_ReturnsEmptyItems(t *testing.T) {
+	st := &mockStore{
+		selectAvailableSheetsPagedResult: nil,
+		selectAvailableSheetsPagedTotal:  0,
+	}
+	svc := NewService(st)
+
+	p := httpkit.PageParams{Page: 1, Limit: 10}
+	result, err := svc.ListAvailableSheets(context.Background(), p)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(result.Items) != 0 {
+		t.Errorf("items = %d, want 0", len(result.Items))
+	}
+	if result.TotalItems != 0 {
+		t.Errorf("total_items = %d, want 0", result.TotalItems)
+	}
+	if result.TotalPages != 1 {
+		t.Errorf("total_pages = %d, want 1 (minimum)", result.TotalPages)
+	}
+}
+
+func TestListAvailableSheets_LastPage_CorrectMetadata(t *testing.T) {
+	// 21 total, limit 10 → 3 pages; last page has 1 item
+	lastPage := []BoardSheet{{ID: uuid.New(), Status: "AVAILABLE"}}
+	st := &mockStore{
+		selectAvailableSheetsPagedResult: lastPage,
+		selectAvailableSheetsPagedTotal:  21,
+	}
+	svc := NewService(st)
+
+	p := httpkit.PageParams{Page: 3, Limit: 10}
+	result, err := svc.ListAvailableSheets(context.Background(), p)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.TotalItems != 21 {
+		t.Errorf("total_items = %d, want 21", result.TotalItems)
+	}
+	if result.TotalPages != 3 {
+		t.Errorf("total_pages = %d, want 3", result.TotalPages)
+	}
+	if result.CurrentPage != 3 {
+		t.Errorf("current_page = %d, want 3", result.CurrentPage)
+	}
+	if len(result.Items) != 1 {
+		t.Errorf("items on last page = %d, want 1", len(result.Items))
+	}
+}
+
+func TestListAvailableSheets_StoreError_Propagated(t *testing.T) {
+	storeErr := errors.New("timeout")
+	st := &mockStore{selectAvailableSheetsPagedErr: storeErr}
+	svc := NewService(st)
+
+	_, err := svc.ListAvailableSheets(context.Background(), httpkit.PageParams{Page: 1, Limit: 10})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !errors.Is(err, storeErr) {
+		t.Errorf("got %v, want %v", err, storeErr)
 	}
 }

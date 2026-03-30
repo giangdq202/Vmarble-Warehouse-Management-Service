@@ -6,6 +6,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/vmarble/warehouse-management-service/internal/domain"
+	"github.com/vmarble/warehouse-management-service/internal/platform/httpkit"
 )
 
 type MaterialType string
@@ -66,11 +67,11 @@ type SetBOMInput struct {
 
 type Service interface {
 	CreateMaterial(ctx context.Context, in CreateMaterialInput) (Material, error)
-	ListMaterials(ctx context.Context) ([]Material, error)
+	ListMaterials(ctx context.Context, p httpkit.PageParams) (httpkit.PagedResult[Material], error)
 	GetMaterial(ctx context.Context, materialID uuid.UUID) (Material, error)
 
 	CreateSKU(ctx context.Context, in CreateSKUInput) (SKU, error)
-	ListSKUs(ctx context.Context) ([]SKU, error)
+	ListSKUs(ctx context.Context, p httpkit.PageParams) (httpkit.PagedResult[SKU], error)
 	GetSKU(ctx context.Context, skuID uuid.UUID) (SKU, error)
 
 	SetBOM(ctx context.Context, in SetBOMInput) (BOM, error)

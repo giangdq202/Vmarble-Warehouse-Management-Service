@@ -26,6 +26,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/vmarble/warehouse-management-service/internal/domain"
+	"github.com/vmarble/warehouse-management-service/internal/platform/httpkit"
 	"github.com/vmarble/warehouse-management-service/internal/testhelper"
 )
 
@@ -106,12 +107,12 @@ func TestIntegration_ListMaterials_ReturnsPersisted(t *testing.T) {
 		}
 	}
 
-	materials, err := svc.ListMaterials(context.Background())
+	result, err := svc.ListMaterials(context.Background(), httpkit.PageParams{Page: 1, Limit: 100})
 	if err != nil {
 		t.Fatalf("ListMaterials: %v", err)
 	}
-	if len(materials) != 3 {
-		t.Errorf("materials count = %d, want 3", len(materials))
+	if len(result.Items) != 3 {
+		t.Errorf("materials count = %d, want 3", len(result.Items))
 	}
 }
 
@@ -238,12 +239,12 @@ func TestIntegration_ListSKUs_ReturnsPersisted(t *testing.T) {
 		}
 	}
 
-	skus, err := svc.ListSKUs(context.Background())
+	result, err := svc.ListSKUs(context.Background(), httpkit.PageParams{Page: 1, Limit: 100})
 	if err != nil {
 		t.Fatalf("ListSKUs: %v", err)
 	}
-	if len(skus) != 4 {
-		t.Errorf("skus count = %d, want 4", len(skus))
+	if len(result.Items) != 4 {
+		t.Errorf("skus count = %d, want 4", len(result.Items))
 	}
 }
 
@@ -351,5 +352,207 @@ func TestIntegration_GetBOM_SKUNotFound(t *testing.T) {
 	_, err := svc.GetBOM(context.Background(), uuid.New())
 	if !errors.Is(err, domain.ErrNotFound) {
 		t.Errorf("expected ErrNotFound for unknown SKU, got %v", err)
+	}
+}
+
+// ── ListMaterials pagination & search ─────────────────────────────────────────
+
+func TestIntegration_ListMaterials_Pagination_CorrectMetadata(t *testing.T) {
+	pool := getPool(t)
+	truncateCatalog(t)
+	svc := newSvc(pool)
+
+	// Seed 5 materials.
+	for i := range 5 {
+		_, err := svc.CreateMaterial(context.Background(), CreateMaterialInput{
+			Type: MaterialTypePlywood,
+			Name: fmt.Sprintf("PagMat-%02d", i),
+			Unit: "sheet",
+		})
+		if err != nil {
+			t.Fatalf("CreateMaterial[%d]: %v", i, err)
+		}
+	}
+
+	// Page 1, limit 2 → 3 pages total.
+	p1, err := svc.ListMaterials(context.Background(), httpkit.PageParams{Page: 1, Limit: 2})
+	if err != nil {
+		t.Fatalf("ListMaterials page 1: %v", err)
+	}
+	if p1.TotalItems != 5 {
+		t.Errorf("total_items = %d, want 5", p1.TotalItems)
+	}
+	if p1.TotalPages != 3 {
+		t.Errorf("total_pages = %d, want 3", p1.TotalPages)
+	}
+	if p1.CurrentPage != 1 {
+		t.Errorf("current_page = %d, want 1", p1.CurrentPage)
+	}
+	if len(p1.Items) != 2 {
+		t.Errorf("page-1 items = %d, want 2", len(p1.Items))
+	}
+
+	// Last page (3) should have 1 item.
+	p3, err := svc.ListMaterials(context.Background(), httpkit.PageParams{Page: 3, Limit: 2})
+	if err != nil {
+		t.Fatalf("ListMaterials page 3: %v", err)
+	}
+	if p3.TotalPages != 3 {
+		t.Errorf("last page: total_pages = %d, want 3", p3.TotalPages)
+	}
+	if len(p3.Items) != 1 {
+		t.Errorf("last-page items = %d, want 1", len(p3.Items))
+	}
+}
+
+func TestIntegration_ListMaterials_Search_MatchesSubstring(t *testing.T) {
+	pool := getPool(t)
+	truncateCatalog(t)
+	svc := newSvc(pool)
+
+	svc.CreateMaterial(context.Background(), CreateMaterialInput{Type: MaterialTypePlywood, Name: "Oak Plywood", Unit: "sheet"})
+	svc.CreateMaterial(context.Background(), CreateMaterialInput{Type: MaterialTypeGlue, Name: "Wood Glue", Unit: "kg"})
+	svc.CreateMaterial(context.Background(), CreateMaterialInput{Type: MaterialTypeMetal, Name: "Steel Bar", Unit: "kg"})
+
+	result, err := svc.ListMaterials(context.Background(), httpkit.PageParams{Page: 1, Limit: 10, Search: "plywood"})
+	if err != nil {
+		t.Fatalf("ListMaterials search: %v", err)
+	}
+	if result.TotalItems != 1 {
+		t.Errorf("total_items = %d, want 1 (ILIKE 'plywood')", result.TotalItems)
+	}
+	if len(result.Items) != 1 {
+		t.Fatalf("items = %d, want 1", len(result.Items))
+	}
+	if result.Items[0].Name != "Oak Plywood" {
+		t.Errorf("matched material = %q, want 'Oak Plywood'", result.Items[0].Name)
+	}
+}
+
+func TestIntegration_ListMaterials_Search_NoResults(t *testing.T) {
+	pool := getPool(t)
+	truncateCatalog(t)
+	svc := newSvc(pool)
+
+	svc.CreateMaterial(context.Background(), CreateMaterialInput{Type: MaterialTypePlywood, Name: "Cedar", Unit: "sheet"})
+
+	result, err := svc.ListMaterials(context.Background(), httpkit.PageParams{Page: 1, Limit: 10, Search: "absolutely-not-there"})
+	if err != nil {
+		t.Fatalf("ListMaterials no-match search: %v", err)
+	}
+	if result.TotalItems != 0 {
+		t.Errorf("total_items = %d, want 0", result.TotalItems)
+	}
+	if len(result.Items) != 0 {
+		t.Errorf("items = %d, want 0", len(result.Items))
+	}
+	if result.TotalPages < 1 {
+		t.Errorf("total_pages = %d, want at least 1", result.TotalPages)
+	}
+}
+
+// ── ListSKUs pagination & search ──────────────────────────────────────────────
+
+func TestIntegration_ListSKUs_Pagination_CorrectMetadata(t *testing.T) {
+	pool := getPool(t)
+	truncateCatalog(t)
+	svc := newSvc(pool)
+
+	for i := range 7 {
+		_, err := svc.CreateSKU(context.Background(), CreateSKUInput{
+			Code:       fmt.Sprintf("PAG-SKU-%02d", i),
+			Name:       fmt.Sprintf("Paged Panel %02d", i),
+			Dimensions: domain.Dimension{LengthMM: 1000, WidthMM: 500},
+		})
+		if err != nil {
+			t.Fatalf("CreateSKU[%d]: %v", i, err)
+		}
+	}
+
+	// Page 2, limit 3 → 3 pages total; page 2 has 3 items.
+	p2, err := svc.ListSKUs(context.Background(), httpkit.PageParams{Page: 2, Limit: 3})
+	if err != nil {
+		t.Fatalf("ListSKUs page 2: %v", err)
+	}
+	if p2.TotalItems != 7 {
+		t.Errorf("total_items = %d, want 7", p2.TotalItems)
+	}
+	if p2.TotalPages != 3 {
+		t.Errorf("total_pages = %d, want 3", p2.TotalPages)
+	}
+	if p2.CurrentPage != 2 {
+		t.Errorf("current_page = %d, want 2", p2.CurrentPage)
+	}
+	if len(p2.Items) != 3 {
+		t.Errorf("page-2 items = %d, want 3", len(p2.Items))
+	}
+
+	// Last page (3) has 1 item.
+	p3, err := svc.ListSKUs(context.Background(), httpkit.PageParams{Page: 3, Limit: 3})
+	if err != nil {
+		t.Fatalf("ListSKUs page 3: %v", err)
+	}
+	if len(p3.Items) != 1 {
+		t.Errorf("last-page items = %d, want 1", len(p3.Items))
+	}
+}
+
+func TestIntegration_ListSKUs_SearchByCode(t *testing.T) {
+	pool := getPool(t)
+	truncateCatalog(t)
+	svc := newSvc(pool)
+
+	svc.CreateSKU(context.Background(), CreateSKUInput{Code: "CHAIR-001", Name: "Side Chair", Dimensions: domain.Dimension{LengthMM: 500, WidthMM: 500}})
+	svc.CreateSKU(context.Background(), CreateSKUInput{Code: "TABLE-001", Name: "Dining Table", Dimensions: domain.Dimension{LengthMM: 1500, WidthMM: 900}})
+	svc.CreateSKU(context.Background(), CreateSKUInput{Code: "SHELF-001", Name: "Wall Shelf", Dimensions: domain.Dimension{LengthMM: 800, WidthMM: 300}})
+
+	result, err := svc.ListSKUs(context.Background(), httpkit.PageParams{Page: 1, Limit: 10, Search: "chair"})
+	if err != nil {
+		t.Fatalf("ListSKUs search by code: %v", err)
+	}
+	if result.TotalItems != 1 {
+		t.Errorf("total_items = %d, want 1 (ILIKE 'chair' on code or name)", result.TotalItems)
+	}
+}
+
+func TestIntegration_ListSKUs_SearchByName(t *testing.T) {
+	pool := getPool(t)
+	truncateCatalog(t)
+	svc := newSvc(pool)
+
+	svc.CreateSKU(context.Background(), CreateSKUInput{Code: "ITEM-A", Name: "Wardrobe Panel", Dimensions: domain.Dimension{LengthMM: 2000, WidthMM: 600}})
+	svc.CreateSKU(context.Background(), CreateSKUInput{Code: "ITEM-B", Name: "Bed Frame", Dimensions: domain.Dimension{LengthMM: 2100, WidthMM: 1600}})
+
+	result, err := svc.ListSKUs(context.Background(), httpkit.PageParams{Page: 1, Limit: 10, Search: "wardrobe"})
+	if err != nil {
+		t.Fatalf("ListSKUs search by name: %v", err)
+	}
+	if result.TotalItems != 1 {
+		t.Errorf("total_items = %d, want 1 (ILIKE 'wardrobe' on name)", result.TotalItems)
+	}
+	if result.Items[0].Name != "Wardrobe Panel" {
+		t.Errorf("matched sku name = %q, want 'Wardrobe Panel'", result.Items[0].Name)
+	}
+}
+
+func TestIntegration_ListSKUs_Search_NoResults(t *testing.T) {
+	pool := getPool(t)
+	truncateCatalog(t)
+	svc := newSvc(pool)
+
+	svc.CreateSKU(context.Background(), CreateSKUInput{Code: "EXISTS", Name: "Existing Panel", Dimensions: domain.Dimension{LengthMM: 1200, WidthMM: 600}})
+
+	result, err := svc.ListSKUs(context.Background(), httpkit.PageParams{Page: 1, Limit: 10, Search: "ZZZZZ-NO-MATCH"})
+	if err != nil {
+		t.Fatalf("ListSKUs no-match search: %v", err)
+	}
+	if result.TotalItems != 0 {
+		t.Errorf("total_items = %d, want 0", result.TotalItems)
+	}
+	if len(result.Items) != 0 {
+		t.Errorf("items = %d, want 0", len(result.Items))
+	}
+	if result.TotalPages < 1 {
+		t.Errorf("total_pages = %d, want at least 1", result.TotalPages)
 	}
 }

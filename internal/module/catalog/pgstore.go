@@ -3,11 +3,13 @@ package catalog
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/vmarble/warehouse-management-service/internal/domain"
+	"github.com/vmarble/warehouse-management-service/internal/platform/httpkit"
 )
 
 type pgStore struct {
@@ -45,6 +47,57 @@ func (s *pgStore) selectMaterials(ctx context.Context) ([]Material, error) {
 		out = append(out, m)
 	}
 	return out, rows.Err()
+}
+
+// selectMaterialsPaged returns a page of materials optionally filtered by a
+// case-insensitive keyword match on the name column.
+// It returns (items, totalMatchingItems, error).
+func (s *pgStore) selectMaterialsPaged(ctx context.Context, p httpkit.PageParams) ([]Material, int, error) {
+	search := "%" + p.Search + "%"
+
+	// Allow only known safe column names to avoid SQL injection via sort_by.
+	sortCol := "created_at"
+	switch p.SortBy {
+	case "name", "type", "unit":
+		sortCol = p.SortBy
+	}
+	orderDir := "ASC"
+	if p.Order == "desc" {
+		orderDir = "DESC"
+	}
+
+	var total int
+	err := s.pool.QueryRow(ctx,
+		`SELECT COUNT(*) FROM materials WHERE name ILIKE $1`,
+		search,
+	).Scan(&total)
+	if err != nil {
+		return nil, 0, fmt.Errorf("count materials: %w", err)
+	}
+
+	query := fmt.Sprintf(
+		`SELECT id, type, name, unit, created_at
+		 FROM materials
+		 WHERE name ILIKE $1
+		 ORDER BY %s %s
+		 LIMIT $2 OFFSET $3`,
+		sortCol, orderDir,
+	)
+	rows, err := s.pool.Query(ctx, query, search, p.Limit, p.Offset())
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+
+	var out []Material
+	for rows.Next() {
+		var m Material
+		if err := rows.Scan(&m.ID, &m.Type, &m.Name, &m.Unit, &m.CreatedAt); err != nil {
+			return nil, 0, err
+		}
+		out = append(out, m)
+	}
+	return out, total, rows.Err()
 }
 
 func (s *pgStore) selectMaterialByID(ctx context.Context, id uuid.UUID) (Material, error) {
@@ -92,6 +145,59 @@ func (s *pgStore) selectSKUs(ctx context.Context) ([]SKU, error) {
 		out = append(out, s)
 	}
 	return out, rows.Err()
+}
+
+// selectSKUsPaged returns a page of SKUs optionally filtered by a
+// case-insensitive keyword match on the name or code columns.
+// It returns (items, totalMatchingItems, error).
+func (s *pgStore) selectSKUsPaged(ctx context.Context, p httpkit.PageParams) ([]SKU, int, error) {
+	search := "%" + p.Search + "%"
+
+	// Allow only known safe column names to avoid SQL injection via sort_by.
+	sortCol := "created_at"
+	switch p.SortBy {
+	case "name", "code":
+		sortCol = p.SortBy
+	}
+	orderDir := "ASC"
+	if p.Order == "desc" {
+		orderDir = "DESC"
+	}
+
+	var total int
+	err := s.pool.QueryRow(ctx,
+		`SELECT COUNT(*) FROM skus WHERE name ILIKE $1 OR code ILIKE $1`,
+		search,
+	).Scan(&total)
+	if err != nil {
+		return nil, 0, fmt.Errorf("count skus: %w", err)
+	}
+
+	query := fmt.Sprintf(
+		`SELECT id, code, name, length_mm, width_mm, requires_metal, created_at
+		 FROM skus
+		 WHERE name ILIKE $1 OR code ILIKE $1
+		 ORDER BY %s %s
+		 LIMIT $2 OFFSET $3`,
+		sortCol, orderDir,
+	)
+	rows, err := s.pool.Query(ctx, query, search, p.Limit, p.Offset())
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+
+	var out []SKU
+	for rows.Next() {
+		var sku SKU
+		if err := rows.Scan(&sku.ID, &sku.Code, &sku.Name,
+			&sku.Dimensions.LengthMM, &sku.Dimensions.WidthMM,
+			&sku.RequiresMetal, &sku.CreatedAt); err != nil {
+			return nil, 0, err
+		}
+		out = append(out, sku)
+	}
+	return out, total, rows.Err()
 }
 
 func (s *pgStore) selectSKUByID(ctx context.Context, id uuid.UUID) (SKU, error) {

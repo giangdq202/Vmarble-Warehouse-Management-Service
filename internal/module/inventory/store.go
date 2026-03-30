@@ -6,15 +6,18 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/vmarble/warehouse-management-service/internal/domain"
+	"github.com/vmarble/warehouse-management-service/internal/platform/httpkit"
 )
 
 type store interface {
 	insertLot(ctx context.Context, lot InventoryLot) error
 	selectLots(ctx context.Context) ([]InventoryLot, error)
+	selectLotsPaged(ctx context.Context, p httpkit.PageParams) ([]InventoryLot, int, error)
 
 	insertSheets(ctx context.Context, sheets []BoardSheet) error
 	selectSheetByID(ctx context.Context, id uuid.UUID) (BoardSheet, error)
 	selectAvailableSheets(ctx context.Context) ([]BoardSheet, error)
+	selectAvailableSheetsPaged(ctx context.Context, p httpkit.PageParams) ([]BoardSheet, int, error)
 	updateSheetStatus(ctx context.Context, id uuid.UUID, status string, issuedToWO *uuid.UUID) error
 
 	insertCuttingRecord(ctx context.Context, cr CuttingRecord) error

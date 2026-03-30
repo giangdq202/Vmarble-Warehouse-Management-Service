@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/vmarble/warehouse-management-service/internal/domain"
+	"github.com/vmarble/warehouse-management-service/internal/platform/httpkit"
 )
 
 type service struct {
@@ -50,8 +51,12 @@ func (s *service) CreateMaterial(ctx context.Context, in CreateMaterialInput) (M
 	return m, nil
 }
 
-func (s *service) ListMaterials(ctx context.Context) ([]Material, error) {
-	return s.st.selectMaterials(ctx)
+func (s *service) ListMaterials(ctx context.Context, p httpkit.PageParams) (httpkit.PagedResult[Material], error) {
+	items, total, err := s.st.selectMaterialsPaged(ctx, p)
+	if err != nil {
+		return httpkit.PagedResult[Material]{}, err
+	}
+	return httpkit.NewPagedResult(items, total, p), nil
 }
 
 func (s *service) GetMaterial(ctx context.Context, materialID uuid.UUID) (Material, error) {
@@ -80,8 +85,12 @@ func (s *service) CreateSKU(ctx context.Context, in CreateSKUInput) (SKU, error)
 	return sku, nil
 }
 
-func (s *service) ListSKUs(ctx context.Context) ([]SKU, error) {
-	return s.st.selectSKUs(ctx)
+func (s *service) ListSKUs(ctx context.Context, p httpkit.PageParams) (httpkit.PagedResult[SKU], error) {
+	items, total, err := s.st.selectSKUsPaged(ctx, p)
+	if err != nil {
+		return httpkit.PagedResult[SKU]{}, err
+	}
+	return httpkit.NewPagedResult(items, total, p), nil
 }
 
 func (s *service) GetSKU(ctx context.Context, skuID uuid.UUID) (SKU, error) {

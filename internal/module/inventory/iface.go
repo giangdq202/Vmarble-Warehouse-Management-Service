@@ -6,6 +6,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/vmarble/warehouse-management-service/internal/domain"
+	"github.com/vmarble/warehouse-management-service/internal/platform/httpkit"
 )
 
 type ReceiveStockInput struct {
@@ -60,10 +61,10 @@ type Remnant struct {
 
 type Service interface {
 	ReceiveStock(ctx context.Context, in ReceiveStockInput) (InventoryLot, error)
-	ListLots(ctx context.Context) ([]InventoryLot, error)
+	ListLots(ctx context.Context, p httpkit.PageParams) (httpkit.PagedResult[InventoryLot], error)
 
 	GetSheet(ctx context.Context, sheetID uuid.UUID) (BoardSheet, error)
-	ListAvailableSheets(ctx context.Context) ([]BoardSheet, error)
+	ListAvailableSheets(ctx context.Context, p httpkit.PageParams) (httpkit.PagedResult[BoardSheet], error)
 
 	RecordCut(ctx context.Context, in RecordCutInput) (CutResult, error)
 

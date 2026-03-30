@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/vmarble/warehouse-management-service/internal/domain"
+	"github.com/vmarble/warehouse-management-service/internal/platform/httpkit"
 )
 
 type pgStore struct {
@@ -50,6 +51,56 @@ func (s *pgStore) selectLots(ctx context.Context) ([]InventoryLot, error) {
 		lots = append(lots, l)
 	}
 	return lots, rows.Err()
+}
+
+// selectLotsPaged returns a page of inventory lots optionally filtered by a
+// case-insensitive keyword match on the supplier_ref column.
+// It returns (items, totalMatchingItems, error).
+func (s *pgStore) selectLotsPaged(ctx context.Context, p httpkit.PageParams) ([]InventoryLot, int, error) {
+	search := "%" + p.Search + "%"
+
+	sortCol := "received_at"
+	if p.SortBy == "supplier_ref" {
+		sortCol = "supplier_ref"
+	}
+	orderDir := "DESC"
+	if p.Order == "asc" {
+		orderDir = "ASC"
+	}
+
+	var total int
+	if err := s.pool.QueryRow(ctx,
+		`SELECT COUNT(*) FROM inventory_lots WHERE supplier_ref ILIKE $1`,
+		search,
+	).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("count inventory_lots: %w", err)
+	}
+
+	query := fmt.Sprintf(
+		`SELECT id, material_id, quantity, cost_per_sheet_amount, cost_per_sheet_currency, supplier_ref, received_at
+		 FROM inventory_lots
+		 WHERE supplier_ref ILIKE $1
+		 ORDER BY %s %s
+		 LIMIT $2 OFFSET $3`,
+		sortCol, orderDir,
+	)
+	rows, err := s.pool.Query(ctx, query, search, p.Limit, p.Offset())
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+
+	var lots []InventoryLot
+	for rows.Next() {
+		var l InventoryLot
+		if err := rows.Scan(&l.ID, &l.MaterialID, &l.Quantity,
+			&l.CostPerSheet.Amount, &l.CostPerSheet.Currency,
+			&l.SupplierRef, &l.ReceivedAt); err != nil {
+			return nil, 0, err
+		}
+		lots = append(lots, l)
+	}
+	return lots, total, rows.Err()
 }
 
 func (s *pgStore) insertSheets(ctx context.Context, sheets []BoardSheet) error {
@@ -108,6 +159,59 @@ func (s *pgStore) selectAvailableSheets(ctx context.Context) ([]BoardSheet, erro
 		sheets = append(sheets, sh)
 	}
 	return sheets, rows.Err()
+}
+
+// selectAvailableSheetsPaged returns a page of AVAILABLE board sheets,
+// with pagination support. Board sheets have no freeform text fields, so
+// search filters on the lot_id (exact UUID prefix match is not useful in
+// practice, but the field is provided for API consistency — an empty search
+// returns all available sheets).
+// It returns (items, totalMatchingItems, error).
+func (s *pgStore) selectAvailableSheetsPaged(ctx context.Context, p httpkit.PageParams) ([]BoardSheet, int, error) {
+	// Board sheets don't have a natural text field; we support sorting but not
+	// keyword search (search param is ignored — all available sheets match).
+	sortCol := "id"
+	if p.SortBy == "length_mm" || p.SortBy == "width_mm" {
+		sortCol = p.SortBy
+	}
+	orderDir := "ASC"
+	if p.Order == "desc" {
+		orderDir = "DESC"
+	}
+
+	var total int
+	if err := s.pool.QueryRow(ctx,
+		`SELECT COUNT(*) FROM board_sheets WHERE status = 'AVAILABLE'`,
+	).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("count board_sheets: %w", err)
+	}
+
+	query := fmt.Sprintf(
+		`SELECT id, lot_id, length_mm, width_mm, cost_amount, cost_currency, status, issued_to_wo_id
+		 FROM board_sheets
+		 WHERE status = 'AVAILABLE'
+		 ORDER BY %s %s
+		 LIMIT $1 OFFSET $2`,
+		sortCol, orderDir,
+	)
+	rows, err := s.pool.Query(ctx, query, p.Limit, p.Offset())
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+
+	var sheets []BoardSheet
+	for rows.Next() {
+		var sh BoardSheet
+		if err := rows.Scan(&sh.ID, &sh.LotID,
+			&sh.Dimensions.LengthMM, &sh.Dimensions.WidthMM,
+			&sh.CostPerSheet.Amount, &sh.CostPerSheet.Currency,
+			&sh.Status, &sh.IssuedToWorkOrderID); err != nil {
+			return nil, 0, err
+		}
+		sheets = append(sheets, sh)
+	}
+	return sheets, total, rows.Err()
 }
 
 func (s *pgStore) updateSheetStatus(ctx context.Context, id uuid.UUID, status string, issuedToWO *uuid.UUID) error {

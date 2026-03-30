@@ -54,19 +54,25 @@ func (h *Handler) createMaterial(c *gin.Context) {
 
 // listMaterials godoc
 //
-// @Summary      List materials
+// @Summary      List materials (paginated)
 // @Tags         catalog
 // @Produce      json
-// @Success      200  {array}   Material
+// @Param        page     query     int     false  "page number (default 1)"
+// @Param        limit    query     int     false  "items per page (default 10, max 100)"
+// @Param        search   query     string  false  "filter by name (case-insensitive)"
+// @Param        sort_by  query     string  false  "sort column: name|type|unit (default created_at)"
+// @Param        order    query     string  false  "asc or desc (default asc)"
+// @Success      200  {object}  httpkit.PagedResult[Material]
 // @Failure      500  {object}  map[string]string
 // @Router       /api/v1/materials [get]
 func (h *Handler) listMaterials(c *gin.Context) {
-	materials, err := h.svc.ListMaterials(c.Request.Context())
+	p := httpkit.BindPageParams(c)
+	result, err := h.svc.ListMaterials(c.Request.Context(), p)
 	if err != nil {
 		httpkit.Error(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, materials)
+	c.JSON(http.StatusOK, result)
 }
 
 // getMaterial godoc
@@ -118,19 +124,25 @@ func (h *Handler) createSKU(c *gin.Context) {
 
 // listSKUs godoc
 //
-// @Summary      List SKUs
+// @Summary      List SKUs (paginated)
 // @Tags         catalog
 // @Produce      json
-// @Success      200  {array}   SKU
+// @Param        page     query     int     false  "page number (default 1)"
+// @Param        limit    query     int     false  "items per page (default 10, max 100)"
+// @Param        search   query     string  false  "filter by name or code (case-insensitive)"
+// @Param        sort_by  query     string  false  "sort column: name|code (default created_at)"
+// @Param        order    query     string  false  "asc or desc (default asc)"
+// @Success      200  {object}  httpkit.PagedResult[SKU]
 // @Failure      500  {object}  map[string]string
 // @Router       /api/v1/skus [get]
 func (h *Handler) listSKUs(c *gin.Context) {
-	skus, err := h.svc.ListSKUs(c.Request.Context())
+	p := httpkit.BindPageParams(c)
+	result, err := h.svc.ListSKUs(c.Request.Context(), p)
 	if err != nil {
 		httpkit.Error(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, skus)
+	c.JSON(http.StatusOK, result)
 }
 
 // getSKU godoc
