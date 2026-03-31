@@ -89,6 +89,12 @@ func (s *service) RecordCut(ctx context.Context, in RecordCutInput) (CutResult, 
 	var parentBoardID uuid.UUID
 	var parentRemnantID *uuid.UUID
 
+	// Material attributes inherited by any new remnant produced by this cut.
+	var inheritSupplierCode *string
+	var inheritLotBatch *string
+	var inheritGrainPattern *string
+	var inheritQualityGrade *string
+
 	if in.SheetID != nil {
 		sheet, err := s.st.selectSheetByID(ctx, *in.SheetID)
 		if err != nil {
@@ -100,6 +106,10 @@ func (s *service) RecordCut(ctx context.Context, in RecordCutInput) (CutResult, 
 		sourceDim = sheet.Dimensions
 		parentBoardID = sheet.ID
 		parentRemnantID = nil
+		inheritSupplierCode = sheet.SupplierCode
+		inheritLotBatch = sheet.LotBatch
+		inheritGrainPattern = sheet.GrainPattern
+		inheritQualityGrade = sheet.QualityGrade
 	} else {
 		remnant, err := s.st.selectRemnantByID(ctx, *in.RemnantID)
 		if err != nil {
@@ -111,6 +121,10 @@ func (s *service) RecordCut(ctx context.Context, in RecordCutInput) (CutResult, 
 		sourceDim = remnant.Dimensions
 		parentBoardID = remnant.ParentBoardID
 		parentRemnantID = &remnant.ID
+		inheritSupplierCode = remnant.SupplierCode
+		inheritLotBatch = remnant.LotBatch
+		inheritGrainPattern = remnant.GrainPattern
+		inheritQualityGrade = remnant.QualityGrade
 	}
 
 	usedArea := in.UsedDimension.AreaSqMM()
@@ -161,6 +175,10 @@ func (s *service) RecordCut(ctx context.Context, in RecordCutInput) (CutResult, 
 			ParentRemnantID: parentRemnantID,
 			Dimensions:      *in.RemnantDimension,
 			Status:          domain.RemnantAvailable,
+			SupplierCode:    inheritSupplierCode,
+			LotBatch:        inheritLotBatch,
+			GrainPattern:    inheritGrainPattern,
+			QualityGrade:    inheritQualityGrade,
 			CreatedAt:       time.Now().UTC(),
 		}
 		op.NewRemnant = &newRemnant

@@ -169,6 +169,59 @@ func availableRemnant(id uuid.UUID, parentBoard uuid.UUID) Remnant {
 	}
 }
 
+// ── Inheritance helpers ──────────────────────────────────────────────────────
+
+func availableSheetWithAttrs(id uuid.UUID) BoardSheet {
+	sh := availableSheet(id)
+	sh.SupplierCode = ptr("SUP-VN-01")
+	sh.LotBatch = ptr("LOT-2026-03")
+	sh.GrainPattern = ptr("VERTICAL")
+	sh.QualityGrade = ptr("A")
+	return sh
+}
+
+func availableRemnantWithAttrs(id uuid.UUID, parentBoard uuid.UUID) Remnant {
+	r := availableRemnant(id, parentBoard)
+	r.SupplierCode = ptr("SUP-VN-02")
+	r.LotBatch = ptr("LOT-2026-04")
+	r.GrainPattern = ptr("HORIZONTAL")
+	r.QualityGrade = ptr("B")
+	return r
+}
+
+func assertMaterialAttrs(t *testing.T, r *Remnant, wantSC, wantLB, wantGP, wantQG *string) {
+	t.Helper()
+	if !strPtrEqual(r.SupplierCode, wantSC) {
+		t.Errorf("SupplierCode = %v, want %v", strPtrVal(r.SupplierCode), strPtrVal(wantSC))
+	}
+	if !strPtrEqual(r.LotBatch, wantLB) {
+		t.Errorf("LotBatch = %v, want %v", strPtrVal(r.LotBatch), strPtrVal(wantLB))
+	}
+	if !strPtrEqual(r.GrainPattern, wantGP) {
+		t.Errorf("GrainPattern = %v, want %v", strPtrVal(r.GrainPattern), strPtrVal(wantGP))
+	}
+	if !strPtrEqual(r.QualityGrade, wantQG) {
+		t.Errorf("QualityGrade = %v, want %v", strPtrVal(r.QualityGrade), strPtrVal(wantQG))
+	}
+}
+
+func strPtrEqual(a, b *string) bool {
+	if a == nil && b == nil {
+		return true
+	}
+	if a == nil || b == nil {
+		return false
+	}
+	return *a == *b
+}
+
+func strPtrVal(p *string) string {
+	if p == nil {
+		return "<nil>"
+	}
+	return *p
+}
+
 // ── TestRecordCut ─────────────────────────────────────────────────────────────
 
 func TestRecordCut_FromSheet_NoRemnant(t *testing.T) {
@@ -1535,4 +1588,113 @@ func TestListAvailableSheets_StoreError_Propagated(t *testing.T) {
 	if !errors.Is(err, storeErr) {
 		t.Errorf("got %v, want %v", err, storeErr)
 	}
+}
+
+// ── Issue 2.3: Material attribute inheritance ─────────────────────────────────
+
+func TestRecordCut_FromSheet_NewRemnant_InheritsSheetAttributes(t *testing.T) {
+	sheetID := uuid.New()
+	sheet := availableSheetWithAttrs(sheetID)
+	remnantDim := dim800x400
+
+	st := &mockStore{selectSheetByIDResult: sheet}
+	svc := NewService(st)
+
+	_, err := svc.RecordCut(context.Background(), RecordCutInput{
+		SheetID:          ptr(sheetID),
+		WorkOrderID:      uuid.New(),
+		SKUID:            uuid.New(),
+		UsedDimension:    dim1000x500,
+		RemnantDimension: &remnantDim,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	op := st.recordCutAtomicallyOp
+	if op.NewRemnant == nil {
+		t.Fatal("NewRemnant must be non-nil")
+	}
+	assertMaterialAttrs(t, op.NewRemnant,
+		sheet.SupplierCode, sheet.LotBatch, sheet.GrainPattern, sheet.QualityGrade)
+}
+
+func TestRecordCut_FromRemnant_NewRemnant_InheritsParentRemnantAttributes(t *testing.T) {
+	boardID := uuid.New()
+	parentRemID := uuid.New()
+	parentRemnant := availableRemnantWithAttrs(parentRemID, boardID)
+	nestedDim := dim100x100
+
+	st := &mockStore{selectRemnantByIDResult: parentRemnant}
+	svc := NewService(st)
+
+	_, err := svc.RecordCut(context.Background(), RecordCutInput{
+		RemnantID:        ptr(parentRemID),
+		WorkOrderID:      uuid.New(),
+		SKUID:            uuid.New(),
+		UsedDimension:    dim100x100,
+		RemnantDimension: &nestedDim,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	op := st.recordCutAtomicallyOp
+	if op.NewRemnant == nil {
+		t.Fatal("NewRemnant must be non-nil")
+	}
+	assertMaterialAttrs(t, op.NewRemnant,
+		parentRemnant.SupplierCode, parentRemnant.LotBatch, parentRemnant.GrainPattern, parentRemnant.QualityGrade)
+}
+
+func TestRecordCut_NoNewRemnant_NoInheritanceAttempted(t *testing.T) {
+	sheetID := uuid.New()
+	sheet := availableSheetWithAttrs(sheetID)
+
+	st := &mockStore{selectSheetByIDResult: sheet}
+	svc := NewService(st)
+
+	result, err := svc.RecordCut(context.Background(), RecordCutInput{
+		SheetID:       ptr(sheetID),
+		WorkOrderID:   uuid.New(),
+		SKUID:         uuid.New(),
+		UsedDimension: dim1000x500,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.RemnantID != nil {
+		t.Error("RemnantID must be nil when no remnant dimension given")
+	}
+
+	op := st.recordCutAtomicallyOp
+	if op.NewRemnant != nil {
+		t.Error("NewRemnant must be nil — no inheritance should occur")
+	}
+}
+
+func TestRecordCut_SourceWithNilAttributes_NewRemnantHasNilAttributes(t *testing.T) {
+	sheetID := uuid.New()
+	sheet := availableSheet(sheetID) // no material attrs set (all nil)
+	remnantDim := dim800x400
+
+	st := &mockStore{selectSheetByIDResult: sheet}
+	svc := NewService(st)
+
+	_, err := svc.RecordCut(context.Background(), RecordCutInput{
+		SheetID:          ptr(sheetID),
+		WorkOrderID:      uuid.New(),
+		SKUID:            uuid.New(),
+		UsedDimension:    dim1000x500,
+		RemnantDimension: &remnantDim,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	op := st.recordCutAtomicallyOp
+	if op.NewRemnant == nil {
+		t.Fatal("NewRemnant must be non-nil")
+	}
+	assertMaterialAttrs(t, op.NewRemnant, nil, nil, nil, nil)
 }
