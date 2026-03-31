@@ -1,2529 +1,2821 @@
 {
-    "swagger": "2.0",
-    "info": {
-        "description": "Backend API for warehouse \u0026 production management.",
-        "title": "VMARBLE Warehouse Management Service API",
-        "contact": {},
-        "version": "0.1.0"
-    },
-    "basePath": "/",
-    "paths": {
-        "/api/v1/barcodes": {
-            "post": {
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "barcode"
-                ],
-                "summary": "Generate barcode",
-                "parameters": [
-                    {
-                        "description": "payload",
-                        "name": "body",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/barcode.GenerateBarcodeInput"
-                        }
-                    }
-                ],
-                "responses": {
-                    "201": {
-                        "description": "Created",
-                        "schema": {
-                            "$ref": "#/definitions/barcode.Barcode"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    }
-                }
+  "swagger": "2.0",
+  "info": {
+    "description": "Backend API for warehouse & production management.",
+    "title": "VMARBLE Warehouse Management Service API",
+    "contact": {},
+    "version": "0.1.0"
+  },
+  "basePath": "/",
+  "paths": {
+    "/api/auth/login": {
+      "post": {
+        "description": "Authenticate with username + password and receive a Bearer token.",
+        "consumes": [
+          "application/json"
+        ],
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "auth"
+        ],
+        "summary": "Login",
+        "parameters": [
+          {
+            "description": "credentials",
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/authn.LoginInput"
             }
-        },
-        "/api/v1/barcodes/{id}": {
-            "get": {
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "barcode"
-                ],
-                "summary": "Lookup barcode",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "barcode id (uuid)",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/barcode.Barcode"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    }
-                }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "schema": {
+              "$ref": "#/definitions/authn.LoginResult"
             }
-        },
-        "/api/v1/barcodes/{id}/scans": {
-            "get": {
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "barcode"
-                ],
-                "summary": "List scan events",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "barcode id (uuid)",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "array",
-                            "items": {
-                                "$ref": "#/definitions/barcode.ScanEvent"
-                            }
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    }
-                }
-            },
-            "post": {
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "barcode"
-                ],
-                "summary": "Record scan event",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "barcode id (uuid)",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "description": "payload",
-                        "name": "body",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/barcode.RecordScanInput"
-                        }
-                    }
-                ],
-                "responses": {
-                    "201": {
-                        "description": "Created",
-                        "schema": {
-                            "$ref": "#/definitions/barcode.ScanEvent"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    },
-                    "409": {
-                        "description": "Conflict",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    }
-                }
+          },
+          "400": {
+            "description": "Bad Request",
+            "schema": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
             }
-        },
-        "/api/v1/costing": {
-            "get": {
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "costing"
-                ],
-                "summary": "List costing records",
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "array",
-                            "items": {
-                                "$ref": "#/definitions/costing.CostingRecord"
-                            }
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    }
-                }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "schema": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
             }
-        },
-        "/api/v1/costing/{workOrderID}": {
-            "get": {
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "costing"
-                ],
-                "summary": "Get costing record by work order",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "work order id (uuid)",
-                        "name": "workOrderID",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/costing.CostingRecord"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/costing/{workOrderID}/compute": {
-            "post": {
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "costing"
-                ],
-                "summary": "Compute costing for a work order",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "work order id (uuid)",
-                        "name": "workOrderID",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/costing.CostingRecord"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    },
-                    "409": {
-                        "description": "Conflict",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    },
-                    "422": {
-                        "description": "Unprocessable Entity",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/costing/{workOrderID}/finalize": {
-            "post": {
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "costing"
-                ],
-                "summary": "Finalize costing for a work order",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "work order id (uuid)",
-                        "name": "workOrderID",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    },
-                    "409": {
-                        "description": "Conflict",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/inventory/cuts": {
-            "post": {
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "inventory"
-                ],
-                "summary": "Record cutting operation",
-                "parameters": [
-                    {
-                        "description": "payload",
-                        "name": "body",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/inventory.RecordCutInput"
-                        }
-                    }
-                ],
-                "responses": {
-                    "201": {
-                        "description": "Created",
-                        "schema": {
-                            "$ref": "#/definitions/inventory.CutResult"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    },
-                    "422": {
-                        "description": "Unprocessable Entity",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/inventory/lots": {
-            "get": {
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "inventory"
-                ],
-                "summary": "List inventory lots",
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "array",
-                            "items": {
-                                "$ref": "#/definitions/inventory.InventoryLot"
-                            }
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    }
-                }
-            },
-            "post": {
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "inventory"
-                ],
-                "summary": "Receive stock (create inventory lot)",
-                "parameters": [
-                    {
-                        "description": "payload",
-                        "name": "body",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/inventory.ReceiveStockInput"
-                        }
-                    }
-                ],
-                "responses": {
-                    "201": {
-                        "description": "Created",
-                        "schema": {
-                            "$ref": "#/definitions/inventory.InventoryLot"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/inventory/remnants": {
-            "get": {
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "inventory"
-                ],
-                "summary": "Find available remnants",
-                "parameters": [
-                    {
-                        "type": "integer",
-                        "description": "min length (mm)",
-                        "name": "min_length_mm",
-                        "in": "query"
-                    },
-                    {
-                        "type": "integer",
-                        "description": "min width (mm)",
-                        "name": "min_width_mm",
-                        "in": "query"
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "array",
-                            "items": {
-                                "$ref": "#/definitions/inventory.Remnant"
-                            }
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/inventory/remnants/{id}/allocate": {
-            "post": {
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "inventory"
-                ],
-                "summary": "Allocate remnant to work order",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "remnant id (uuid)",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "description": "payload",
-                        "name": "body",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "type": "object"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    },
-                    "409": {
-                        "description": "Conflict",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/inventory/remnants/{id}/waste": {
-            "post": {
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "inventory"
-                ],
-                "summary": "Mark remnant as waste",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "remnant id (uuid)",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    },
-                    "409": {
-                        "description": "Conflict",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/inventory/sheets": {
-            "get": {
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "inventory"
-                ],
-                "summary": "List available board sheets",
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "array",
-                            "items": {
-                                "$ref": "#/definitions/inventory.BoardSheet"
-                            }
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/inventory/sheets/{id}": {
-            "get": {
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "inventory"
-                ],
-                "summary": "Get board sheet",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "sheet id (uuid)",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/inventory.BoardSheet"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/inventory/sheets/{id}/lineage": {
-            "get": {
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "inventory"
-                ],
-                "summary": "Get remnant lineage by sheet",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "sheet id (uuid)",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "array",
-                            "items": {
-                                "$ref": "#/definitions/inventory.Remnant"
-                            }
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/materials": {
-            "get": {
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "catalog"
-                ],
-                "summary": "List materials",
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "array",
-                            "items": {
-                                "$ref": "#/definitions/catalog.Material"
-                            }
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    }
-                }
-            },
-            "post": {
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "catalog"
-                ],
-                "summary": "Create material",
-                "parameters": [
-                    {
-                        "description": "payload",
-                        "name": "body",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/catalog.CreateMaterialInput"
-                        }
-                    }
-                ],
-                "responses": {
-                    "201": {
-                        "description": "Created",
-                        "schema": {
-                            "$ref": "#/definitions/catalog.Material"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/materials/{id}": {
-            "get": {
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "catalog"
-                ],
-                "summary": "Get material",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "material id (uuid)",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/catalog.Material"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/plans": {
-            "get": {
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "planning"
-                ],
-                "summary": "List production plans",
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "array",
-                            "items": {
-                                "$ref": "#/definitions/planning.Plan"
-                            }
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    }
-                }
-            },
-            "post": {
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "planning"
-                ],
-                "summary": "Create production plan",
-                "parameters": [
-                    {
-                        "description": "payload",
-                        "name": "body",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/planning.CreatePlanInput"
-                        }
-                    }
-                ],
-                "responses": {
-                    "201": {
-                        "description": "Created",
-                        "schema": {
-                            "$ref": "#/definitions/planning.Plan"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/plans/{id}": {
-            "get": {
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "planning"
-                ],
-                "summary": "Get production plan",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "plan id (uuid)",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/planning.Plan"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/plans/{id}/approve": {
-            "post": {
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "planning"
-                ],
-                "summary": "Approve production plan",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "plan id (uuid)",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    },
-                    "409": {
-                        "description": "Conflict",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/plans/{id}/cancel": {
-            "post": {
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "planning"
-                ],
-                "summary": "Cancel production plan",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "plan id (uuid)",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    },
-                    "409": {
-                        "description": "Conflict",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/pos": {
-            "get": {
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "order"
-                ],
-                "summary": "List POs",
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "array",
-                            "items": {
-                                "$ref": "#/definitions/order.PO"
-                            }
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    }
-                }
-            },
-            "post": {
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "order"
-                ],
-                "summary": "Create PO",
-                "parameters": [
-                    {
-                        "description": "payload",
-                        "name": "body",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/order.CreatePOInput"
-                        }
-                    }
-                ],
-                "responses": {
-                    "201": {
-                        "description": "Created",
-                        "schema": {
-                            "$ref": "#/definitions/order.PO"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/pos/{id}": {
-            "get": {
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "order"
-                ],
-                "summary": "Get PO",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "po id (uuid)",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/order.PO"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/pos/{id}/line-items": {
-            "get": {
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "order"
-                ],
-                "summary": "List PO line items",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "po id (uuid)",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "array",
-                            "items": {
-                                "$ref": "#/definitions/order.LineItem"
-                            }
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/skus": {
-            "get": {
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "catalog"
-                ],
-                "summary": "List SKUs",
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "array",
-                            "items": {
-                                "$ref": "#/definitions/catalog.SKU"
-                            }
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    }
-                }
-            },
-            "post": {
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "catalog"
-                ],
-                "summary": "Create SKU",
-                "parameters": [
-                    {
-                        "description": "payload",
-                        "name": "body",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/catalog.CreateSKUInput"
-                        }
-                    }
-                ],
-                "responses": {
-                    "201": {
-                        "description": "Created",
-                        "schema": {
-                            "$ref": "#/definitions/catalog.SKU"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/skus/{id}": {
-            "get": {
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "catalog"
-                ],
-                "summary": "Get SKU",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "sku id (uuid)",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/catalog.SKU"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/skus/{id}/bom": {
-            "get": {
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "catalog"
-                ],
-                "summary": "Get BOM for SKU",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "sku id (uuid)",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/catalog.BOM"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    }
-                }
-            },
-            "put": {
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "catalog"
-                ],
-                "summary": "Set BOM for SKU",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "sku id (uuid)",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "description": "payload",
-                        "name": "body",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/catalog.SetBOMInput"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/catalog.BOM"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/work-orders": {
-            "get": {
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "production"
-                ],
-                "summary": "List work orders",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "filter by plan id (uuid)",
-                        "name": "plan_id",
-                        "in": "query"
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "array",
-                            "items": {
-                                "$ref": "#/definitions/production.WorkOrder"
-                            }
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    }
-                }
-            },
-            "post": {
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "production"
-                ],
-                "summary": "Create work order",
-                "parameters": [
-                    {
-                        "description": "payload",
-                        "name": "body",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/production.CreateWOInput"
-                        }
-                    }
-                ],
-                "responses": {
-                    "201": {
-                        "description": "Created",
-                        "schema": {
-                            "$ref": "#/definitions/production.WorkOrder"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/work-orders/{id}": {
-            "get": {
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "production"
-                ],
-                "summary": "Get work order",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "work order id (uuid)",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/production.WorkOrder"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/work-orders/{id}/advance": {
-            "post": {
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "production"
-                ],
-                "summary": "Advance work order status",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "work order id (uuid)",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "description": "payload",
-                        "name": "body",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "type": "object"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    },
-                    "409": {
-                        "description": "Conflict",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/work-orders/{id}/consumptions": {
-            "get": {
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "production"
-                ],
-                "summary": "List consumption records for work order",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "work order id (uuid)",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "array",
-                            "items": {
-                                "$ref": "#/definitions/production.ConsumptionRecord"
-                            }
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    }
-                }
-            },
-            "post": {
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "production"
-                ],
-                "summary": "Record material consumption for work order",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "work order id (uuid)",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "description": "payload",
-                        "name": "body",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/production.RecordConsumptionInput"
-                        }
-                    }
-                ],
-                "responses": {
-                    "201": {
-                        "description": "Created",
-                        "schema": {
-                            "$ref": "#/definitions/production.ConsumptionRecord"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    },
-                    "422": {
-                        "description": "Unprocessable Entity",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    }
-                }
-            }
-        },
-        "/healthz": {
-            "get": {
-                "description": "Liveness probe",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "system"
-                ],
-                "summary": "Health check",
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    }
-                }
-            }
+          }
         }
+      }
     },
-    "definitions": {
-        "barcode.Barcode": {
-            "type": "object",
-            "properties": {
-                "created_at": {
-                    "type": "string"
-                },
-                "dimensions": {
-                    "type": "string"
-                },
-                "id": {
-                    "type": "string"
-                },
-                "po_id": {
-                    "type": "string"
-                },
-                "produced_date": {
-                    "type": "string"
-                },
-                "production_plan_id": {
-                    "type": "string"
-                },
-                "sku_code": {
-                    "type": "string"
-                },
-                "sku_id": {
-                    "type": "string"
-                },
-                "sku_name": {
-                    "type": "string"
-                },
-                "work_order_id": {
-                    "type": "string"
-                }
+    "/api/v1/barcodes": {
+      "post": {
+        "consumes": [
+          "application/json"
+        ],
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "barcode"
+        ],
+        "summary": "Generate barcode",
+        "parameters": [
+          {
+            "description": "payload",
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/barcode.GenerateBarcodeInput"
             }
-        },
-        "barcode.GenerateBarcodeInput": {
-            "type": "object",
-            "properties": {
-                "dimensions": {
-                    "type": "string"
-                },
-                "po_id": {
-                    "type": "string"
-                },
-                "produced_date": {
-                    "type": "string"
-                },
-                "production_plan_id": {
-                    "type": "string"
-                },
-                "sku_code": {
-                    "type": "string"
-                },
-                "sku_id": {
-                    "type": "string"
-                },
-                "sku_name": {
-                    "type": "string"
-                },
-                "work_order_id": {
-                    "type": "string"
-                }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Created",
+            "schema": {
+              "$ref": "#/definitions/barcode.Barcode"
             }
-        },
-        "barcode.RecordScanInput": {
-            "type": "object",
-            "properties": {
-                "barcode_id": {
-                    "type": "string"
-                },
-                "checkpoint": {
-                    "$ref": "#/definitions/barcode.ScanCheckpoint"
-                },
-                "scanned_by": {
-                    "type": "string"
-                }
+          },
+          "400": {
+            "description": "Bad Request",
+            "schema": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
             }
-        },
-        "barcode.ScanCheckpoint": {
-            "type": "string",
-            "enum": [
-                "CNC_COMPLETE",
-                "FINISHED_GOODS",
-                "SHIPPED"
-            ],
-            "x-enum-varnames": [
-                "CheckpointCNCComplete",
-                "CheckpointFinishedGoods",
-                "CheckpointShipped"
-            ]
-        },
-        "barcode.ScanEvent": {
-            "type": "object",
-            "properties": {
-                "barcode_id": {
-                    "type": "string"
-                },
-                "checkpoint": {
-                    "$ref": "#/definitions/barcode.ScanCheckpoint"
-                },
-                "id": {
-                    "type": "string"
-                },
-                "scanned_at": {
-                    "type": "string"
-                },
-                "scanned_by": {
-                    "type": "string"
-                }
-            }
-        },
-        "catalog.BOM": {
-            "type": "object",
-            "properties": {
-                "components": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/catalog.BOMComponent"
-                    }
-                },
-                "sku_id": {
-                    "type": "string"
-                }
-            }
-        },
-        "catalog.BOMComponent": {
-            "type": "object",
-            "properties": {
-                "material_id": {
-                    "type": "string"
-                },
-                "material_type": {
-                    "$ref": "#/definitions/catalog.MaterialType"
-                },
-                "quantity_per_unit": {
-                    "type": "number"
-                },
-                "unit": {
-                    "type": "string"
-                }
-            }
-        },
-        "catalog.CreateMaterialInput": {
-            "type": "object",
-            "properties": {
-                "name": {
-                    "type": "string"
-                },
-                "type": {
-                    "$ref": "#/definitions/catalog.MaterialType"
-                },
-                "unit": {
-                    "type": "string"
-                }
-            }
-        },
-        "catalog.CreateSKUInput": {
-            "type": "object",
-            "properties": {
-                "code": {
-                    "type": "string"
-                },
-                "dimensions": {
-                    "$ref": "#/definitions/domain.Dimension"
-                },
-                "name": {
-                    "type": "string"
-                },
-                "requires_metal": {
-                    "type": "boolean"
-                }
-            }
-        },
-        "catalog.Material": {
-            "type": "object",
-            "properties": {
-                "created_at": {
-                    "type": "string"
-                },
-                "id": {
-                    "type": "string"
-                },
-                "name": {
-                    "type": "string"
-                },
-                "type": {
-                    "$ref": "#/definitions/catalog.MaterialType"
-                },
-                "unit": {
-                    "type": "string"
-                }
-            }
-        },
-        "catalog.MaterialType": {
-            "type": "string",
-            "enum": [
-                "PLYWOOD",
-                "GLUE",
-                "METAL",
-                "OTHER"
-            ],
-            "x-enum-varnames": [
-                "MaterialTypePlywood",
-                "MaterialTypeGlue",
-                "MaterialTypeMetal",
-                "MaterialTypeOther"
-            ]
-        },
-        "catalog.SKU": {
-            "type": "object",
-            "properties": {
-                "code": {
-                    "type": "string"
-                },
-                "created_at": {
-                    "type": "string"
-                },
-                "dimensions": {
-                    "$ref": "#/definitions/domain.Dimension"
-                },
-                "id": {
-                    "type": "string"
-                },
-                "name": {
-                    "type": "string"
-                },
-                "requires_metal": {
-                    "type": "boolean"
-                }
-            }
-        },
-        "catalog.SetBOMInput": {
-            "type": "object",
-            "properties": {
-                "components": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/catalog.BOMComponent"
-                    }
-                },
-                "sku_id": {
-                    "type": "string"
-                }
-            }
-        },
-        "costing.CostingRecord": {
-            "type": "object",
-            "properties": {
-                "auxiliary_cost": {
-                    "$ref": "#/definitions/domain.Money"
-                },
-                "created_at": {
-                    "type": "string"
-                },
-                "finalized": {
-                    "type": "boolean"
-                },
-                "id": {
-                    "type": "string"
-                },
-                "material_cost": {
-                    "$ref": "#/definitions/domain.Money"
-                },
-                "sku_id": {
-                    "type": "string"
-                },
-                "total_cost": {
-                    "$ref": "#/definitions/domain.Money"
-                },
-                "work_order_id": {
-                    "type": "string"
-                }
-            }
-        },
-        "domain.Dimension": {
-            "type": "object",
-            "properties": {
-                "length_mm": {
-                    "type": "integer"
-                },
-                "width_mm": {
-                    "type": "integer"
-                }
-            }
-        },
-        "domain.Money": {
-            "type": "object",
-            "properties": {
-                "amount": {
-                    "type": "integer"
-                },
-                "currency": {
-                    "type": "string"
-                }
-            }
-        },
-        "domain.PlanStatus": {
-            "type": "string",
-            "enum": [
-                "DRAFT",
-                "APPROVED",
-                "CANCELED"
-            ],
-            "x-enum-varnames": [
-                "PlanDraft",
-                "PlanApproved",
-                "PlanCanceled"
-            ]
-        },
-        "domain.RemnantStatus": {
-            "type": "string",
-            "enum": [
-                "AVAILABLE",
-                "ALLOCATED",
-                "CONSUMED",
-                "WASTE"
-            ],
-            "x-enum-varnames": [
-                "RemnantAvailable",
-                "RemnantAllocated",
-                "RemnantConsumed",
-                "RemnantWaste"
-            ]
-        },
-        "domain.WorkOrderStatus": {
-            "type": "string",
-            "enum": [
-                "PLANNED",
-                "IN_CUTTING",
-                "IN_PROCESSING",
-                "COMPLETED",
-                "COSTED"
-            ],
-            "x-enum-varnames": [
-                "WOPlanned",
-                "WOInCutting",
-                "WOInProcessing",
-                "WOCompleted",
-                "WOCosted"
-            ]
-        },
-        "inventory.BoardSheet": {
-            "type": "object",
-            "properties": {
-                "cost_per_sheet": {
-                    "$ref": "#/definitions/domain.Money"
-                },
-                "dimensions": {
-                    "$ref": "#/definitions/domain.Dimension"
-                },
-                "id": {
-                    "type": "string"
-                },
-                "issued_to_work_order_id": {
-                    "type": "string"
-                },
-                "lot_id": {
-                    "type": "string"
-                },
-                "status": {
-                    "type": "string"
-                }
-            }
-        },
-        "inventory.CutResult": {
-            "type": "object",
-            "properties": {
-                "cutting_record_id": {
-                    "type": "string"
-                },
-                "remnant_id": {
-                    "type": "string"
-                }
-            }
-        },
-        "inventory.InventoryLot": {
-            "type": "object",
-            "properties": {
-                "cost_per_sheet": {
-                    "$ref": "#/definitions/domain.Money"
-                },
-                "id": {
-                    "type": "string"
-                },
-                "material_id": {
-                    "type": "string"
-                },
-                "quantity": {
-                    "type": "integer"
-                },
-                "received_at": {
-                    "type": "string"
-                },
-                "supplier_ref": {
-                    "type": "string"
-                }
-            }
-        },
-        "inventory.ReceiveStockInput": {
-            "type": "object",
-            "properties": {
-                "cost_per_sheet": {
-                    "$ref": "#/definitions/domain.Money"
-                },
-                "dimensions": {
-                    "$ref": "#/definitions/domain.Dimension"
-                },
-                "material_id": {
-                    "type": "string"
-                },
-                "quantity": {
-                    "type": "integer"
-                },
-                "supplier_ref": {
-                    "type": "string"
-                }
-            }
-        },
-        "inventory.RecordCutInput": {
-            "type": "object",
-            "properties": {
-                "remnant_dimension": {
-                    "$ref": "#/definitions/domain.Dimension"
-                },
-                "remnant_id": {
-                    "type": "string"
-                },
-                "sheet_id": {
-                    "type": "string"
-                },
-                "sku_id": {
-                    "type": "string"
-                },
-                "used_dimension": {
-                    "$ref": "#/definitions/domain.Dimension"
-                },
-                "work_order_id": {
-                    "type": "string"
-                }
-            }
-        },
-        "inventory.Remnant": {
-            "type": "object",
-            "properties": {
-                "allocated_to_wo": {
-                    "type": "string"
-                },
-                "created_at": {
-                    "type": "string"
-                },
-                "dimensions": {
-                    "$ref": "#/definitions/domain.Dimension"
-                },
-                "id": {
-                    "type": "string"
-                },
-                "parent_board_id": {
-                    "type": "string"
-                },
-                "parent_remnant_id": {
-                    "type": "string"
-                },
-                "status": {
-                    "$ref": "#/definitions/domain.RemnantStatus"
-                }
-            }
-        },
-        "order.CreateLineItemInput": {
-            "type": "object",
-            "properties": {
-                "quantity": {
-                    "type": "integer"
-                },
-                "selling_price": {
-                    "$ref": "#/definitions/domain.Money"
-                },
-                "sku_id": {
-                    "type": "string"
-                }
-            }
-        },
-        "order.CreatePOInput": {
-            "type": "object",
-            "properties": {
-                "code": {
-                    "type": "string"
-                },
-                "expected_delivery": {
-                    "type": "string"
-                },
-                "line_items": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/order.CreateLineItemInput"
-                    }
-                }
-            }
-        },
-        "order.LineItem": {
-            "type": "object",
-            "properties": {
-                "id": {
-                    "type": "string"
-                },
-                "po_id": {
-                    "type": "string"
-                },
-                "quantity": {
-                    "type": "integer"
-                },
-                "selling_price": {
-                    "$ref": "#/definitions/domain.Money"
-                },
-                "sku_id": {
-                    "type": "string"
-                }
-            }
-        },
-        "order.PO": {
-            "type": "object",
-            "properties": {
-                "code": {
-                    "type": "string"
-                },
-                "created_at": {
-                    "type": "string"
-                },
-                "expected_delivery": {
-                    "type": "string"
-                },
-                "id": {
-                    "type": "string"
-                },
-                "line_items": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/order.LineItem"
-                    }
-                }
-            }
-        },
-        "planning.CreatePlanInput": {
-            "type": "object",
-            "properties": {
-                "deadline": {
-                    "type": "string"
-                },
-                "items": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/planning.PlanItemInput"
-                    }
-                },
-                "po_id": {
-                    "type": "string"
-                }
-            }
-        },
-        "planning.Plan": {
-            "type": "object",
-            "properties": {
-                "created_at": {
-                    "type": "string"
-                },
-                "deadline": {
-                    "type": "string"
-                },
-                "id": {
-                    "type": "string"
-                },
-                "items": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/planning.PlanItem"
-                    }
-                },
-                "po_id": {
-                    "type": "string"
-                },
-                "status": {
-                    "$ref": "#/definitions/domain.PlanStatus"
-                }
-            }
-        },
-        "planning.PlanItem": {
-            "type": "object",
-            "properties": {
-                "id": {
-                    "type": "string"
-                },
-                "plan_id": {
-                    "type": "string"
-                },
-                "quantity": {
-                    "type": "integer"
-                },
-                "sku_id": {
-                    "type": "string"
-                }
-            }
-        },
-        "planning.PlanItemInput": {
-            "type": "object",
-            "properties": {
-                "quantity": {
-                    "type": "integer"
-                },
-                "sku_id": {
-                    "type": "string"
-                }
-            }
-        },
-        "production.ConsumptionRecord": {
-            "type": "object",
-            "properties": {
-                "created_at": {
-                    "type": "string"
-                },
-                "id": {
-                    "type": "string"
-                },
-                "material_id": {
-                    "type": "string"
-                },
-                "material_type": {
-                    "type": "string"
-                },
-                "quantity": {
-                    "type": "number"
-                },
-                "unit": {
-                    "type": "string"
-                },
-                "work_order_id": {
-                    "type": "string"
-                }
-            }
-        },
-        "production.CreateWOInput": {
-            "type": "object",
-            "properties": {
-                "plan_id": {
-                    "type": "string"
-                },
-                "quantity": {
-                    "type": "integer"
-                },
-                "sku_id": {
-                    "type": "string"
-                }
-            }
-        },
-        "production.RecordConsumptionInput": {
-            "type": "object",
-            "properties": {
-                "material_id": {
-                    "type": "string"
-                },
-                "material_type": {
-                    "type": "string"
-                },
-                "quantity": {
-                    "type": "number"
-                },
-                "unit": {
-                    "type": "string"
-                },
-                "work_order_id": {
-                    "type": "string"
-                }
-            }
-        },
-        "production.WorkOrder": {
-            "type": "object",
-            "properties": {
-                "created_at": {
-                    "type": "string"
-                },
-                "id": {
-                    "type": "string"
-                },
-                "plan_id": {
-                    "type": "string"
-                },
-                "quantity": {
-                    "type": "integer"
-                },
-                "sku_id": {
-                    "type": "string"
-                },
-                "status": {
-                    "$ref": "#/definitions/domain.WorkOrderStatus"
-                }
-            }
+          }
         }
+      }
+    },
+    "/api/v1/barcodes/{id}": {
+      "get": {
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "barcode"
+        ],
+        "summary": "Lookup barcode",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "barcode id (uuid)",
+            "name": "id",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "schema": {
+              "$ref": "#/definitions/barcode.Barcode"
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "schema": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "schema": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/barcodes/{id}/scans": {
+      "get": {
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "barcode"
+        ],
+        "summary": "List scan events",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "barcode id (uuid)",
+            "name": "id",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "schema": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/barcode.ScanEvent"
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "schema": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "schema": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "consumes": [
+          "application/json"
+        ],
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "barcode"
+        ],
+        "summary": "Record scan event",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "barcode id (uuid)",
+            "name": "id",
+            "in": "path",
+            "required": true
+          },
+          {
+            "description": "payload",
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/barcode.RecordScanInput"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Created",
+            "schema": {
+              "$ref": "#/definitions/barcode.ScanEvent"
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "schema": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "schema": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/costing": {
+      "get": {
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "costing"
+        ],
+        "summary": "List costing records",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "schema": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/costing.CostingRecord"
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "schema": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/costing/{workOrderID}": {
+      "get": {
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "costing"
+        ],
+        "summary": "Get costing record by work order",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "work order id (uuid)",
+            "name": "workOrderID",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "schema": {
+              "$ref": "#/definitions/costing.CostingRecord"
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "schema": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "schema": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/costing/{workOrderID}/compute": {
+      "post": {
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "costing"
+        ],
+        "summary": "Compute costing for a work order",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "work order id (uuid)",
+            "name": "workOrderID",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "schema": {
+              "$ref": "#/definitions/costing.CostingRecord"
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "schema": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "schema": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          },
+          "422": {
+            "description": "Unprocessable Entity",
+            "schema": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/costing/{workOrderID}/finalize": {
+      "post": {
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "costing"
+        ],
+        "summary": "Finalize costing for a work order",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "work order id (uuid)",
+            "name": "workOrderID",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "schema": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "schema": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "schema": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/inventory/cuts": {
+      "post": {
+        "consumes": [
+          "application/json"
+        ],
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "inventory"
+        ],
+        "summary": "Record cutting operation",
+        "parameters": [
+          {
+            "description": "payload",
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/inventory.RecordCutInput"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Created",
+            "schema": {
+              "$ref": "#/definitions/inventory.CutResult"
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "schema": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          },
+          "422": {
+            "description": "Unprocessable Entity",
+            "schema": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/inventory/lots": {
+      "get": {
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "inventory"
+        ],
+        "summary": "List inventory lots (paginated)",
+        "parameters": [
+          {
+            "type": "integer",
+            "description": "page number (default 1)",
+            "name": "page",
+            "in": "query"
+          },
+          {
+            "type": "integer",
+            "description": "items per page (default 10, max 100)",
+            "name": "limit",
+            "in": "query"
+          },
+          {
+            "type": "string",
+            "description": "filter by supplier_ref (case-insensitive)",
+            "name": "search",
+            "in": "query"
+          },
+          {
+            "type": "string",
+            "description": "sort column: supplier_ref (default received_at)",
+            "name": "sort_by",
+            "in": "query"
+          },
+          {
+            "type": "string",
+            "description": "asc or desc (default desc)",
+            "name": "order",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "schema": {
+              "$ref": "#/definitions/httpkit.PagedResult-inventory_InventoryLot"
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "schema": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "consumes": [
+          "application/json"
+        ],
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "inventory"
+        ],
+        "summary": "Receive stock (create inventory lot)",
+        "parameters": [
+          {
+            "description": "payload",
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/inventory.ReceiveStockInput"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Created",
+            "schema": {
+              "$ref": "#/definitions/inventory.InventoryLot"
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "schema": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/inventory/remnants": {
+      "get": {
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "inventory"
+        ],
+        "summary": "Find available remnants",
+        "parameters": [
+          {
+            "type": "integer",
+            "description": "min length (mm)",
+            "name": "min_length_mm",
+            "in": "query"
+          },
+          {
+            "type": "integer",
+            "description": "min width (mm)",
+            "name": "min_width_mm",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "schema": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/inventory.Remnant"
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "schema": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/inventory/remnants/{id}/allocate": {
+      "post": {
+        "consumes": [
+          "application/json"
+        ],
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "inventory"
+        ],
+        "summary": "Allocate remnant to work order",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "remnant id (uuid)",
+            "name": "id",
+            "in": "path",
+            "required": true
+          },
+          {
+            "description": "payload",
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "type": "object"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "schema": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "schema": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "schema": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/inventory/remnants/{id}/waste": {
+      "post": {
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "inventory"
+        ],
+        "summary": "Mark remnant as waste",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "remnant id (uuid)",
+            "name": "id",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "schema": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "schema": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "schema": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/inventory/sheets": {
+      "get": {
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "inventory"
+        ],
+        "summary": "List available board sheets (paginated)",
+        "parameters": [
+          {
+            "type": "integer",
+            "description": "page number (default 1)",
+            "name": "page",
+            "in": "query"
+          },
+          {
+            "type": "integer",
+            "description": "items per page (default 10, max 100)",
+            "name": "limit",
+            "in": "query"
+          },
+          {
+            "type": "string",
+            "description": "sort column: length_mm|width_mm (default id)",
+            "name": "sort_by",
+            "in": "query"
+          },
+          {
+            "type": "string",
+            "description": "asc or desc (default asc)",
+            "name": "order",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "schema": {
+              "$ref": "#/definitions/httpkit.PagedResult-inventory_BoardSheet"
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "schema": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/inventory/sheets/{id}": {
+      "get": {
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "inventory"
+        ],
+        "summary": "Get board sheet",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "sheet id (uuid)",
+            "name": "id",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "schema": {
+              "$ref": "#/definitions/inventory.BoardSheet"
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "schema": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "schema": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/inventory/sheets/{id}/lineage": {
+      "get": {
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "inventory"
+        ],
+        "summary": "Get remnant lineage by sheet",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "sheet id (uuid)",
+            "name": "id",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "schema": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/inventory.Remnant"
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "schema": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "schema": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/materials": {
+      "get": {
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "catalog"
+        ],
+        "summary": "List materials (paginated)",
+        "parameters": [
+          {
+            "type": "integer",
+            "description": "page number (default 1)",
+            "name": "page",
+            "in": "query"
+          },
+          {
+            "type": "integer",
+            "description": "items per page (default 10, max 100)",
+            "name": "limit",
+            "in": "query"
+          },
+          {
+            "type": "string",
+            "description": "filter by name (case-insensitive)",
+            "name": "search",
+            "in": "query"
+          },
+          {
+            "type": "string",
+            "description": "sort column: name|type|unit (default created_at)",
+            "name": "sort_by",
+            "in": "query"
+          },
+          {
+            "type": "string",
+            "description": "asc or desc (default asc)",
+            "name": "order",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "schema": {
+              "$ref": "#/definitions/httpkit.PagedResult-catalog_Material"
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "schema": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "consumes": [
+          "application/json"
+        ],
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "catalog"
+        ],
+        "summary": "Create material",
+        "parameters": [
+          {
+            "description": "payload",
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/catalog.CreateMaterialInput"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Created",
+            "schema": {
+              "$ref": "#/definitions/catalog.Material"
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "schema": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/materials/{id}": {
+      "get": {
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "catalog"
+        ],
+        "summary": "Get material",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "material id (uuid)",
+            "name": "id",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "schema": {
+              "$ref": "#/definitions/catalog.Material"
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "schema": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "schema": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/plans": {
+      "get": {
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "planning"
+        ],
+        "summary": "List production plans",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "schema": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/planning.Plan"
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "schema": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "consumes": [
+          "application/json"
+        ],
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "planning"
+        ],
+        "summary": "Create production plan",
+        "parameters": [
+          {
+            "description": "payload",
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/planning.CreatePlanInput"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Created",
+            "schema": {
+              "$ref": "#/definitions/planning.Plan"
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "schema": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/plans/{id}": {
+      "get": {
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "planning"
+        ],
+        "summary": "Get production plan",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "plan id (uuid)",
+            "name": "id",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "schema": {
+              "$ref": "#/definitions/planning.Plan"
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "schema": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "schema": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/plans/{id}/approve": {
+      "post": {
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "planning"
+        ],
+        "summary": "Approve production plan",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "plan id (uuid)",
+            "name": "id",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "schema": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "schema": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "schema": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/plans/{id}/cancel": {
+      "post": {
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "planning"
+        ],
+        "summary": "Cancel production plan",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "plan id (uuid)",
+            "name": "id",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "schema": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "schema": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "schema": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/pos": {
+      "get": {
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "order"
+        ],
+        "summary": "List POs",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "schema": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/order.PO"
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "schema": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "consumes": [
+          "application/json"
+        ],
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "order"
+        ],
+        "summary": "Create PO",
+        "parameters": [
+          {
+            "description": "payload",
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/order.CreatePOInput"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Created",
+            "schema": {
+              "$ref": "#/definitions/order.PO"
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "schema": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/pos/{id}": {
+      "get": {
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "order"
+        ],
+        "summary": "Get PO",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "po id (uuid)",
+            "name": "id",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "schema": {
+              "$ref": "#/definitions/order.PO"
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "schema": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "schema": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/pos/{id}/line-items": {
+      "get": {
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "order"
+        ],
+        "summary": "List PO line items",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "po id (uuid)",
+            "name": "id",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "schema": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/order.LineItem"
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "schema": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "schema": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/skus": {
+      "get": {
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "catalog"
+        ],
+        "summary": "List SKUs (paginated)",
+        "parameters": [
+          {
+            "type": "integer",
+            "description": "page number (default 1)",
+            "name": "page",
+            "in": "query"
+          },
+          {
+            "type": "integer",
+            "description": "items per page (default 10, max 100)",
+            "name": "limit",
+            "in": "query"
+          },
+          {
+            "type": "string",
+            "description": "filter by name or code (case-insensitive)",
+            "name": "search",
+            "in": "query"
+          },
+          {
+            "type": "string",
+            "description": "sort column: name|code (default created_at)",
+            "name": "sort_by",
+            "in": "query"
+          },
+          {
+            "type": "string",
+            "description": "asc or desc (default asc)",
+            "name": "order",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "schema": {
+              "$ref": "#/definitions/httpkit.PagedResult-catalog_SKU"
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "schema": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "consumes": [
+          "application/json"
+        ],
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "catalog"
+        ],
+        "summary": "Create SKU",
+        "parameters": [
+          {
+            "description": "payload",
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/catalog.CreateSKUInput"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Created",
+            "schema": {
+              "$ref": "#/definitions/catalog.SKU"
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "schema": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/skus/{id}": {
+      "get": {
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "catalog"
+        ],
+        "summary": "Get SKU",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "sku id (uuid)",
+            "name": "id",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "schema": {
+              "$ref": "#/definitions/catalog.SKU"
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "schema": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "schema": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/skus/{id}/bom": {
+      "get": {
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "catalog"
+        ],
+        "summary": "Get BOM for SKU",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "sku id (uuid)",
+            "name": "id",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "schema": {
+              "$ref": "#/definitions/catalog.BOM"
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "schema": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "schema": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "consumes": [
+          "application/json"
+        ],
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "catalog"
+        ],
+        "summary": "Set BOM for SKU",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "sku id (uuid)",
+            "name": "id",
+            "in": "path",
+            "required": true
+          },
+          {
+            "description": "payload",
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/catalog.SetBOMInput"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "schema": {
+              "$ref": "#/definitions/catalog.BOM"
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "schema": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "schema": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/work-orders": {
+      "get": {
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "production"
+        ],
+        "summary": "List work orders",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "filter by plan id (uuid)",
+            "name": "plan_id",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "schema": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/production.WorkOrder"
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "schema": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "schema": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "consumes": [
+          "application/json"
+        ],
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "production"
+        ],
+        "summary": "Create work order",
+        "parameters": [
+          {
+            "description": "payload",
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/production.CreateWOInput"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Created",
+            "schema": {
+              "$ref": "#/definitions/production.WorkOrder"
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "schema": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/work-orders/{id}": {
+      "get": {
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "production"
+        ],
+        "summary": "Get work order",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "work order id (uuid)",
+            "name": "id",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "schema": {
+              "$ref": "#/definitions/production.WorkOrder"
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "schema": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "schema": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/work-orders/{id}/advance": {
+      "post": {
+        "consumes": [
+          "application/json"
+        ],
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "production"
+        ],
+        "summary": "Advance work order status",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "work order id (uuid)",
+            "name": "id",
+            "in": "path",
+            "required": true
+          },
+          {
+            "description": "payload",
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "type": "object"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "schema": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "schema": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "schema": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/work-orders/{id}/consumptions": {
+      "get": {
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "production"
+        ],
+        "summary": "List consumption records for work order",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "work order id (uuid)",
+            "name": "id",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "schema": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/production.ConsumptionRecord"
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "schema": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "schema": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "consumes": [
+          "application/json"
+        ],
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "production"
+        ],
+        "summary": "Record material consumption for work order",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "work order id (uuid)",
+            "name": "id",
+            "in": "path",
+            "required": true
+          },
+          {
+            "description": "payload",
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/production.RecordConsumptionInput"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Created",
+            "schema": {
+              "$ref": "#/definitions/production.ConsumptionRecord"
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "schema": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          },
+          "422": {
+            "description": "Unprocessable Entity",
+            "schema": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/healthz": {
+      "get": {
+        "description": "Liveness probe",
+        "consumes": [
+          "application/json"
+        ],
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "system"
+        ],
+        "summary": "Health check",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "schema": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
     }
+  },
+  "definitions": {
+    "authn.LoginInput": {
+      "type": "object",
+      "properties": {
+        "password": {
+          "type": "string"
+        },
+        "username": {
+          "type": "string"
+        }
+      }
+    },
+    "authn.LoginResult": {
+      "type": "object",
+      "properties": {
+        "expires_at": {
+          "type": "string"
+        },
+        "role": {
+          "type": "string"
+        },
+        "token": {
+          "type": "string"
+        }
+      }
+    },
+    "barcode.Barcode": {
+      "type": "object",
+      "properties": {
+        "created_at": {
+          "type": "string"
+        },
+        "dimensions": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "po_id": {
+          "type": "string"
+        },
+        "produced_date": {
+          "type": "string"
+        },
+        "production_plan_id": {
+          "type": "string"
+        },
+        "sku_code": {
+          "type": "string"
+        },
+        "sku_id": {
+          "type": "string"
+        },
+        "sku_name": {
+          "type": "string"
+        },
+        "work_order_id": {
+          "type": "string"
+        }
+      }
+    },
+    "barcode.GenerateBarcodeInput": {
+      "type": "object",
+      "properties": {
+        "dimensions": {
+          "type": "string"
+        },
+        "po_id": {
+          "type": "string"
+        },
+        "produced_date": {
+          "type": "string"
+        },
+        "production_plan_id": {
+          "type": "string"
+        },
+        "sku_code": {
+          "type": "string"
+        },
+        "sku_id": {
+          "type": "string"
+        },
+        "sku_name": {
+          "type": "string"
+        },
+        "work_order_id": {
+          "type": "string"
+        }
+      }
+    },
+    "barcode.RecordScanInput": {
+      "type": "object",
+      "properties": {
+        "barcode_id": {
+          "type": "string"
+        },
+        "checkpoint": {
+          "$ref": "#/definitions/barcode.ScanCheckpoint"
+        },
+        "scanned_by": {
+          "type": "string"
+        }
+      }
+    },
+    "barcode.ScanCheckpoint": {
+      "type": "string",
+      "enum": [
+        "CNC_COMPLETE",
+        "FINISHED_GOODS",
+        "SHIPPED"
+      ],
+      "x-enum-varnames": [
+        "CheckpointCNCComplete",
+        "CheckpointFinishedGoods",
+        "CheckpointShipped"
+      ]
+    },
+    "barcode.ScanEvent": {
+      "type": "object",
+      "properties": {
+        "barcode_id": {
+          "type": "string"
+        },
+        "checkpoint": {
+          "$ref": "#/definitions/barcode.ScanCheckpoint"
+        },
+        "id": {
+          "type": "string"
+        },
+        "scanned_at": {
+          "type": "string"
+        },
+        "scanned_by": {
+          "type": "string"
+        }
+      }
+    },
+    "catalog.BOM": {
+      "type": "object",
+      "properties": {
+        "components": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/catalog.BOMComponent"
+          }
+        },
+        "sku_id": {
+          "type": "string"
+        }
+      }
+    },
+    "catalog.BOMComponent": {
+      "type": "object",
+      "properties": {
+        "material_id": {
+          "type": "string"
+        },
+        "material_type": {
+          "$ref": "#/definitions/catalog.MaterialType"
+        },
+        "quantity_per_unit": {
+          "type": "number"
+        },
+        "unit": {
+          "type": "string"
+        }
+      }
+    },
+    "catalog.CreateMaterialInput": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "type": {
+          "$ref": "#/definitions/catalog.MaterialType"
+        },
+        "unit": {
+          "type": "string"
+        }
+      }
+    },
+    "catalog.CreateSKUInput": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "string"
+        },
+        "dimensions": {
+          "$ref": "#/definitions/domain.Dimension"
+        },
+        "name": {
+          "type": "string"
+        },
+        "requires_metal": {
+          "type": "boolean"
+        }
+      }
+    },
+    "catalog.Material": {
+      "type": "object",
+      "properties": {
+        "created_at": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "type": {
+          "$ref": "#/definitions/catalog.MaterialType"
+        },
+        "unit": {
+          "type": "string"
+        }
+      }
+    },
+    "catalog.MaterialType": {
+      "type": "string",
+      "enum": [
+        "PLYWOOD",
+        "GLUE",
+        "METAL",
+        "OTHER"
+      ],
+      "x-enum-varnames": [
+        "MaterialTypePlywood",
+        "MaterialTypeGlue",
+        "MaterialTypeMetal",
+        "MaterialTypeOther"
+      ]
+    },
+    "catalog.SKU": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "string"
+        },
+        "created_at": {
+          "type": "string"
+        },
+        "dimensions": {
+          "$ref": "#/definitions/domain.Dimension"
+        },
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "requires_metal": {
+          "type": "boolean"
+        }
+      }
+    },
+    "catalog.SetBOMInput": {
+      "type": "object",
+      "properties": {
+        "components": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/catalog.BOMComponent"
+          }
+        },
+        "sku_id": {
+          "type": "string"
+        }
+      }
+    },
+    "costing.CostingRecord": {
+      "type": "object",
+      "properties": {
+        "auxiliary_cost": {
+          "$ref": "#/definitions/domain.Money"
+        },
+        "created_at": {
+          "type": "string"
+        },
+        "finalized": {
+          "type": "boolean"
+        },
+        "id": {
+          "type": "string"
+        },
+        "material_cost": {
+          "$ref": "#/definitions/domain.Money"
+        },
+        "sku_id": {
+          "type": "string"
+        },
+        "total_cost": {
+          "$ref": "#/definitions/domain.Money"
+        },
+        "work_order_id": {
+          "type": "string"
+        }
+      }
+    },
+    "domain.Dimension": {
+      "type": "object",
+      "properties": {
+        "length_mm": {
+          "type": "integer"
+        },
+        "width_mm": {
+          "type": "integer"
+        }
+      }
+    },
+    "domain.Money": {
+      "type": "object",
+      "properties": {
+        "amount": {
+          "type": "integer"
+        },
+        "currency": {
+          "type": "string"
+        }
+      }
+    },
+    "domain.PlanStatus": {
+      "type": "string",
+      "enum": [
+        "DRAFT",
+        "APPROVED",
+        "CANCELED"
+      ],
+      "x-enum-varnames": [
+        "PlanDraft",
+        "PlanApproved",
+        "PlanCanceled"
+      ]
+    },
+    "domain.RemnantStatus": {
+      "type": "string",
+      "enum": [
+        "AVAILABLE",
+        "ALLOCATED",
+        "CONSUMED",
+        "WASTE"
+      ],
+      "x-enum-varnames": [
+        "RemnantAvailable",
+        "RemnantAllocated",
+        "RemnantConsumed",
+        "RemnantWaste"
+      ]
+    },
+    "domain.WorkOrderStatus": {
+      "type": "string",
+      "enum": [
+        "PLANNED",
+        "IN_CUTTING",
+        "IN_PROCESSING",
+        "COMPLETED",
+        "COSTED"
+      ],
+      "x-enum-varnames": [
+        "WOPlanned",
+        "WOInCutting",
+        "WOInProcessing",
+        "WOCompleted",
+        "WOCosted"
+      ]
+    },
+    "httpkit.PagedResult-catalog_Material": {
+      "type": "object",
+      "properties": {
+        "current_page": {
+          "type": "integer"
+        },
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/catalog.Material"
+          }
+        },
+        "limit": {
+          "type": "integer"
+        },
+        "total_items": {
+          "type": "integer"
+        },
+        "total_pages": {
+          "type": "integer"
+        }
+      }
+    },
+    "httpkit.PagedResult-catalog_SKU": {
+      "type": "object",
+      "properties": {
+        "current_page": {
+          "type": "integer"
+        },
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/catalog.SKU"
+          }
+        },
+        "limit": {
+          "type": "integer"
+        },
+        "total_items": {
+          "type": "integer"
+        },
+        "total_pages": {
+          "type": "integer"
+        }
+      }
+    },
+    "httpkit.PagedResult-inventory_BoardSheet": {
+      "type": "object",
+      "properties": {
+        "current_page": {
+          "type": "integer"
+        },
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/inventory.BoardSheet"
+          }
+        },
+        "limit": {
+          "type": "integer"
+        },
+        "total_items": {
+          "type": "integer"
+        },
+        "total_pages": {
+          "type": "integer"
+        }
+      }
+    },
+    "httpkit.PagedResult-inventory_InventoryLot": {
+      "type": "object",
+      "properties": {
+        "current_page": {
+          "type": "integer"
+        },
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/inventory.InventoryLot"
+          }
+        },
+        "limit": {
+          "type": "integer"
+        },
+        "total_items": {
+          "type": "integer"
+        },
+        "total_pages": {
+          "type": "integer"
+        }
+      }
+    },
+    "inventory.BoardSheet": {
+      "type": "object",
+      "properties": {
+        "cost_per_sheet": {
+          "$ref": "#/definitions/domain.Money"
+        },
+        "dimensions": {
+          "$ref": "#/definitions/domain.Dimension"
+        },
+        "id": {
+          "type": "string"
+        },
+        "issued_to_work_order_id": {
+          "type": "string"
+        },
+        "lot_id": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        }
+      }
+    },
+    "inventory.CutResult": {
+      "type": "object",
+      "properties": {
+        "cutting_record_id": {
+          "type": "string"
+        },
+        "remnant_id": {
+          "type": "string"
+        }
+      }
+    },
+    "inventory.InventoryLot": {
+      "type": "object",
+      "properties": {
+        "cost_per_sheet": {
+          "$ref": "#/definitions/domain.Money"
+        },
+        "id": {
+          "type": "string"
+        },
+        "material_id": {
+          "type": "string"
+        },
+        "quantity": {
+          "type": "integer"
+        },
+        "received_at": {
+          "type": "string"
+        },
+        "supplier_ref": {
+          "type": "string"
+        }
+      }
+    },
+    "inventory.ReceiveStockInput": {
+      "type": "object",
+      "properties": {
+        "cost_per_sheet": {
+          "$ref": "#/definitions/domain.Money"
+        },
+        "dimensions": {
+          "$ref": "#/definitions/domain.Dimension"
+        },
+        "material_id": {
+          "type": "string"
+        },
+        "quantity": {
+          "type": "integer"
+        },
+        "supplier_ref": {
+          "type": "string"
+        }
+      }
+    },
+    "inventory.RecordCutInput": {
+      "type": "object",
+      "properties": {
+        "remnant_dimension": {
+          "$ref": "#/definitions/domain.Dimension"
+        },
+        "remnant_id": {
+          "type": "string"
+        },
+        "sheet_id": {
+          "type": "string"
+        },
+        "sku_id": {
+          "type": "string"
+        },
+        "used_dimension": {
+          "$ref": "#/definitions/domain.Dimension"
+        },
+        "work_order_id": {
+          "type": "string"
+        }
+      }
+    },
+    "inventory.Remnant": {
+      "type": "object",
+      "properties": {
+        "allocated_to_wo": {
+          "type": "string"
+        },
+        "created_at": {
+          "type": "string"
+        },
+        "dimensions": {
+          "$ref": "#/definitions/domain.Dimension"
+        },
+        "id": {
+          "type": "string"
+        },
+        "parent_board_id": {
+          "type": "string"
+        },
+        "parent_remnant_id": {
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/definitions/domain.RemnantStatus"
+        }
+      }
+    },
+    "order.CreateLineItemInput": {
+      "type": "object",
+      "properties": {
+        "quantity": {
+          "type": "integer"
+        },
+        "selling_price": {
+          "$ref": "#/definitions/domain.Money"
+        },
+        "sku_id": {
+          "type": "string"
+        }
+      }
+    },
+    "order.CreatePOInput": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "string"
+        },
+        "expected_delivery": {
+          "type": "string"
+        },
+        "line_items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/order.CreateLineItemInput"
+          }
+        }
+      }
+    },
+    "order.LineItem": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "po_id": {
+          "type": "string"
+        },
+        "quantity": {
+          "type": "integer"
+        },
+        "selling_price": {
+          "$ref": "#/definitions/domain.Money"
+        },
+        "sku_id": {
+          "type": "string"
+        }
+      }
+    },
+    "order.PO": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "string"
+        },
+        "created_at": {
+          "type": "string"
+        },
+        "expected_delivery": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "line_items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/order.LineItem"
+          }
+        }
+      }
+    },
+    "planning.CreatePlanInput": {
+      "type": "object",
+      "properties": {
+        "deadline": {
+          "type": "string"
+        },
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/planning.PlanItemInput"
+          }
+        },
+        "po_id": {
+          "type": "string"
+        }
+      }
+    },
+    "planning.Plan": {
+      "type": "object",
+      "properties": {
+        "created_at": {
+          "type": "string"
+        },
+        "deadline": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/planning.PlanItem"
+          }
+        },
+        "po_id": {
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/definitions/domain.PlanStatus"
+        }
+      }
+    },
+    "planning.PlanItem": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "plan_id": {
+          "type": "string"
+        },
+        "quantity": {
+          "type": "integer"
+        },
+        "sku_id": {
+          "type": "string"
+        }
+      }
+    },
+    "planning.PlanItemInput": {
+      "type": "object",
+      "properties": {
+        "quantity": {
+          "type": "integer"
+        },
+        "sku_id": {
+          "type": "string"
+        }
+      }
+    },
+    "production.ConsumptionRecord": {
+      "type": "object",
+      "properties": {
+        "created_at": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "material_id": {
+          "type": "string"
+        },
+        "material_type": {
+          "type": "string"
+        },
+        "quantity": {
+          "type": "number"
+        },
+        "unit": {
+          "type": "string"
+        },
+        "work_order_id": {
+          "type": "string"
+        }
+      }
+    },
+    "production.CreateWOInput": {
+      "type": "object",
+      "properties": {
+        "plan_id": {
+          "type": "string"
+        },
+        "quantity": {
+          "type": "integer"
+        },
+        "sku_id": {
+          "type": "string"
+        }
+      }
+    },
+    "production.RecordConsumptionInput": {
+      "type": "object",
+      "properties": {
+        "material_id": {
+          "type": "string"
+        },
+        "material_type": {
+          "type": "string"
+        },
+        "quantity": {
+          "type": "number"
+        },
+        "unit": {
+          "type": "string"
+        },
+        "work_order_id": {
+          "type": "string"
+        }
+      }
+    },
+    "production.WorkOrder": {
+      "type": "object",
+      "properties": {
+        "created_at": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "plan_id": {
+          "type": "string"
+        },
+        "quantity": {
+          "type": "integer"
+        },
+        "sku_id": {
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/definitions/domain.WorkOrderStatus"
+        }
+      }
+    }
+  },
+  "securityDefinitions": {
+    "BearerAuth": {
+      "description": "Enter: Bearer <token>",
+      "type": "apiKey",
+      "name": "Authorization",
+      "in": "header"
+    }
+  },
+  "security": [
+    {
+      "BearerAuth": []
+    }
+  ]
 }

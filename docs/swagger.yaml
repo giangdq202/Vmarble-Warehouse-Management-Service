@@ -1,5 +1,21 @@
 basePath: /
 definitions:
+  authn.LoginInput:
+    properties:
+      password:
+        type: string
+      username:
+        type: string
+    type: object
+  authn.LoginResult:
+    properties:
+      expires_at:
+        type: string
+      role:
+        type: string
+      token:
+        type: string
+    type: object
   barcode.Barcode:
     properties:
       created_at:
@@ -232,6 +248,66 @@ definitions:
     - WOInProcessing
     - WOCompleted
     - WOCosted
+  httpkit.PagedResult-catalog_Material:
+    properties:
+      current_page:
+        type: integer
+      items:
+        items:
+          $ref: '#/definitions/catalog.Material'
+        type: array
+      limit:
+        type: integer
+      total_items:
+        type: integer
+      total_pages:
+        type: integer
+    type: object
+  httpkit.PagedResult-catalog_SKU:
+    properties:
+      current_page:
+        type: integer
+      items:
+        items:
+          $ref: '#/definitions/catalog.SKU'
+        type: array
+      limit:
+        type: integer
+      total_items:
+        type: integer
+      total_pages:
+        type: integer
+    type: object
+  httpkit.PagedResult-inventory_BoardSheet:
+    properties:
+      current_page:
+        type: integer
+      items:
+        items:
+          $ref: '#/definitions/inventory.BoardSheet'
+        type: array
+      limit:
+        type: integer
+      total_items:
+        type: integer
+      total_pages:
+        type: integer
+    type: object
+  httpkit.PagedResult-inventory_InventoryLot:
+    properties:
+      current_page:
+        type: integer
+      items:
+        items:
+          $ref: '#/definitions/inventory.InventoryLot'
+        type: array
+      limit:
+        type: integer
+      total_items:
+        type: integer
+      total_pages:
+        type: integer
+    type: object
   inventory.BoardSheet:
     properties:
       cost_per_sheet:
@@ -468,6 +544,40 @@ info:
   title: VMARBLE Warehouse Management Service API
   version: 0.1.0
 paths:
+  /api/auth/login:
+    post:
+      consumes:
+      - application/json
+      description: Authenticate with username + password and receive a Bearer token.
+      parameters:
+      - description: credentials
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/authn.LoginInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/authn.LoginResult'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Login
+      tags:
+      - auth
   /api/v1/barcodes:
     post:
       consumes:
@@ -747,22 +857,41 @@ paths:
       - inventory
   /api/v1/inventory/lots:
     get:
+      parameters:
+      - description: page number (default 1)
+        in: query
+        name: page
+        type: integer
+      - description: items per page (default 10, max 100)
+        in: query
+        name: limit
+        type: integer
+      - description: filter by supplier_ref (case-insensitive)
+        in: query
+        name: search
+        type: string
+      - description: 'sort column: supplier_ref (default received_at)'
+        in: query
+        name: sort_by
+        type: string
+      - description: asc or desc (default desc)
+        in: query
+        name: order
+        type: string
       produces:
       - application/json
       responses:
         "200":
           description: OK
           schema:
-            items:
-              $ref: '#/definitions/inventory.InventoryLot'
-            type: array
+            $ref: '#/definitions/httpkit.PagedResult-inventory_InventoryLot'
         "500":
           description: Internal Server Error
           schema:
             additionalProperties:
               type: string
             type: object
-      summary: List inventory lots
+      summary: List inventory lots (paginated)
       tags:
       - inventory
     post:
@@ -894,22 +1023,37 @@ paths:
       - inventory
   /api/v1/inventory/sheets:
     get:
+      parameters:
+      - description: page number (default 1)
+        in: query
+        name: page
+        type: integer
+      - description: items per page (default 10, max 100)
+        in: query
+        name: limit
+        type: integer
+      - description: 'sort column: length_mm|width_mm (default id)'
+        in: query
+        name: sort_by
+        type: string
+      - description: asc or desc (default asc)
+        in: query
+        name: order
+        type: string
       produces:
       - application/json
       responses:
         "200":
           description: OK
           schema:
-            items:
-              $ref: '#/definitions/inventory.BoardSheet'
-            type: array
+            $ref: '#/definitions/httpkit.PagedResult-inventory_BoardSheet'
         "500":
           description: Internal Server Error
           schema:
             additionalProperties:
               type: string
             type: object
-      summary: List available board sheets
+      summary: List available board sheets (paginated)
       tags:
       - inventory
   /api/v1/inventory/sheets/{id}:
@@ -976,22 +1120,41 @@ paths:
       - inventory
   /api/v1/materials:
     get:
+      parameters:
+      - description: page number (default 1)
+        in: query
+        name: page
+        type: integer
+      - description: items per page (default 10, max 100)
+        in: query
+        name: limit
+        type: integer
+      - description: filter by name (case-insensitive)
+        in: query
+        name: search
+        type: string
+      - description: 'sort column: name|type|unit (default created_at)'
+        in: query
+        name: sort_by
+        type: string
+      - description: asc or desc (default asc)
+        in: query
+        name: order
+        type: string
       produces:
       - application/json
       responses:
         "200":
           description: OK
           schema:
-            items:
-              $ref: '#/definitions/catalog.Material'
-            type: array
+            $ref: '#/definitions/httpkit.PagedResult-catalog_Material'
         "500":
           description: Internal Server Error
           schema:
             additionalProperties:
               type: string
             type: object
-      summary: List materials
+      summary: List materials (paginated)
       tags:
       - catalog
     post:
@@ -1300,22 +1463,41 @@ paths:
       - order
   /api/v1/skus:
     get:
+      parameters:
+      - description: page number (default 1)
+        in: query
+        name: page
+        type: integer
+      - description: items per page (default 10, max 100)
+        in: query
+        name: limit
+        type: integer
+      - description: filter by name or code (case-insensitive)
+        in: query
+        name: search
+        type: string
+      - description: 'sort column: name|code (default created_at)'
+        in: query
+        name: sort_by
+        type: string
+      - description: asc or desc (default asc)
+        in: query
+        name: order
+        type: string
       produces:
       - application/json
       responses:
         "200":
           description: OK
           schema:
-            items:
-              $ref: '#/definitions/catalog.SKU'
-            type: array
+            $ref: '#/definitions/httpkit.PagedResult-catalog_SKU'
         "500":
           description: Internal Server Error
           schema:
             additionalProperties:
               type: string
             type: object
-      summary: List SKUs
+      summary: List SKUs (paginated)
       tags:
       - catalog
     post:
@@ -1654,4 +1836,13 @@ paths:
       summary: Health check
       tags:
       - system
+securityDefinitions:
+  BearerAuth:
+    description: 'Enter: Bearer <token>'
+    in: header
+    name: Authorization
+    type: apiKey
 swagger: "2.0"
+
+security:
+- BearerAuth: []

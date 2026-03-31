@@ -15,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/vmarble/warehouse-management-service/internal/domain"
 	"github.com/vmarble/warehouse-management-service/internal/module/barcode"
+	"github.com/vmarble/warehouse-management-service/internal/module/authn"
 	"github.com/vmarble/warehouse-management-service/internal/module/catalog"
 	"github.com/vmarble/warehouse-management-service/internal/module/costing"
 	"github.com/vmarble/warehouse-management-service/internal/module/inventory"
@@ -33,6 +34,13 @@ import (
 // @version         0.1.0
 // @description     Backend API for warehouse & production management.
 // @BasePath        /
+//
+// @securityDefinitions.apikey  BearerAuth
+// @in                          header
+// @name                        Authorization
+// @description                 Enter: Bearer <token>
+//
+// @security BearerAuth
 func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
@@ -56,6 +64,7 @@ func main() {
 	defer pool.Close()
 
 	// ── Module stores ───────────────────────────────────────
+	authnStore   := authn.NewPGStore(pool)
 	catalogStore := catalog.NewPGStore(pool)
 	orderStore := order.NewPGStore(pool)
 	planningStore := planning.NewPGStore(pool)
@@ -65,6 +74,7 @@ func main() {
 	barcodeStore := barcode.NewPGStore(pool)
 
 	// ── Module services ─────────────────────────────────────
+	authnSvc  := authn.NewService(authnStore, cfg.AuthSecret)
 	catalogSvc := catalog.NewService(catalogStore)
 	orderSvc := order.NewService(orderStore)
 	planningSvc := planning.NewService(planningStore)
@@ -91,6 +101,11 @@ func main() {
 	// Swagger UI: /swagger/index.html
 	r.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
 
+	// ── Public routes (no auth required) ───────────────────
+	public := r.Group("/api/auth")
+	authn.NewHandler(authnSvc).Register(public)
+
+	// ── Protected routes ────────────────────────────────────
 	api := r.Group("/api/v1")
 	api.Use(auth.Middleware(cfg.AuthSecret))
 
