@@ -33,6 +33,10 @@ type BoardSheet struct {
 	CostPerSheet        domain.Money     `json:"cost_per_sheet"`
 	Status              string           `json:"status"`
 	IssuedToWorkOrderID *uuid.UUID       `json:"issued_to_work_order_id,omitempty"`
+	SupplierCode        *string          `json:"supplier_code,omitempty"`
+	LotBatch            *string          `json:"lot_batch,omitempty"`
+	GrainPattern        *string          `json:"grain_pattern,omitempty"`
+	QualityGrade        *string          `json:"quality_grade,omitempty"`
 }
 
 type RecordCutInput struct {
