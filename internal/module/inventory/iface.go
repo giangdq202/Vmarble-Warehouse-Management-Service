@@ -10,11 +10,11 @@ import (
 )
 
 type ReceiveStockInput struct {
-	MaterialID   uuid.UUID       `json:"material_id"`
+	MaterialID   uuid.UUID        `json:"material_id"`
 	Dimensions   domain.Dimension `json:"dimensions"`
-	CostPerSheet domain.Money    `json:"cost_per_sheet"`
-	Quantity     int             `json:"quantity"`
-	SupplierRef  string          `json:"supplier_ref"`
+	CostPerSheet domain.Money     `json:"cost_per_sheet"`
+	Quantity     int              `json:"quantity"`
+	SupplierRef  string           `json:"supplier_ref"`
 }
 
 type InventoryLot struct {
@@ -27,20 +27,20 @@ type InventoryLot struct {
 }
 
 type BoardSheet struct {
-	ID                 uuid.UUID  `json:"id"`
-	LotID              uuid.UUID  `json:"lot_id"`
-	Dimensions         domain.Dimension `json:"dimensions"`
-	CostPerSheet       domain.Money     `json:"cost_per_sheet"`
-	Status             string     `json:"status"`
-	IssuedToWorkOrderID *uuid.UUID `json:"issued_to_work_order_id,omitempty"`
+	ID                  uuid.UUID        `json:"id"`
+	LotID               uuid.UUID        `json:"lot_id"`
+	Dimensions          domain.Dimension `json:"dimensions"`
+	CostPerSheet        domain.Money     `json:"cost_per_sheet"`
+	Status              string           `json:"status"`
+	IssuedToWorkOrderID *uuid.UUID       `json:"issued_to_work_order_id,omitempty"`
 }
 
 type RecordCutInput struct {
 	SheetID          *uuid.UUID        `json:"sheet_id,omitempty"`
-	RemnantID       *uuid.UUID        `json:"remnant_id,omitempty"`
-	WorkOrderID     uuid.UUID         `json:"work_order_id"`
-	SKUID           uuid.UUID         `json:"sku_id"`
-	UsedDimension   domain.Dimension  `json:"used_dimension"`
+	RemnantID        *uuid.UUID        `json:"remnant_id,omitempty"`
+	WorkOrderID      uuid.UUID         `json:"work_order_id"`
+	SKUID            uuid.UUID         `json:"sku_id"`
+	UsedDimension    domain.Dimension  `json:"used_dimension"`
 	RemnantDimension *domain.Dimension `json:"remnant_dimension,omitempty"`
 }
 
@@ -50,13 +50,20 @@ type CutResult struct {
 }
 
 type Remnant struct {
-	ID              uuid.UUID           `json:"id"`
-	ParentBoardID   uuid.UUID           `json:"parent_board_id"`
-	ParentRemnantID *uuid.UUID          `json:"parent_remnant_id,omitempty"`
-	Dimensions      domain.Dimension    `json:"dimensions"`
-	Status          domain.RemnantStatus `json:"status"`
-	AllocatedToWO   *uuid.UUID          `json:"allocated_to_wo,omitempty"`
-	CreatedAt       time.Time           `json:"created_at"`
+	ID                  uuid.UUID            `json:"id"`
+	ParentBoardID       uuid.UUID            `json:"parent_board_id"`
+	ParentRemnantID     *uuid.UUID           `json:"parent_remnant_id,omitempty"`
+	Dimensions          domain.Dimension     `json:"dimensions"`
+	Status              domain.RemnantStatus `json:"status"`
+	AllocatedToWO       *uuid.UUID           `json:"allocated_to_wo,omitempty"`
+	SupplierCode        *string              `json:"supplier_code,omitempty"`
+	LotBatch            *string              `json:"lot_batch,omitempty"`
+	GrainPattern        *string              `json:"grain_pattern,omitempty"`
+	QualityGrade        *string              `json:"quality_grade,omitempty"`
+	BoundingBoxLengthMM *int                 `json:"bounding_box_length_mm,omitempty"`
+	BoundingBoxWidthMM  *int                 `json:"bounding_box_width_mm,omitempty"`
+	BinLocationID       *uuid.UUID           `json:"bin_location_id,omitempty"`
+	CreatedAt           time.Time            `json:"created_at"`
 }
 
 type Service interface {

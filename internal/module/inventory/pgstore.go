@@ -2,6 +2,7 @@ package inventory
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 
@@ -240,18 +241,26 @@ func (s *pgStore) insertCuttingRecord(ctx context.Context, cr CuttingRecord) err
 
 func (s *pgStore) insertRemnant(ctx context.Context, r Remnant) error {
 	_, err := s.pool.Exec(ctx,
-		`INSERT INTO remnants (id, parent_board_id, parent_remnant_id, length_mm, width_mm, status, allocated_to_wo_id, created_at)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+		`INSERT INTO remnants (
+			id, parent_board_id, parent_remnant_id, length_mm, width_mm,
+			status, allocated_to_wo_id, supplier_code, lot_batch, grain_pattern,
+			quality_grade, bounding_box_length_mm, bounding_box_width_mm, bin_location_id, created_at
+		)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
 		r.ID, r.ParentBoardID, r.ParentRemnantID,
 		r.Dimensions.LengthMM, r.Dimensions.WidthMM,
-		string(r.Status), r.AllocatedToWO, r.CreatedAt,
+		string(r.Status), r.AllocatedToWO,
+		r.SupplierCode, r.LotBatch, r.GrainPattern, r.QualityGrade,
+		r.BoundingBoxLengthMM, r.BoundingBoxWidthMM, r.BinLocationID, r.CreatedAt,
 	)
 	return err
 }
 
 func (s *pgStore) selectAvailableRemnantsByMinDimension(ctx context.Context, minDim domain.Dimension) ([]Remnant, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT id, parent_board_id, parent_remnant_id, length_mm, width_mm, status, allocated_to_wo_id, created_at
+		`SELECT id, parent_board_id, parent_remnant_id, length_mm, width_mm, status, allocated_to_wo_id,
+		        supplier_code, lot_batch, grain_pattern, quality_grade,
+		        bounding_box_length_mm, bounding_box_width_mm, bin_location_id, created_at
 		 FROM remnants
 		 WHERE status = 'AVAILABLE' AND length_mm >= $1 AND width_mm >= $2
 		 ORDER BY (length_mm * width_mm) ASC`,
@@ -265,7 +274,9 @@ func (s *pgStore) selectAvailableRemnantsByMinDimension(ctx context.Context, min
 
 func (s *pgStore) selectRemnantsByBoardSheet(ctx context.Context, boardSheetID uuid.UUID) ([]Remnant, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT id, parent_board_id, parent_remnant_id, length_mm, width_mm, status, allocated_to_wo_id, created_at
+		`SELECT id, parent_board_id, parent_remnant_id, length_mm, width_mm, status, allocated_to_wo_id,
+		        supplier_code, lot_batch, grain_pattern, quality_grade,
+		        bounding_box_length_mm, bounding_box_width_mm, bin_location_id, created_at
 		 FROM remnants WHERE parent_board_id = $1 ORDER BY created_at`, boardSheetID)
 	if err != nil {
 		return nil, err
@@ -276,12 +287,12 @@ func (s *pgStore) selectRemnantsByBoardSheet(ctx context.Context, boardSheetID u
 
 func (s *pgStore) selectRemnantByID(ctx context.Context, id uuid.UUID) (Remnant, error) {
 	var r Remnant
-	err := s.pool.QueryRow(ctx,
-		`SELECT id, parent_board_id, parent_remnant_id, length_mm, width_mm, status, allocated_to_wo_id, created_at
-		 FROM remnants WHERE id = $1`, id).
-		Scan(&r.ID, &r.ParentBoardID, &r.ParentRemnantID,
-			&r.Dimensions.LengthMM, &r.Dimensions.WidthMM,
-			&r.Status, &r.AllocatedToWO, &r.CreatedAt)
+	row := s.pool.QueryRow(ctx,
+		`SELECT id, parent_board_id, parent_remnant_id, length_mm, width_mm, status, allocated_to_wo_id,
+		        supplier_code, lot_batch, grain_pattern, quality_grade,
+		        bounding_box_length_mm, bounding_box_width_mm, bin_location_id, created_at
+		 FROM remnants WHERE id = $1`, id)
+	err := scanRemnantRecord(row, &r)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Remnant{}, domain.NewBizError(domain.ErrNotFound, "remnant not found")
 	}
@@ -393,11 +404,17 @@ func (s *pgStore) recordCutAtomically(ctx context.Context, op cutWriteOp) error 
 	if op.NewRemnant != nil {
 		r := op.NewRemnant
 		if _, execErr := tx.Exec(ctx,
-			`INSERT INTO remnants (id, parent_board_id, parent_remnant_id, length_mm, width_mm, status, allocated_to_wo_id, created_at)
-			 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+			`INSERT INTO remnants (
+				id, parent_board_id, parent_remnant_id, length_mm, width_mm,
+				status, allocated_to_wo_id, supplier_code, lot_batch, grain_pattern,
+				quality_grade, bounding_box_length_mm, bounding_box_width_mm, bin_location_id, created_at
+			)
+			 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
 			r.ID, r.ParentBoardID, r.ParentRemnantID,
 			r.Dimensions.LengthMM, r.Dimensions.WidthMM,
-			string(r.Status), r.AllocatedToWO, r.CreatedAt,
+			string(r.Status), r.AllocatedToWO,
+			r.SupplierCode, r.LotBatch, r.GrainPattern, r.QualityGrade,
+			r.BoundingBoxLengthMM, r.BoundingBoxWidthMM, r.BinLocationID, r.CreatedAt,
 		); execErr != nil {
 			err = fmt.Errorf("insert remnant: %w", execErr)
 			return err
@@ -515,12 +532,63 @@ func scanRemnants(rows pgx.Rows) ([]Remnant, error) {
 	var remnants []Remnant
 	for rows.Next() {
 		var r Remnant
-		if err := rows.Scan(&r.ID, &r.ParentBoardID, &r.ParentRemnantID,
-			&r.Dimensions.LengthMM, &r.Dimensions.WidthMM,
-			&r.Status, &r.AllocatedToWO, &r.CreatedAt); err != nil {
+		if err := scanRemnantRecord(rows, &r); err != nil {
 			return nil, err
 		}
 		remnants = append(remnants, r)
 	}
 	return remnants, rows.Err()
+}
+
+type remnantScanner interface {
+	Scan(dest ...any) error
+}
+
+func scanRemnantRecord(scanner remnantScanner, r *Remnant) error {
+	var supplierCode sql.NullString
+	var lotBatch sql.NullString
+	var grainPattern sql.NullString
+	var qualityGrade sql.NullString
+	var boundingBoxLengthMM sql.NullInt32
+	var boundingBoxWidthMM sql.NullInt32
+	var binLocationID uuid.NullUUID
+	if err := scanner.Scan(
+		&r.ID, &r.ParentBoardID, &r.ParentRemnantID,
+		&r.Dimensions.LengthMM, &r.Dimensions.WidthMM,
+		&r.Status, &r.AllocatedToWO,
+		&supplierCode, &lotBatch, &grainPattern, &qualityGrade,
+		&boundingBoxLengthMM, &boundingBoxWidthMM, &binLocationID,
+		&r.CreatedAt,
+	); err != nil {
+		return err
+	}
+	r.SupplierCode = nullStringPtr(supplierCode)
+	r.LotBatch = nullStringPtr(lotBatch)
+	r.GrainPattern = nullStringPtr(grainPattern)
+	r.QualityGrade = nullStringPtr(qualityGrade)
+	r.BoundingBoxLengthMM = nullInt32Ptr(boundingBoxLengthMM)
+	r.BoundingBoxWidthMM = nullInt32Ptr(boundingBoxWidthMM)
+	if binLocationID.Valid {
+		v := binLocationID.UUID
+		r.BinLocationID = &v
+	} else {
+		r.BinLocationID = nil
+	}
+	return nil
+}
+
+func nullStringPtr(v sql.NullString) *string {
+	if !v.Valid {
+		return nil
+	}
+	s := v.String
+	return &s
+}
+
+func nullInt32Ptr(v sql.NullInt32) *int {
+	if !v.Valid {
+		return nil
+	}
+	n := int(v.Int32)
+	return &n
 }
