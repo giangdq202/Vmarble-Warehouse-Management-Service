@@ -16,6 +16,58 @@ const docTemplate = `{
     "host": "{{.Host}}",
     "basePath": "{{.BasePath}}",
     "paths": {
+        "/api/auth/login": {
+            "post": {
+                "description": "Authenticate with username + password and receive a Bearer token.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "auth"
+                ],
+                "summary": "Login",
+                "parameters": [
+                    {
+                        "description": "credentials",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/authn.LoginInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/authn.LoginResult"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/barcodes": {
             "post": {
                 "consumes": [
@@ -449,15 +501,44 @@ const docTemplate = `{
                 "tags": [
                     "inventory"
                 ],
-                "summary": "List inventory lots",
+                "summary": "List inventory lots (paginated)",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "page number (default 1)",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "items per page (default 10, max 100)",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "filter by supplier_ref (case-insensitive)",
+                        "name": "search",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "sort column: supplier_ref (default received_at)",
+                        "name": "sort_by",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "asc or desc (default desc)",
+                        "name": "order",
+                        "in": "query"
+                    }
+                ],
                 "responses": {
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "type": "array",
-                            "items": {
-                                "$ref": "#/definitions/inventory.InventoryLot"
-                            }
+                            "$ref": "#/definitions/httpkit.PagedResult-inventory_InventoryLot"
                         }
                     },
                     "500": {
@@ -675,15 +756,38 @@ const docTemplate = `{
                 "tags": [
                     "inventory"
                 ],
-                "summary": "List available board sheets",
+                "summary": "List available board sheets (paginated)",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "page number (default 1)",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "items per page (default 10, max 100)",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "sort column: length_mm|width_mm (default id)",
+                        "name": "sort_by",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "asc or desc (default asc)",
+                        "name": "order",
+                        "in": "query"
+                    }
+                ],
                 "responses": {
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "type": "array",
-                            "items": {
-                                "$ref": "#/definitions/inventory.BoardSheet"
-                            }
+                            "$ref": "#/definitions/httpkit.PagedResult-inventory_BoardSheet"
                         }
                     },
                     "500": {
@@ -801,15 +905,44 @@ const docTemplate = `{
                 "tags": [
                     "catalog"
                 ],
-                "summary": "List materials",
+                "summary": "List materials (paginated)",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "page number (default 1)",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "items per page (default 10, max 100)",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "filter by name (case-insensitive)",
+                        "name": "search",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "sort column: name|type|unit (default created_at)",
+                        "name": "sort_by",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "asc or desc (default asc)",
+                        "name": "order",
+                        "in": "query"
+                    }
+                ],
                 "responses": {
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "type": "array",
-                            "items": {
-                                "$ref": "#/definitions/catalog.Material"
-                            }
+                            "$ref": "#/definitions/httpkit.PagedResult-catalog_Material"
                         }
                     },
                     "500": {
@@ -1299,15 +1432,44 @@ const docTemplate = `{
                 "tags": [
                     "catalog"
                 ],
-                "summary": "List SKUs",
+                "summary": "List SKUs (paginated)",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "page number (default 1)",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "items per page (default 10, max 100)",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "filter by name or code (case-insensitive)",
+                        "name": "search",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "sort column: name|code (default created_at)",
+                        "name": "sort_by",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "asc or desc (default asc)",
+                        "name": "order",
+                        "in": "query"
+                    }
+                ],
                 "responses": {
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "type": "array",
-                            "items": {
-                                "$ref": "#/definitions/catalog.SKU"
-                            }
+                            "$ref": "#/definitions/httpkit.PagedResult-catalog_SKU"
                         }
                     },
                     "500": {
@@ -1838,6 +2000,31 @@ const docTemplate = `{
         }
     },
     "definitions": {
+        "authn.LoginInput": {
+            "type": "object",
+            "properties": {
+                "password": {
+                    "type": "string"
+                },
+                "username": {
+                    "type": "string"
+                }
+            }
+        },
+        "authn.LoginResult": {
+            "type": "object",
+            "properties": {
+                "expires_at": {
+                    "type": "string"
+                },
+                "role": {
+                    "type": "string"
+                },
+                "token": {
+                    "type": "string"
+                }
+            }
+        },
         "barcode.Barcode": {
             "type": "object",
             "properties": {
@@ -2178,6 +2365,98 @@ const docTemplate = `{
                 "WOCompleted",
                 "WOCosted"
             ]
+        },
+        "httpkit.PagedResult-catalog_Material": {
+            "type": "object",
+            "properties": {
+                "current_page": {
+                    "type": "integer"
+                },
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/catalog.Material"
+                    }
+                },
+                "limit": {
+                    "type": "integer"
+                },
+                "total_items": {
+                    "type": "integer"
+                },
+                "total_pages": {
+                    "type": "integer"
+                }
+            }
+        },
+        "httpkit.PagedResult-catalog_SKU": {
+            "type": "object",
+            "properties": {
+                "current_page": {
+                    "type": "integer"
+                },
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/catalog.SKU"
+                    }
+                },
+                "limit": {
+                    "type": "integer"
+                },
+                "total_items": {
+                    "type": "integer"
+                },
+                "total_pages": {
+                    "type": "integer"
+                }
+            }
+        },
+        "httpkit.PagedResult-inventory_BoardSheet": {
+            "type": "object",
+            "properties": {
+                "current_page": {
+                    "type": "integer"
+                },
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/inventory.BoardSheet"
+                    }
+                },
+                "limit": {
+                    "type": "integer"
+                },
+                "total_items": {
+                    "type": "integer"
+                },
+                "total_pages": {
+                    "type": "integer"
+                }
+            }
+        },
+        "httpkit.PagedResult-inventory_InventoryLot": {
+            "type": "object",
+            "properties": {
+                "current_page": {
+                    "type": "integer"
+                },
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/inventory.InventoryLot"
+                    }
+                },
+                "limit": {
+                    "type": "integer"
+                },
+                "total_items": {
+                    "type": "integer"
+                },
+                "total_pages": {
+                    "type": "integer"
+                }
+            }
         },
         "inventory.BoardSheet": {
             "type": "object",
@@ -2533,7 +2812,20 @@ const docTemplate = `{
                 }
             }
         }
-    }
+    },
+    "securityDefinitions": {
+        "BearerAuth": {
+            "description": "Enter: Bearer \u003ctoken\u003e",
+            "type": "apiKey",
+            "name": "Authorization",
+            "in": "header"
+        }
+    },
+    "security": [
+        {
+            "BearerAuth": []
+        }
+    ]
 }`
 
 // SwaggerInfo holds exported Swagger Info so clients can modify it

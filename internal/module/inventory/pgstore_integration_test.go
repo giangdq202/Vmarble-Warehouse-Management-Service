@@ -25,6 +25,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/vmarble/warehouse-management-service/internal/domain"
+	"github.com/vmarble/warehouse-management-service/internal/platform/httpkit"
 	"github.com/vmarble/warehouse-management-service/internal/testhelper"
 )
 
@@ -132,7 +133,8 @@ func TestIntegration_ReceiveStock_CreatesLotAndSheets(t *testing.T) {
 		t.Errorf("lot.Quantity = %d, want 3", lot.Quantity)
 	}
 
-	sheets, err := svc.ListAvailableSheets(context.Background())
+	sheetsResult, err := svc.ListAvailableSheets(context.Background(), httpkit.PageParams{Page: 1, Limit: 1000})
+	sheets := sheetsResult.Items
 	if err != nil {
 		t.Fatalf("ListAvailableSheets: %v", err)
 	}
@@ -171,7 +173,8 @@ func TestIntegration_ReceiveStock_ListLots(t *testing.T) {
 		}
 	}
 
-	lots, err := svc.ListLots(context.Background())
+	lotsResult, err := svc.ListLots(context.Background(), httpkit.PageParams{Page: 1, Limit: 100})
+	lots := lotsResult.Items
 	if err != nil {
 		t.Fatalf("ListLots: %v", err)
 	}
@@ -194,7 +197,8 @@ func TestIntegration_RecordCut_FromSheet_NoRemnant(t *testing.T) {
 		CostPerSheet: testCost,
 		Quantity:     1,
 	})
-	sheets, _ := svc.ListAvailableSheets(context.Background())
+	sheetsResult, _ := svc.ListAvailableSheets(context.Background(), httpkit.PageParams{Page: 1, Limit: 1000})
+	sheets := sheetsResult.Items
 	sheetID := sheets[0].ID
 	woID := uuid.New()
 
@@ -239,7 +243,8 @@ func TestIntegration_RecordCut_FromSheet_WithRemnant(t *testing.T) {
 		CostPerSheet: testCost,
 		Quantity:     1,
 	})
-	sheets, _ := svc.ListAvailableSheets(context.Background())
+	sheetsResult, _ := svc.ListAvailableSheets(context.Background(), httpkit.PageParams{Page: 1, Limit: 1000})
+	sheets := sheetsResult.Items
 	sheetID := sheets[0].ID
 	remnantDim := testDim800x400
 
@@ -293,7 +298,8 @@ func TestIntegration_RecordCut_FromRemnant_NestedLineage(t *testing.T) {
 		CostPerSheet: testCost,
 		Quantity:     1,
 	})
-	sheets, _ := svc.ListAvailableSheets(context.Background())
+	sheetsResult, _ := svc.ListAvailableSheets(context.Background(), httpkit.PageParams{Page: 1, Limit: 1000})
+	sheets := sheetsResult.Items
 	sheetID := sheets[0].ID
 
 	// First cut: sheet → remnant 1000×500.
@@ -364,7 +370,8 @@ func TestIntegration_RecordCut_AreaConservation_Rejected(t *testing.T) {
 		CostPerSheet: testCost,
 		Quantity:     1,
 	})
-	sheets, _ := svc.ListAvailableSheets(context.Background())
+	sheetsResult, _ := svc.ListAvailableSheets(context.Background(), httpkit.PageParams{Page: 1, Limit: 1000})
+	sheets := sheetsResult.Items
 	sheetID := sheets[0].ID
 
 	overDim := domain.Dimension{LengthMM: 2001, WidthMM: 1000}
@@ -399,7 +406,8 @@ func TestIntegration_AllocateRemnant_HappyPath(t *testing.T) {
 		CostPerSheet: testCost,
 		Quantity:     1,
 	})
-	sheets, _ := svc.ListAvailableSheets(context.Background())
+	sheetsResult, _ := svc.ListAvailableSheets(context.Background(), httpkit.PageParams{Page: 1, Limit: 1000})
+	sheets := sheetsResult.Items
 	rd := testDim1000x500
 	r, _ := svc.RecordCut(context.Background(), RecordCutInput{
 		SheetID:          ptrUUID(sheets[0].ID),
@@ -434,7 +442,8 @@ func TestIntegration_AllocateRemnant_AlreadyAllocated_Rejected(t *testing.T) {
 		CostPerSheet: testCost,
 		Quantity:     1,
 	})
-	sheets, _ := svc.ListAvailableSheets(context.Background())
+	sheetsResult, _ := svc.ListAvailableSheets(context.Background(), httpkit.PageParams{Page: 1, Limit: 1000})
+	sheets := sheetsResult.Items
 	rd := testDim1000x500
 	r, _ := svc.RecordCut(context.Background(), RecordCutInput{
 		SheetID:          ptrUUID(sheets[0].ID),
@@ -465,7 +474,8 @@ func TestIntegration_MarkRemnantWaste_FromAvailable(t *testing.T) {
 		CostPerSheet: testCost,
 		Quantity:     1,
 	})
-	sheets, _ := svc.ListAvailableSheets(context.Background())
+	sheetsResult, _ := svc.ListAvailableSheets(context.Background(), httpkit.PageParams{Page: 1, Limit: 1000})
+	sheets := sheetsResult.Items
 	rd := testDim1000x500
 	r, _ := svc.RecordCut(context.Background(), RecordCutInput{
 		SheetID:          ptrUUID(sheets[0].ID),
@@ -510,7 +520,8 @@ func TestIntegration_ConcurrentRecordCut_SameSheet(t *testing.T) {
 		CostPerSheet: testCost,
 		Quantity:     1,
 	})
-	sheets, _ := svc.ListAvailableSheets(context.Background())
+	sheetsResult, _ := svc.ListAvailableSheets(context.Background(), httpkit.PageParams{Page: 1, Limit: 1000})
+	sheets := sheetsResult.Items
 	sheetID := sheets[0].ID
 
 	const workers = 10
@@ -574,7 +585,8 @@ func TestIntegration_ConcurrentAllocateRemnant_SameRemnant(t *testing.T) {
 		CostPerSheet: testCost,
 		Quantity:     1,
 	})
-	sheets, _ := svc.ListAvailableSheets(context.Background())
+	sheetsResult, _ := svc.ListAvailableSheets(context.Background(), httpkit.PageParams{Page: 1, Limit: 1000})
+	sheets := sheetsResult.Items
 	rd := testDim1000x500
 	r, _ := svc.RecordCut(context.Background(), RecordCutInput{
 		SheetID:          ptrUUID(sheets[0].ID),
@@ -610,5 +622,178 @@ func TestIntegration_ConcurrentAllocateRemnant_SameRemnant(t *testing.T) {
 
 	if successes != 1 {
 		t.Errorf("FOR UPDATE: expected exactly 1 successful allocation, got %d", successes)
+	}
+}
+
+// ── ListLots pagination & search ──────────────────────────────────────────────
+
+func TestIntegration_ListLots_Pagination_CorrectMetadata(t *testing.T) {
+	pool := getPool(t)
+	truncateInventory(t)
+	svc := newSvc(pool)
+
+	mat := seedMaterial(t, pool)
+
+	// Seed 5 lots with distinct supplier refs.
+	for i := range 5 {
+		_, err := svc.ReceiveStock(context.Background(), ReceiveStockInput{
+			MaterialID:   mat,
+			Dimensions:   domain.Dimension{LengthMM: 2000, WidthMM: 1000},
+			CostPerSheet: domain.Money{Amount: 100_000, Currency: "VND"},
+			Quantity:     1,
+			SupplierRef:  fmt.Sprintf("PAG-SUP-%02d", i),
+		})
+		if err != nil {
+			t.Fatalf("ReceiveStock[%d]: %v", i, err)
+		}
+	}
+
+	// Page 1, limit 2 → 3 pages total.
+	p1, err := svc.ListLots(context.Background(), httpkit.PageParams{Page: 1, Limit: 2})
+	if err != nil {
+		t.Fatalf("ListLots page 1: %v", err)
+	}
+	if p1.TotalItems != 5 {
+		t.Errorf("total_items = %d, want 5", p1.TotalItems)
+	}
+	if p1.TotalPages != 3 {
+		t.Errorf("total_pages = %d, want 3", p1.TotalPages)
+	}
+	if p1.CurrentPage != 1 {
+		t.Errorf("current_page = %d, want 1", p1.CurrentPage)
+	}
+	if len(p1.Items) != 2 {
+		t.Errorf("page-1 items = %d, want 2", len(p1.Items))
+	}
+
+	// Last page (3) has 1 item.
+	p3, err := svc.ListLots(context.Background(), httpkit.PageParams{Page: 3, Limit: 2})
+	if err != nil {
+		t.Fatalf("ListLots page 3: %v", err)
+	}
+	if len(p3.Items) != 1 {
+		t.Errorf("last-page items = %d, want 1", len(p3.Items))
+	}
+}
+
+func TestIntegration_ListLots_Search_MatchesSupplierRef(t *testing.T) {
+	pool := getPool(t)
+	truncateInventory(t)
+	svc := newSvc(pool)
+
+	mat := seedMaterial(t, pool)
+	dim := domain.Dimension{LengthMM: 2000, WidthMM: 1000}
+	cost := domain.Money{Amount: 100_000, Currency: "VND"}
+
+	svc.ReceiveStock(context.Background(), ReceiveStockInput{MaterialID: mat, Dimensions: dim, CostPerSheet: cost, Quantity: 1, SupplierRef: "ACME-2024"})
+	svc.ReceiveStock(context.Background(), ReceiveStockInput{MaterialID: mat, Dimensions: dim, CostPerSheet: cost, Quantity: 1, SupplierRef: "BETA-2024"})
+	svc.ReceiveStock(context.Background(), ReceiveStockInput{MaterialID: mat, Dimensions: dim, CostPerSheet: cost, Quantity: 1, SupplierRef: "GAMMA-2024"})
+
+	result, err := svc.ListLots(context.Background(), httpkit.PageParams{Page: 1, Limit: 10, Search: "acme"})
+	if err != nil {
+		t.Fatalf("ListLots search: %v", err)
+	}
+	if result.TotalItems != 1 {
+		t.Errorf("total_items = %d, want 1 (ILIKE 'acme')", result.TotalItems)
+	}
+	if len(result.Items) != 1 {
+		t.Fatalf("items = %d, want 1", len(result.Items))
+	}
+	if result.Items[0].SupplierRef != "ACME-2024" {
+		t.Errorf("supplier_ref = %q, want 'ACME-2024'", result.Items[0].SupplierRef)
+	}
+}
+
+func TestIntegration_ListLots_Search_NoResults(t *testing.T) {
+	pool := getPool(t)
+	truncateInventory(t)
+	svc := newSvc(pool)
+
+	mat := seedMaterial(t, pool)
+	svc.ReceiveStock(context.Background(), ReceiveStockInput{
+		MaterialID:   mat,
+		Dimensions:   domain.Dimension{LengthMM: 2000, WidthMM: 1000},
+		CostPerSheet: domain.Money{Amount: 100_000, Currency: "VND"},
+		Quantity:     1,
+		SupplierRef:  "ACME-2024",
+	})
+
+	result, err := svc.ListLots(context.Background(), httpkit.PageParams{Page: 1, Limit: 10, Search: "ZZZZZ-NO-MATCH"})
+	if err != nil {
+		t.Fatalf("ListLots no-match search: %v", err)
+	}
+	if result.TotalItems != 0 {
+		t.Errorf("total_items = %d, want 0", result.TotalItems)
+	}
+	if len(result.Items) != 0 {
+		t.Errorf("items = %d, want 0", len(result.Items))
+	}
+	if result.TotalPages < 1 {
+		t.Errorf("total_pages = %d, want at least 1", result.TotalPages)
+	}
+}
+
+// ── ListAvailableSheets pagination ────────────────────────────────────────────
+
+func TestIntegration_ListAvailableSheets_Pagination_CorrectMetadata(t *testing.T) {
+	pool := getPool(t)
+	truncateInventory(t)
+	svc := newSvc(pool)
+
+	mat := seedMaterial(t, pool)
+	// Seed 1 lot with 6 sheets.
+	_, err := svc.ReceiveStock(context.Background(), ReceiveStockInput{
+		MaterialID:   mat,
+		Dimensions:   domain.Dimension{LengthMM: 2000, WidthMM: 1000},
+		CostPerSheet: domain.Money{Amount: 100_000, Currency: "VND"},
+		Quantity:     6,
+		SupplierRef:  "SHEET-PAG",
+	})
+	if err != nil {
+		t.Fatalf("ReceiveStock: %v", err)
+	}
+
+	// Page 1, limit 4 → 2 pages.
+	p1, err := svc.ListAvailableSheets(context.Background(), httpkit.PageParams{Page: 1, Limit: 4})
+	if err != nil {
+		t.Fatalf("ListAvailableSheets page 1: %v", err)
+	}
+	if p1.TotalItems != 6 {
+		t.Errorf("total_items = %d, want 6", p1.TotalItems)
+	}
+	if p1.TotalPages != 2 {
+		t.Errorf("total_pages = %d, want 2", p1.TotalPages)
+	}
+	if len(p1.Items) != 4 {
+		t.Errorf("page-1 items = %d, want 4", len(p1.Items))
+	}
+
+	// Last page (2) has 2 items.
+	p2, err := svc.ListAvailableSheets(context.Background(), httpkit.PageParams{Page: 2, Limit: 4})
+	if err != nil {
+		t.Fatalf("ListAvailableSheets page 2: %v", err)
+	}
+	if len(p2.Items) != 2 {
+		t.Errorf("last-page items = %d, want 2", len(p2.Items))
+	}
+}
+
+func TestIntegration_ListAvailableSheets_Empty_WhenNoneAvailable(t *testing.T) {
+	pool := getPool(t)
+	truncateInventory(t)
+	svc := newSvc(pool)
+
+	result, err := svc.ListAvailableSheets(context.Background(), httpkit.PageParams{Page: 1, Limit: 10})
+	if err != nil {
+		t.Fatalf("ListAvailableSheets: %v", err)
+	}
+	if result.TotalItems != 0 {
+		t.Errorf("total_items = %d, want 0", result.TotalItems)
+	}
+	if len(result.Items) != 0 {
+		t.Errorf("items = %d, want 0", len(result.Items))
+	}
+	if result.TotalPages < 1 {
+		t.Errorf("total_pages = %d, want at least 1", result.TotalPages)
 	}
 }

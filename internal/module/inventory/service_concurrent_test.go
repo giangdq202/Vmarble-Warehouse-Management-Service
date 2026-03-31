@@ -23,6 +23,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/vmarble/warehouse-management-service/internal/domain"
+	"github.com/vmarble/warehouse-management-service/internal/platform/httpkit"
 )
 
 // ── concurrentMockStore ───────────────────────────────────────────────────────
@@ -67,6 +68,9 @@ func (s *concurrentMockStore) insertLot(_ context.Context, _ InventoryLot) error
 func (s *concurrentMockStore) selectLots(_ context.Context) ([]InventoryLot, error) {
 	return nil, nil
 }
+func (s *concurrentMockStore) selectLotsPaged(_ context.Context, _ httpkit.PageParams) ([]InventoryLot, int, error) {
+	return nil, 0, nil
+}
 func (s *concurrentMockStore) insertSheets(_ context.Context, _ []BoardSheet) error { return nil }
 
 func (s *concurrentMockStore) selectSheetByID(_ context.Context, id uuid.UUID) (BoardSheet, error) {
@@ -81,6 +85,9 @@ func (s *concurrentMockStore) selectSheetByID(_ context.Context, id uuid.UUID) (
 
 func (s *concurrentMockStore) selectAvailableSheets(_ context.Context) ([]BoardSheet, error) {
 	return nil, nil
+}
+func (s *concurrentMockStore) selectAvailableSheetsPaged(_ context.Context, _ httpkit.PageParams) ([]BoardSheet, int, error) {
+	return nil, 0, nil
 }
 func (s *concurrentMockStore) updateSheetStatus(_ context.Context, _ uuid.UUID, _ string, _ *uuid.UUID) error {
 	return nil

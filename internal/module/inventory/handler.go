@@ -56,36 +56,47 @@ func (h *Handler) receiveStock(c *gin.Context) {
 
 // listLots godoc
 //
-// @Summary      List inventory lots
+// @Summary      List inventory lots (paginated)
 // @Tags         inventory
 // @Produce      json
-// @Success      200  {array}   InventoryLot
+// @Param        page      query     int     false  "page number (default 1)"
+// @Param        limit     query     int     false  "items per page (default 10, max 100)"
+// @Param        search    query     string  false  "filter by supplier_ref (case-insensitive)"
+// @Param        sort_by   query     string  false  "sort column: supplier_ref (default received_at)"
+// @Param        order     query     string  false  "asc or desc (default desc)"
+// @Success      200  {object}  httpkit.PagedResult[InventoryLot]
 // @Failure      500  {object}  map[string]string
 // @Router       /api/v1/inventory/lots [get]
 func (h *Handler) listLots(c *gin.Context) {
-	lots, err := h.svc.ListLots(c.Request.Context())
+	p := httpkit.BindPageParams(c)
+	result, err := h.svc.ListLots(c.Request.Context(), p)
 	if err != nil {
 		httpkit.Error(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, lots)
+	c.JSON(http.StatusOK, result)
 }
 
 // listSheets godoc
 //
-// @Summary      List available board sheets
+// @Summary      List available board sheets (paginated)
 // @Tags         inventory
 // @Produce      json
-// @Success      200  {array}   BoardSheet
+// @Param        page     query     int     false  "page number (default 1)"
+// @Param        limit    query     int     false  "items per page (default 10, max 100)"
+// @Param        sort_by  query     string  false  "sort column: length_mm|width_mm (default id)"
+// @Param        order    query     string  false  "asc or desc (default asc)"
+// @Success      200  {object}  httpkit.PagedResult[BoardSheet]
 // @Failure      500  {object}  map[string]string
 // @Router       /api/v1/inventory/sheets [get]
 func (h *Handler) listSheets(c *gin.Context) {
-	sheets, err := h.svc.ListAvailableSheets(c.Request.Context())
+	p := httpkit.BindPageParams(c)
+	result, err := h.svc.ListAvailableSheets(c.Request.Context(), p)
 	if err != nil {
 		httpkit.Error(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, sheets)
+	c.JSON(http.StatusOK, result)
 }
 
 // getSheet godoc

@@ -11,6 +11,7 @@ SWAG     ?= go run github.com/swaggo/swag/cmd/swag@v1.8.12
 dev: docker-up migrate-up run
 
 run:
+	@set -a; [ -f .env ] && . ./.env; set +a; \
 	DATABASE_URL="$${DATABASE_URL:-"$(DSN)"}" go run ./cmd/server
 
 build:
@@ -34,7 +35,7 @@ lint:
 # ── API Docs (Swagger) ───────────────────────────────────────
 
 swagger:
-	$(SWAG) init --parseInternal --parseGoList=false -g main.go -d ./cmd/server,./internal/domain,./internal/module/barcode,./internal/module/catalog,./internal/module/costing,./internal/module/inventory,./internal/module/order,./internal/module/planning,./internal/module/production,./internal/platform/auth,./internal/platform/config,./internal/platform/httpkit,./internal/platform/postgres -o docs
+	$(SWAG) init --parseInternal --parseGoList=false -g main.go -d ./cmd/server,./internal/domain,./internal/module/authn,./internal/module/barcode,./internal/module/catalog,./internal/module/costing,./internal/module/inventory,./internal/module/order,./internal/module/planning,./internal/module/production,./internal/platform/auth,./internal/platform/config,./internal/platform/httpkit,./internal/platform/postgres -o docs
 
 # ── Database Migrations ─────────────────────────────────────
 

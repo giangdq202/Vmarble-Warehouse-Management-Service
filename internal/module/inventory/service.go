@@ -6,6 +6,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/vmarble/warehouse-management-service/internal/domain"
+	"github.com/vmarble/warehouse-management-service/internal/platform/httpkit"
 )
 
 type service struct {
@@ -53,16 +54,24 @@ func (s *service) ReceiveStock(ctx context.Context, in ReceiveStockInput) (Inven
 	return lot, nil
 }
 
-func (s *service) ListLots(ctx context.Context) ([]InventoryLot, error) {
-	return s.st.selectLots(ctx)
+func (s *service) ListLots(ctx context.Context, p httpkit.PageParams) (httpkit.PagedResult[InventoryLot], error) {
+	items, total, err := s.st.selectLotsPaged(ctx, p)
+	if err != nil {
+		return httpkit.PagedResult[InventoryLot]{}, err
+	}
+	return httpkit.NewPagedResult(items, total, p), nil
 }
 
 func (s *service) GetSheet(ctx context.Context, sheetID uuid.UUID) (BoardSheet, error) {
 	return s.st.selectSheetByID(ctx, sheetID)
 }
 
-func (s *service) ListAvailableSheets(ctx context.Context) ([]BoardSheet, error) {
-	return s.st.selectAvailableSheets(ctx)
+func (s *service) ListAvailableSheets(ctx context.Context, p httpkit.PageParams) (httpkit.PagedResult[BoardSheet], error) {
+	items, total, err := s.st.selectAvailableSheetsPaged(ctx, p)
+	if err != nil {
+		return httpkit.PagedResult[BoardSheet]{}, err
+	}
+	return httpkit.NewPagedResult(items, total, p), nil
 }
 
 func (s *service) RecordCut(ctx context.Context, in RecordCutInput) (CutResult, error) {

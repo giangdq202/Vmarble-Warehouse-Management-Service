@@ -26,6 +26,8 @@ services:
     environment:
       DATABASE_URL: postgres://vmarble:vmarble@postgres:5432/vmarble?sslmode=disable
       PORT: "8080"
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      AUTH_SECRET: ${AUTH_SECRET}
 
 volumes:
   pgdata:

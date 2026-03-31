@@ -4,10 +4,92 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"strconv"
 
 	"github.com/gin-gonic/gin"
 	"github.com/vmarble/warehouse-management-service/internal/domain"
 )
+
+const (
+	defaultPageLimit = 10
+	maxPageLimit     = 100
+)
+
+// PageParams holds the validated pagination and search query parameters.
+// Handlers bind these from query strings using BindPageParams.
+type PageParams struct {
+	Page   int    // 1-based page number (default: 1)
+	Limit  int    // items per page (default: 10, max: 100)
+	Search string // optional search keyword (ILIKE match)
+	SortBy string // optional column name to sort by
+	Order  string // "asc" or "desc" (default: "asc")
+}
+
+// PagedResult is the standard paginated response envelope returned by all
+// list endpoints that support pagination.
+type PagedResult[T any] struct {
+	Items       []T `json:"items"`
+	TotalItems  int `json:"total_items"`
+	TotalPages  int `json:"total_pages"`
+	CurrentPage int `json:"current_page"`
+	Limit       int `json:"limit"`
+}
+
+// NewPagedResult builds a PagedResult from the fetched items and metadata.
+// items must already be the correct page slice (len <= params.Limit).
+func NewPagedResult[T any](items []T, totalItems int, params PageParams) PagedResult[T] {
+	if items == nil {
+		items = []T{}
+	}
+	totalPages := (totalItems + params.Limit - 1) / params.Limit
+	if totalPages == 0 {
+		totalPages = 1
+	}
+	return PagedResult[T]{
+		Items:       items,
+		TotalItems:  totalItems,
+		TotalPages:  totalPages,
+		CurrentPage: params.Page,
+		Limit:       params.Limit,
+	}
+}
+
+// Offset returns the SQL OFFSET value for the given page parameters.
+func (p PageParams) Offset() int {
+	return (p.Page - 1) * p.Limit
+}
+
+// BindPageParams reads page, limit, search, sort_by, and order from the
+// request query string, applies defaults and caps, and returns a validated
+// PageParams. It never writes an error response — callers receive safe values
+// even when parameters are absent or malformed.
+func BindPageParams(c *gin.Context) PageParams {
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	if page < 1 {
+		page = 1
+	}
+
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", strconv.Itoa(defaultPageLimit)))
+	if limit < 1 {
+		limit = defaultPageLimit
+	}
+	if limit > maxPageLimit {
+		limit = maxPageLimit
+	}
+
+	order := c.DefaultQuery("order", "asc")
+	if order != "asc" && order != "desc" {
+		order = "asc"
+	}
+
+	return PageParams{
+		Page:   page,
+		Limit:  limit,
+		Search: c.Query("search"),
+		SortBy: c.Query("sort_by"),
+		Order:  order,
+	}
+}
 
 // healthz godoc
 //
