@@ -8,11 +8,7 @@ endif
 
 APP_NAME := warehouse-server
 PG_PORT  ?= 5432
-DSN      ?= $(DATABASE_URL)
-# Fallback if DATABASE_URL is not set in .env
-ifeq ($(DSN),)
-    DSN := postgres://giangdq:11232922@localhost:$(PG_PORT)/vmarble?sslmode=disable
-endif
+DSN      := $(DATABASE_URL)
 GOOSE    ?= go run github.com/pressly/goose/v3/cmd/goose@v3.24.3
 SWAG     ?= go run github.com/swaggo/swag/cmd/swag@v1.8.12
 
