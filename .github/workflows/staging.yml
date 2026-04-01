@@ -103,17 +103,19 @@ jobs:
       contents: read
       packages: write
     outputs:
-      image_tag:  ${{ steps.meta.outputs.version }}
-      full_image: ${{ env.REGISTRY }}/${{ steps.vars.outputs.image }}:${{ steps.meta.outputs.version }}
+      image_tag:  sha-${{ steps.vars.outputs.sha_short }}
+      full_image: ${{ env.REGISTRY }}/${{ steps.vars.outputs.image }}:sha-${{ steps.vars.outputs.sha_short }}
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # Docker image name phải lowercase — github.repository có thể chứa chữ hoa
-      - name: Lowercase image name
+      # Docker image name phải lowercase — lấy thêm sha_short để deploy/rollback
+      - name: Set variables
         id: vars
-        run: echo "image=$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')" >> $GITHUB_OUTPUT
+        run: |
+          echo "image=$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')" >> $GITHUB_OUTPUT
+          echo "sha_short=$(echo '${{ github.sha }}' | cut -c1-7)" >> $GITHUB_OUTPUT
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3

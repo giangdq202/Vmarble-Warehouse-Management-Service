@@ -34,11 +34,12 @@ cd /opt/vwms-staging
 
 ### 3. Upload files từ repo
 
+Cấu hình `docker-compose.staging.yml` sử dụng **Double Binding**: cho phép truy cập từ chính server (`127.0.0.1`) và qua mạng riêng ảo (`10.8.0.1` - VPN).
+
 ```bash
 # Chạy từ máy local
 scp deploy/staging/docker-compose.staging.yml root@$STAGING_HOST:/opt/vwms-staging/
 scp deploy/staging/deploy.sh                  root@$STAGING_HOST:/opt/vwms-staging/
-scp deploy/staging/rollback-db.sh             root@$STAGING_HOST:/opt/vwms-staging/
 ssh root@$STAGING_HOST "chmod +x /opt/vwms-staging/*.sh"
 ```
 
@@ -58,35 +59,6 @@ EOF
 chmod 600 /opt/vwms-staging/.env.staging
 ```
 
-### 5. Login GitHub Container Registry (GHCR)
-
-Tạo GitHub PAT tại: **GitHub → Settings → Developer settings → Personal access tokens → Fine-grained tokens**
-Scope cần thiết: `read:packages`
-
-```bash
-echo "YOUR_GITHUB_PAT" | docker login ghcr.io -u giangdq202 --password-stdin
-```
-
-### 6. Tạo SSH deploy key cho GitHub Actions
-
-```bash
-# Trên server
-ssh-keygen -t ed25519 -f /tmp/gh_deploy_key -C "github-actions-staging" -N ""
-
-# Thêm public key vào authorized_keys
-cat /tmp/gh_deploy_key.pub >> ~/.ssh/authorized_keys
-
-# In private key ra để copy vào GitHub Secret
-cat /tmp/gh_deploy_key
-```
-
-### 7. Khởi động PostgreSQL lần đầu
-
-```bash
-cd /opt/vwms-staging
-docker compose -f docker-compose.staging.yml --env-file .env.staging up -d postgres
-```
-
 ---
 
 ## GitHub Secrets & Variables
@@ -97,14 +69,14 @@ Vào **GitHub repo → Settings → Secrets and variables → Actions** và thê
 |---|---|---|
 | `DISCORD_WEBHOOK_URL` | Secret | Webhook URL của Discord channel |
 | `STAGING_HOST` | Secret | IP của staging server |
-| `STAGING_SSH_KEY` | Secret | Nội dung private key từ bước 6 |
-| `STAGING_URL` | **Variable** | `http://<staging-host>:8080` |
-
-> **Lấy Discord Webhook:** Discord Server → Channel Settings → Integrations → Webhooks → New Webhook → Copy URL
+| `STAGING_SSH_KEY` | Secret | Nội dung private key |
+| `STAGING_URL` | **Variable** | `http://<staging-host>:8080` hoặc `http://10.8.0.1:8080` (VPN) |
 
 ---
 
-## Luồng CD tự động
+## Luồng CD tự động (Standard Deployment)
+
+Dự án sử dụng **Immutable Tags** (Git SHA) để đảm bảo tính duy nhất của mỗi bản build.
 
 ```
 Merge PR vào dev
@@ -112,32 +84,21 @@ Merge PR vào dev
       ▼
 Job: Build & Push
   ① docker build (multi-stage, alpine)
-  ② docker push → ghcr.io/giangdq202/...:sha-<short>
-  ③ Discord: 🔨 Build OK / ❌ Build FAIL + link log
-      │ (chỉ tiếp tục nếu build thành công)
+  ② docker push 2 tags:
+     - ghcr.io/...:sha-<short> (Dùng để deploy/rollback - KHÔNG ĐỔI)
+     - ghcr.io/...:staging-latest (Dùng để tracking bản mới nhất)
+  ③ Discord: 🔨 Build OK
+      │
       ▼
 Job: Deploy Staging
   ① SSH vào staging server ($STAGING_HOST)
-  ② /opt/vwms-staging/deploy.sh <image>
-     - Pull image mới
-     - docker compose restart app (postgres không bị ảnh hưởng)
+  ② /opt/vwms-staging/deploy.sh <image-path>:sha-<short>
+     - Pull image SHA mới (Không ghi đè lên image cũ)
+     - Restart app container
      - Health check /healthz mỗi 5s, tối đa 60s
-     - OK  → lưu state, exit 0
-     - FAIL→ rollback image cũ, exit 1
+     - OK  → Lưu SHA vào .last_good_image, exit 0
+     - FAIL→ Lấy SHA cũ từ .last_good_image để rollback, exit 1
   ③ Discord: 🚀 Deploy OK / 💥 Deploy FAIL + đã rollback
-```
-
----
-
-## Trigger deploy thủ công
-
-Nếu cần deploy lại mà không có code mới:
-
-```bash
-# Trên GitHub: Actions → Staging CD → Re-run jobs
-# Hoặc tạo empty commit:
-git commit --allow-empty -m "chore: trigger staging redeploy"
-git push origin dev
 ```
 
 ---
@@ -150,10 +111,7 @@ ssh root@$STAGING_HOST
 # Logs của app container
 docker logs vwms-staging-app-1 --tail 100 -f
 
-# Logs của postgres
-docker logs vwms-staging-postgres-1 --tail 50
-
-# Trạng thái deploy gần nhất
+# Trạng thái deploy gần nhất (Sẽ thấy tag SHA ở đây)
 cat /opt/vwms-staging/.last_good_image
 ```
 
@@ -163,37 +121,36 @@ cat /opt/vwms-staging/.last_good_image
 
 ### Rollback app (code)
 
+Vì mỗi image có tag SHA riêng, việc rollback rất đơn giản và an toàn:
+
 ```bash
 ssh root@$STAGING_HOST
 cd /opt/vwms-staging
 
-# Xem image đang chạy
+# Xem image SHA đang chạy tốt nhất
 cat .last_good_image
 
-# Rollback về image cụ thể
-APP_IMAGE="ghcr.io/giangdq202/vmarble-warehouse-managment-service:sha-<prev>" \
+# Nếu cần rollback về một SHA cụ thể khác
+APP_IMAGE="ghcr.io/giangdq202/vmarble-warehouse-management-service:sha-a1b2c3d" \
   docker compose -f docker-compose.staging.yml --env-file .env.staging up -d app
 ```
 
-### Xử lý lỗi Database Migration (Fix-forward)
+### Xử lý Database & Tương thích ngược
 
-Theo triết lý phát triển của dự án, chúng ta **không thực hiện rollback database** (lệnh `down`) trên các môi trường staging/production để đảm bảo tính truy vết (traceability) và an toàn dữ liệu.
+Dự án áp dụng triết lý **"Fix-forward"** và **"Append-only Schema"**:
 
-Nếu một migration gây lỗi, quy trình xử lý như sau:
-1. **Rollback Code:** Nếu lỗi gây sập app, thực hiện rollback code về version trước đó (xem mục trên).
-2. **Tạo Migration mới:** Tạo một file migration mới (ví dụ: `000x_fix_error_in_000y.sql`) để thực hiện các lệnh SQL sửa lỗi hoặc revert thay đổi.
-3. **Deploy:** Merge migration mới vào nhánh `dev` để hệ thống tự động apply lên server.
-
-> 💡 **Lợi ích:** Mọi thay đổi và sai sót đều được lưu vết trong lịch sử Git và bảng `goose_db_version`.
+1.  **Không chạy `migrate down` tự động:** Để đảm bảo an toàn dữ liệu và tính truy vết.
+2.  **Append-only (Chỉ thêm, không xóa/sửa):**
+    *   Trong các migration, ưu tiên thêm cột mới (nullable hoặc có default) thay vì đổi tên hoặc xóa cột cũ.
+    *   Việc này giúp App cũ (sau khi rollback) vẫn tìm thấy cấu hình DB cần thiết và chạy bình thường (Backward Compatibility).
+3.  **Quy trình dọn dẹp:** Chỉ thực hiện xóa cột cũ hoặc migration "phá hủy" sau khi phiên bản App mới đã chạy ổn định trên Production/Staging một thời gian dài.
 
 ---
 
 ## Kiểm tra health staging
 
 ```bash
+# Thử từ nội bộ server hoặc qua VPN
 curl http://$STAGING_HOST:8080/healthz
-# Expected: 200 OK
-
-# Swagger UI
-open http://$STAGING_HOST:8080/swagger/index.html
+curl http://10.8.0.1:8080/healthz
 ```
