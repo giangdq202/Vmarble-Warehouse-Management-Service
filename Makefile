@@ -1,8 +1,18 @@
 .PHONY: dev run build test test-integration lint swagger migrate-up migrate-down migrate-create docker-up docker-down
 
+# Load .env if it exists
+ifneq (,$(wildcard ./.env))
+    include .env
+    export
+endif
+
 APP_NAME := warehouse-server
-PG_PORT  ?= 5433
-DSN      ?= postgres://vmarble:vmarble@localhost:$(PG_PORT)/vmarble?sslmode=disable
+PG_PORT  ?= 5432
+DSN      ?= $(DATABASE_URL)
+# Fallback if DATABASE_URL is not set in .env
+ifeq ($(DSN),)
+    DSN := postgres://giangdq:11232922@localhost:$(PG_PORT)/vmarble?sslmode=disable
+endif
 GOOSE    ?= go run github.com/pressly/goose/v3/cmd/goose@v3.24.3
 SWAG     ?= go run github.com/swaggo/swag/cmd/swag@v1.8.12
 
@@ -11,8 +21,7 @@ SWAG     ?= go run github.com/swaggo/swag/cmd/swag@v1.8.12
 dev: docker-up migrate-up run
 
 run:
-	@set -a; [ -f .env ] && . ./.env; set +a; \
-	DATABASE_URL="$${DATABASE_URL:-"$(DSN)"}" go run ./cmd/server
+	go run ./cmd/server
 
 build:
 	go build -o bin/$(APP_NAME) ./cmd/server
