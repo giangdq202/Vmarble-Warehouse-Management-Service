@@ -601,18 +601,42 @@ const docTemplate = `{
                 "tags": [
                     "inventory"
                 ],
-                "summary": "Find available remnants",
+                "summary": "List remnants with filters (paginated)",
                 "parameters": [
                     {
                         "type": "integer",
-                        "description": "min length (mm)",
+                        "description": "Minimum usable length in mm (bounding box)",
                         "name": "min_length_mm",
                         "in": "query"
                     },
                     {
                         "type": "integer",
-                        "description": "min width (mm)",
+                        "description": "Minimum usable width in mm (bounding box)",
                         "name": "min_width_mm",
+                        "in": "query"
+                    },
+                    {
+                        "enum": [
+                            "AVAILABLE",
+                            "ALLOCATED",
+                            "CONSUMED",
+                            "WASTE"
+                        ],
+                        "type": "string",
+                        "description": "Remnant status (default: AVAILABLE)",
+                        "name": "status",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Page number (default 1)",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Items per page (default 10, max 100)",
+                        "name": "limit",
                         "in": "query"
                     }
                 ],
@@ -620,10 +644,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "type": "array",
-                            "items": {
-                                "$ref": "#/definitions/inventory.Remnant"
-                            }
+                            "$ref": "#/definitions/httpkit.PagedResult-inventory_Remnant"
                         }
                     },
                     "500": {
@@ -689,6 +710,56 @@ const docTemplate = `{
                     },
                     "409": {
                         "description": "Conflict",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/inventory/remnants/{id}/lineage": {
+            "get": {
+                "description": "Returns all remnants that share the same parent board as the given remnant, ordered by created_at ASC.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "inventory"
+                ],
+                "summary": "Get full lineage tree for a remnant",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Remnant ID (uuid)",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/inventory.Remnant"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -1672,6 +1743,38 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/storage-locations": {
+            "get": {
+                "description": "Returns all storage locations where is_active = true, ordered by zone, rack, shelf.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "inventory"
+                ],
+                "summary": "List active storage locations",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/inventory.StorageLocation"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/work-orders": {
             "get": {
                 "produces": [
@@ -2458,6 +2561,29 @@ const docTemplate = `{
                 }
             }
         },
+        "httpkit.PagedResult-inventory_Remnant": {
+            "type": "object",
+            "properties": {
+                "current_page": {
+                    "type": "integer"
+                },
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/inventory.Remnant"
+                    }
+                },
+                "limit": {
+                    "type": "integer"
+                },
+                "total_items": {
+                    "type": "integer"
+                },
+                "total_pages": {
+                    "type": "integer"
+                }
+            }
+        },
         "inventory.BoardSheet": {
             "type": "object",
             "properties": {
@@ -2467,16 +2593,28 @@ const docTemplate = `{
                 "dimensions": {
                     "$ref": "#/definitions/domain.Dimension"
                 },
+                "grain_pattern": {
+                    "type": "string"
+                },
                 "id": {
                     "type": "string"
                 },
                 "issued_to_work_order_id": {
                     "type": "string"
                 },
+                "lot_batch": {
+                    "type": "string"
+                },
                 "lot_id": {
                     "type": "string"
                 },
+                "quality_grade": {
+                    "type": "string"
+                },
                 "status": {
+                    "type": "string"
+                },
+                "supplier_code": {
                     "type": "string"
                 }
             }
@@ -2538,6 +2676,13 @@ const docTemplate = `{
         "inventory.RecordCutInput": {
             "type": "object",
             "properties": {
+                "bounding_box_length_mm": {
+                    "description": "BoundingBoxLengthMM and BoundingBoxWidthMM define the usable area of the\nnew remnant produced by this cut (e.g. after a chipped corner is excluded).\nBoth must be provided together. If omitted, the system defaults to the\nactual remnant dimension so that search queries always have a value to\nfilter on. Must not exceed the corresponding RemnantDimension axis.",
+                    "type": "integer"
+                },
+                "bounding_box_width_mm": {
+                    "type": "integer"
+                },
                 "remnant_dimension": {
                     "$ref": "#/definitions/domain.Dimension"
                 },
@@ -2564,13 +2709,28 @@ const docTemplate = `{
                 "allocated_to_wo": {
                     "type": "string"
                 },
+                "bin_location_id": {
+                    "type": "string"
+                },
+                "bounding_box_length_mm": {
+                    "type": "integer"
+                },
+                "bounding_box_width_mm": {
+                    "type": "integer"
+                },
                 "created_at": {
                     "type": "string"
                 },
                 "dimensions": {
                     "$ref": "#/definitions/domain.Dimension"
                 },
+                "grain_pattern": {
+                    "type": "string"
+                },
                 "id": {
+                    "type": "string"
+                },
+                "lot_batch": {
                     "type": "string"
                 },
                 "parent_board_id": {
@@ -2579,8 +2739,43 @@ const docTemplate = `{
                 "parent_remnant_id": {
                     "type": "string"
                 },
+                "quality_grade": {
+                    "type": "string"
+                },
                 "status": {
                     "$ref": "#/definitions/domain.RemnantStatus"
+                },
+                "supplier_code": {
+                    "type": "string"
+                }
+            }
+        },
+        "inventory.StorageLocation": {
+            "type": "object",
+            "properties": {
+                "barcode": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "is_active": {
+                    "type": "boolean"
+                },
+                "label": {
+                    "type": "string"
+                },
+                "rack": {
+                    "type": "string"
+                },
+                "shelf": {
+                    "type": "string"
+                },
+                "zone": {
+                    "type": "string"
                 }
             }
         },
@@ -2820,12 +3015,7 @@ const docTemplate = `{
             "name": "Authorization",
             "in": "header"
         }
-    },
-    "security": [
-        {
-            "BearerAuth": []
-        }
-    ]
+    }
 }`
 
 // SwaggerInfo holds exported Swagger Info so clients can modify it

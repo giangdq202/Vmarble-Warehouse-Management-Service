@@ -261,3 +261,26 @@ func (s *service) MarkRemnantWaste(ctx context.Context, remnantID uuid.UUID) err
 func (s *service) GetRemnantLineage(ctx context.Context, boardSheetID uuid.UUID) ([]Remnant, error) {
 	return s.st.selectRemnantsByBoardSheet(ctx, boardSheetID)
 }
+
+func (s *service) ListRemnants(ctx context.Context, f RemnantFilter, p httpkit.PageParams) (httpkit.PagedResult[Remnant], error) {
+	if f.Status == "" {
+		f.Status = domain.RemnantAvailable
+	}
+	items, total, err := s.st.selectRemnantsByFilter(ctx, f, p)
+	if err != nil {
+		return httpkit.PagedResult[Remnant]{}, err
+	}
+	return httpkit.NewPagedResult(items, total, p), nil
+}
+
+func (s *service) GetRemnantLineageByRemnant(ctx context.Context, remnantID uuid.UUID) ([]Remnant, error) {
+	remnant, err := s.st.selectRemnantByID(ctx, remnantID)
+	if err != nil {
+		return nil, err
+	}
+	return s.st.selectRemnantsByBoardSheet(ctx, remnant.ParentBoardID)
+}
+
+func (s *service) ListStorageLocations(ctx context.Context) ([]StorageLocation, error) {
+	return s.st.selectActiveStorageLocations(ctx)
+}

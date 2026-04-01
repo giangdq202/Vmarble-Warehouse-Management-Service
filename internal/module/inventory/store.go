@@ -24,9 +24,15 @@ type store interface {
 
 	insertRemnant(ctx context.Context, r Remnant) error
 	selectAvailableRemnantsByMinDimension(ctx context.Context, minDim domain.Dimension) ([]Remnant, error)
+	// selectRemnantsByFilter returns a paginated slice of remnants matching the
+	// filter, plus the total count of matching rows.
+	selectRemnantsByFilter(ctx context.Context, f RemnantFilter, p httpkit.PageParams) ([]Remnant, int, error)
 	selectRemnantsByBoardSheet(ctx context.Context, boardSheetID uuid.UUID) ([]Remnant, error)
 	selectRemnantByID(ctx context.Context, id uuid.UUID) (Remnant, error)
 	updateRemnantStatus(ctx context.Context, id uuid.UUID, status domain.RemnantStatus, allocatedToWO *uuid.UUID) error
+
+	// selectActiveStorageLocations returns all storage locations where is_active = true.
+	selectActiveStorageLocations(ctx context.Context) ([]StorageLocation, error)
 
 	// recordCutAtomically executes all cut-related writes inside a single DB
 	// transaction. It acquires a row-level lock (SELECT … FOR UPDATE) on the

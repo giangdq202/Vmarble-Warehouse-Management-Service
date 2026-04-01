@@ -308,19 +308,42 @@ definitions:
       total_pages:
         type: integer
     type: object
+  httpkit.PagedResult-inventory_Remnant:
+    properties:
+      current_page:
+        type: integer
+      items:
+        items:
+          $ref: '#/definitions/inventory.Remnant'
+        type: array
+      limit:
+        type: integer
+      total_items:
+        type: integer
+      total_pages:
+        type: integer
+    type: object
   inventory.BoardSheet:
     properties:
       cost_per_sheet:
         $ref: '#/definitions/domain.Money'
       dimensions:
         $ref: '#/definitions/domain.Dimension'
+      grain_pattern:
+        type: string
       id:
         type: string
       issued_to_work_order_id:
         type: string
+      lot_batch:
+        type: string
       lot_id:
         type: string
+      quality_grade:
+        type: string
       status:
+        type: string
+      supplier_code:
         type: string
     type: object
   inventory.CutResult:
@@ -360,6 +383,16 @@ definitions:
     type: object
   inventory.RecordCutInput:
     properties:
+      bounding_box_length_mm:
+        description: |-
+          BoundingBoxLengthMM and BoundingBoxWidthMM define the usable area of the
+          new remnant produced by this cut (e.g. after a chipped corner is excluded).
+          Both must be provided together. If omitted, the system defaults to the
+          actual remnant dimension so that search queries always have a value to
+          filter on. Must not exceed the corresponding RemnantDimension axis.
+        type: integer
+      bounding_box_width_mm:
+        type: integer
       remnant_dimension:
         $ref: '#/definitions/domain.Dimension'
       remnant_id:
@@ -377,18 +410,51 @@ definitions:
     properties:
       allocated_to_wo:
         type: string
+      bin_location_id:
+        type: string
+      bounding_box_length_mm:
+        type: integer
+      bounding_box_width_mm:
+        type: integer
       created_at:
         type: string
       dimensions:
         $ref: '#/definitions/domain.Dimension'
+      grain_pattern:
+        type: string
       id:
+        type: string
+      lot_batch:
         type: string
       parent_board_id:
         type: string
       parent_remnant_id:
         type: string
+      quality_grade:
+        type: string
       status:
         $ref: '#/definitions/domain.RemnantStatus'
+      supplier_code:
+        type: string
+    type: object
+  inventory.StorageLocation:
+    properties:
+      barcode:
+        type: string
+      created_at:
+        type: string
+      id:
+        type: string
+      is_active:
+        type: boolean
+      label:
+        type: string
+      rack:
+        type: string
+      shelf:
+        type: string
+      zone:
+        type: string
     type: object
   order.CreateLineItemInput:
     properties:
@@ -923,13 +989,30 @@ paths:
   /api/v1/inventory/remnants:
     get:
       parameters:
-      - description: min length (mm)
+      - description: Minimum usable length in mm (bounding box)
         in: query
         name: min_length_mm
         type: integer
-      - description: min width (mm)
+      - description: Minimum usable width in mm (bounding box)
         in: query
         name: min_width_mm
+        type: integer
+      - description: 'Remnant status (default: AVAILABLE)'
+        enum:
+        - AVAILABLE
+        - ALLOCATED
+        - CONSUMED
+        - WASTE
+        in: query
+        name: status
+        type: string
+      - description: Page number (default 1)
+        in: query
+        name: page
+        type: integer
+      - description: Items per page (default 10, max 100)
+        in: query
+        name: limit
         type: integer
       produces:
       - application/json
@@ -937,16 +1020,14 @@ paths:
         "200":
           description: OK
           schema:
-            items:
-              $ref: '#/definitions/inventory.Remnant'
-            type: array
+            $ref: '#/definitions/httpkit.PagedResult-inventory_Remnant'
         "500":
           description: Internal Server Error
           schema:
             additionalProperties:
               type: string
             type: object
-      summary: Find available remnants
+      summary: List remnants with filters (paginated)
       tags:
       - inventory
   /api/v1/inventory/remnants/{id}/allocate:
@@ -987,6 +1068,40 @@ paths:
               type: string
             type: object
       summary: Allocate remnant to work order
+      tags:
+      - inventory
+  /api/v1/inventory/remnants/{id}/lineage:
+    get:
+      description: Returns all remnants that share the same parent board as the given
+        remnant, ordered by created_at ASC.
+      parameters:
+      - description: Remnant ID (uuid)
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/inventory.Remnant'
+            type: array
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Get full lineage tree for a remnant
       tags:
       - inventory
   /api/v1/inventory/remnants/{id}/waste:
@@ -1623,6 +1738,28 @@ paths:
       summary: Set BOM for SKU
       tags:
       - catalog
+  /api/v1/storage-locations:
+    get:
+      description: Returns all storage locations where is_active = true, ordered by
+        zone, rack, shelf.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/inventory.StorageLocation'
+            type: array
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: List active storage locations
+      tags:
+      - inventory
   /api/v1/work-orders:
     get:
       parameters:
@@ -1843,6 +1980,3 @@ securityDefinitions:
     name: Authorization
     type: apiKey
 swagger: "2.0"
-
-security:
-- BearerAuth: []

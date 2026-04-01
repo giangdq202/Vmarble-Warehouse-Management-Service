@@ -26,9 +26,12 @@ func (h *Handler) Register(rg *gin.RouterGroup) {
 	inv.GET("/sheets/:id", h.getSheet)
 	inv.GET("/sheets/:id/lineage", h.lineage)
 	inv.POST("/cuts", h.recordCut)
-	inv.GET("/remnants", h.findRemnants)
+	inv.GET("/remnants", h.listRemnants)
+	inv.GET("/remnants/:id/lineage", h.getRemnantLineage)
 	inv.POST("/remnants/:id/allocate", h.allocateRemnant)
 	inv.POST("/remnants/:id/waste", h.markWaste)
+
+	rg.GET("/storage-locations", h.listStorageLocations)
 }
 
 // receiveStock godoc
@@ -171,27 +174,80 @@ func (h *Handler) recordCut(c *gin.Context) {
 	c.JSON(http.StatusCreated, result)
 }
 
-// findRemnants godoc
+// listRemnants godoc
 //
-// @Summary      Find available remnants
+// @Summary      List remnants with filters (paginated)
 // @Tags         inventory
 // @Produce      json
-// @Param        min_length_mm  query     int  false  "min length (mm)"
-// @Param        min_width_mm   query     int  false  "min width (mm)"
-// @Success      200            {array}   Remnant
+// @Param        min_length_mm  query     int     false  "Minimum usable length in mm (bounding box)"
+// @Param        min_width_mm   query     int     false  "Minimum usable width in mm (bounding box)"
+// @Param        status         query     string  false  "Remnant status (default: AVAILABLE)"  Enums(AVAILABLE,ALLOCATED,CONSUMED,WASTE)
+// @Param        page           query     int     false  "Page number (default 1)"
+// @Param        limit          query     int     false  "Items per page (default 10, max 100)"
+// @Success      200            {object}  httpkit.PagedResult[Remnant]
 // @Failure      500            {object}  map[string]string
 // @Router       /api/v1/inventory/remnants [get]
-func (h *Handler) findRemnants(c *gin.Context) {
+func (h *Handler) listRemnants(c *gin.Context) {
 	minLength, _ := strconv.Atoi(c.DefaultQuery("min_length_mm", "0"))
 	minWidth, _ := strconv.Atoi(c.DefaultQuery("min_width_mm", "0"))
-	minDim := domain.Dimension{LengthMM: minLength, WidthMM: minWidth}
+	status := domain.RemnantStatus(c.DefaultQuery("status", string(domain.RemnantAvailable)))
 
-	remnants, err := h.svc.FindAvailableRemnants(c.Request.Context(), minDim)
+	f := RemnantFilter{
+		MinLengthMM: minLength,
+		MinWidthMM:  minWidth,
+		Status:      status,
+	}
+	p := httpkit.BindPageParams(c)
+
+	result, err := h.svc.ListRemnants(c.Request.Context(), f, p)
+	if err != nil {
+		httpkit.Error(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, result)
+}
+
+// getRemnantLineage godoc
+//
+// @Summary      Get full lineage tree for a remnant
+// @Description  Returns all remnants that share the same parent board as the given remnant, ordered by created_at ASC.
+// @Tags         inventory
+// @Produce      json
+// @Param        id   path      string  true  "Remnant ID (uuid)"
+// @Success      200  {array}   Remnant
+// @Failure      400  {object}  map[string]string
+// @Failure      404  {object}  map[string]string
+// @Router       /api/v1/inventory/remnants/{id}/lineage [get]
+func (h *Handler) getRemnantLineage(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+	remnants, err := h.svc.GetRemnantLineageByRemnant(c.Request.Context(), id)
 	if err != nil {
 		httpkit.Error(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, remnants)
+}
+
+// listStorageLocations godoc
+//
+// @Summary      List active storage locations
+// @Description  Returns all storage locations where is_active = true, ordered by zone, rack, shelf.
+// @Tags         inventory
+// @Produce      json
+// @Success      200  {array}   StorageLocation
+// @Failure      500  {object}  map[string]string
+// @Router       /api/v1/storage-locations [get]
+func (h *Handler) listStorageLocations(c *gin.Context) {
+	locs, err := h.svc.ListStorageLocations(c.Request.Context())
+	if err != nil {
+		httpkit.Error(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, locs)
 }
 
 // allocateRemnant godoc

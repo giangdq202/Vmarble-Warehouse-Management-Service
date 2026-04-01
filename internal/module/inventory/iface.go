@@ -60,6 +60,32 @@ type CutResult struct {
 	RemnantID       *uuid.UUID `json:"remnant_id,omitempty"`
 }
 
+// RemnantFilter holds optional filter parameters for ListRemnants.
+// Zero values mean "no filter" for that field.
+type RemnantFilter struct {
+	// MinLengthMM filters by COALESCE(bounding_box_length_mm, length_mm) >= MinLengthMM.
+	// 0 means no lower-bound filter on length.
+	MinLengthMM int
+	// MinWidthMM filters by COALESCE(bounding_box_width_mm, width_mm) >= MinWidthMM.
+	// 0 means no lower-bound filter on width.
+	MinWidthMM int
+	// Status restricts results to a specific remnant status.
+	// Defaults to AVAILABLE when empty.
+	Status domain.RemnantStatus
+}
+
+// StorageLocation represents a physical shelf / bin where remnants are stored.
+type StorageLocation struct {
+	ID        uuid.UUID `json:"id"`
+	Zone      string    `json:"zone"`
+	Rack      string    `json:"rack"`
+	Shelf     string    `json:"shelf"`
+	Label     string    `json:"label"`
+	Barcode   string    `json:"barcode"`
+	IsActive  bool      `json:"is_active"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
 type Remnant struct {
 	ID                  uuid.UUID            `json:"id"`
 	ParentBoardID       uuid.UUID            `json:"parent_board_id"`
@@ -86,8 +112,19 @@ type Service interface {
 
 	RecordCut(ctx context.Context, in RecordCutInput) (CutResult, error)
 
+	// ListRemnants returns a paginated list of remnants matching the filter.
+	// Status defaults to AVAILABLE when filter.Status is empty.
+	ListRemnants(ctx context.Context, f RemnantFilter, p httpkit.PageParams) (httpkit.PagedResult[Remnant], error)
+	// FindAvailableRemnants returns the full sorted list of AVAILABLE remnants that
+	// meet the minimum bounding-box dimension. Used by the Best Fit algorithm.
 	FindAvailableRemnants(ctx context.Context, minDim domain.Dimension) ([]Remnant, error)
 	AllocateRemnant(ctx context.Context, remnantID uuid.UUID, workOrderID uuid.UUID) error
 	MarkRemnantWaste(ctx context.Context, remnantID uuid.UUID) error
 	GetRemnantLineage(ctx context.Context, boardSheetID uuid.UUID) ([]Remnant, error)
+	// GetRemnantLineageByRemnant resolves the parent_board_id from the given
+	// remnant, then returns all remnants in the same lineage tree.
+	GetRemnantLineageByRemnant(ctx context.Context, remnantID uuid.UUID) ([]Remnant, error)
+
+	// ListStorageLocations returns all active storage locations.
+	ListStorageLocations(ctx context.Context) ([]StorageLocation, error)
 }
