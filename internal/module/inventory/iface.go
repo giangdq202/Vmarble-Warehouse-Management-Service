@@ -46,6 +46,13 @@ type RecordCutInput struct {
 	SKUID            uuid.UUID         `json:"sku_id"`
 	UsedDimension    domain.Dimension  `json:"used_dimension"`
 	RemnantDimension *domain.Dimension `json:"remnant_dimension,omitempty"`
+	// BoundingBoxLengthMM and BoundingBoxWidthMM define the usable area of the
+	// new remnant produced by this cut (e.g. after a chipped corner is excluded).
+	// Both must be provided together. If omitted, the system defaults to the
+	// actual remnant dimension so that search queries always have a value to
+	// filter on. Must not exceed the corresponding RemnantDimension axis.
+	BoundingBoxLengthMM *int `json:"bounding_box_length_mm,omitempty"`
+	BoundingBoxWidthMM  *int `json:"bounding_box_width_mm,omitempty"`
 }
 
 type CutResult struct {
