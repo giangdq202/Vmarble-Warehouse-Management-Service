@@ -270,8 +270,10 @@ func (s *pgStore) selectAvailableRemnantsByMinDimension(ctx context.Context, min
 		        supplier_code, lot_batch, grain_pattern, quality_grade,
 		        bounding_box_length_mm, bounding_box_width_mm, bin_location_id, created_at
 		 FROM remnants
-		 WHERE status = 'AVAILABLE' AND length_mm >= $1 AND width_mm >= $2
-		 ORDER BY (length_mm * width_mm) ASC`,
+		 WHERE status = 'AVAILABLE'
+		   AND COALESCE(bounding_box_length_mm, length_mm) >= $1
+		   AND COALESCE(bounding_box_width_mm, width_mm) >= $2
+		 ORDER BY (COALESCE(bounding_box_length_mm, length_mm) * COALESCE(bounding_box_width_mm, width_mm)) ASC`,
 		minDim.LengthMM, minDim.WidthMM)
 	if err != nil {
 		return nil, err

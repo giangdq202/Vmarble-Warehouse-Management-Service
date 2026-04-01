@@ -169,17 +169,47 @@ func (s *service) RecordCut(ctx context.Context, in RecordCutInput) (CutResult, 
 	}
 
 	if in.RemnantDimension != nil {
+		// Validate bounding_box does not exceed the actual remnant dimension.
+		// Both axes must be provided together; partial specification is rejected.
+		if (in.BoundingBoxLengthMM == nil) != (in.BoundingBoxWidthMM == nil) {
+			return CutResult{}, domain.NewBizError(domain.ErrInvalidInput,
+				"bounding_box_length_mm and bounding_box_width_mm must be provided together")
+		}
+		if in.BoundingBoxLengthMM != nil && in.BoundingBoxWidthMM != nil {
+			if *in.BoundingBoxLengthMM > in.RemnantDimension.LengthMM ||
+				*in.BoundingBoxWidthMM > in.RemnantDimension.WidthMM {
+				return CutResult{}, domain.NewBizError(domain.ErrInvalidInput,
+					"usable dimension cannot exceed actual dimension")
+			}
+		}
+
+		// Default bounding_box to the actual remnant dimension when not provided.
+		// This guarantees that FindAvailableRemnants can always filter on bounding_box
+		// without needing to fall back to length_mm / width_mm at query time.
+		bbLen := in.BoundingBoxLengthMM
+		bbWid := in.BoundingBoxWidthMM
+		if bbLen == nil {
+			v := in.RemnantDimension.LengthMM
+			bbLen = &v
+		}
+		if bbWid == nil {
+			v := in.RemnantDimension.WidthMM
+			bbWid = &v
+		}
+
 		newRemnant := Remnant{
-			ID:              uuid.New(),
-			ParentBoardID:   parentBoardID,
-			ParentRemnantID: parentRemnantID,
-			Dimensions:      *in.RemnantDimension,
-			Status:          domain.RemnantAvailable,
-			SupplierCode:    inheritSupplierCode,
-			LotBatch:        inheritLotBatch,
-			GrainPattern:    inheritGrainPattern,
-			QualityGrade:    inheritQualityGrade,
-			CreatedAt:       time.Now().UTC(),
+			ID:                  uuid.New(),
+			ParentBoardID:       parentBoardID,
+			ParentRemnantID:     parentRemnantID,
+			Dimensions:          *in.RemnantDimension,
+			Status:              domain.RemnantAvailable,
+			SupplierCode:        inheritSupplierCode,
+			LotBatch:            inheritLotBatch,
+			GrainPattern:        inheritGrainPattern,
+			QualityGrade:        inheritQualityGrade,
+			BoundingBoxLengthMM: bbLen,
+			BoundingBoxWidthMM:  bbWid,
+			CreatedAt:           time.Now().UTC(),
 		}
 		op.NewRemnant = &newRemnant
 	}

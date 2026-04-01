@@ -1698,3 +1698,129 @@ func TestRecordCut_SourceWithNilAttributes_NewRemnantHasNilAttributes(t *testing
 	}
 	assertMaterialAttrs(t, op.NewRemnant, nil, nil, nil, nil)
 }
+
+// ── Issue 2.4: Bounding Box ───────────────────────────────────────────────────
+
+// TestRemnant_BoundingBoxExceedsActual_ReturnsErrInvalidInput verifies that
+// providing a bounding_box larger than the actual remnant dimension is rejected
+// before any store operation is attempted.
+func TestRemnant_BoundingBoxExceedsActual_ReturnsErrInvalidInput(t *testing.T) {
+	sheetID := uuid.New()
+	st := &mockStore{selectSheetByIDResult: availableSheet(sheetID)}
+	svc := NewService(st)
+
+	remnantDim := dim800x400 // actual: 800×400
+	bbLen := 801             // exceeds actual length by 1 mm
+	bbWid := 400
+
+	_, err := svc.RecordCut(context.Background(), RecordCutInput{
+		SheetID:             ptr(sheetID),
+		WorkOrderID:         uuid.New(),
+		SKUID:               uuid.New(),
+		UsedDimension:       dim1000x500,
+		RemnantDimension:    &remnantDim,
+		BoundingBoxLengthMM: &bbLen,
+		BoundingBoxWidthMM:  &bbWid,
+	})
+
+	if !errors.Is(err, domain.ErrInvalidInput) {
+		t.Errorf("expected ErrInvalidInput when bounding_box exceeds actual dimension, got %v", err)
+	}
+	if st.recordCutAtomicallyCalled {
+		t.Error("recordCutAtomically must NOT be called when bounding_box validation fails")
+	}
+}
+
+// TestRemnant_NoBoundingBoxProvided_DefaultsToActualDimension verifies that
+// when the caller omits bounding_box, the new remnant gets bounding_box == actual
+// dimension so that search queries always have a concrete value to filter on.
+func TestRemnant_NoBoundingBoxProvided_DefaultsToActualDimension(t *testing.T) {
+	sheetID := uuid.New()
+	st := &mockStore{selectSheetByIDResult: availableSheet(sheetID)}
+	svc := NewService(st)
+
+	remnantDim := dim800x400 // actual: 800×400; no bounding_box provided
+
+	_, err := svc.RecordCut(context.Background(), RecordCutInput{
+		SheetID:          ptr(sheetID),
+		WorkOrderID:      uuid.New(),
+		SKUID:            uuid.New(),
+		UsedDimension:    dim1000x500,
+		RemnantDimension: &remnantDim,
+		// BoundingBoxLengthMM and BoundingBoxWidthMM intentionally omitted
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	op := st.recordCutAtomicallyOp
+	if op.NewRemnant == nil {
+		t.Fatal("NewRemnant must be non-nil")
+	}
+	r := op.NewRemnant
+	if r.BoundingBoxLengthMM == nil {
+		t.Fatal("BoundingBoxLengthMM must be set (defaulted to actual)")
+	}
+	if *r.BoundingBoxLengthMM != remnantDim.LengthMM {
+		t.Errorf("BoundingBoxLengthMM = %d, want %d (actual length)", *r.BoundingBoxLengthMM, remnantDim.LengthMM)
+	}
+	if r.BoundingBoxWidthMM == nil {
+		t.Fatal("BoundingBoxWidthMM must be set (defaulted to actual)")
+	}
+	if *r.BoundingBoxWidthMM != remnantDim.WidthMM {
+		t.Errorf("BoundingBoxWidthMM = %d, want %d (actual width)", *r.BoundingBoxWidthMM, remnantDim.WidthMM)
+	}
+}
+
+// TestFindAvailableRemnants_UsesBoundingBoxForSearch verifies that
+// FindAvailableRemnants delegates to the store with the correct min dimension
+// and returns the remnants the store provides (the store mock is the source of
+// truth for the bounding_box filter — the SQL is tested in pgstore_integration_test).
+func TestFindAvailableRemnants_UsesBoundingBoxForSearch(t *testing.T) {
+	boardID := uuid.New()
+	remID := uuid.New()
+
+	// Remnant whose bounding_box (700×350) is smaller than actual (800×400)
+	// to simulate a chipped-corner board.
+	bbLen := 700
+	bbWid := 350
+	rem := availableRemnant(remID, boardID)
+	rem.Dimensions = dim800x400
+	rem.BoundingBoxLengthMM = &bbLen
+	rem.BoundingBoxWidthMM = &bbWid
+
+	st := &mockStore{selectAvailableRemnantsResult: []Remnant{rem}}
+	svc := NewService(st)
+
+	// Request a piece that fits the bounding_box (700×350 >= 600×300).
+	minDim := domain.Dimension{LengthMM: 600, WidthMM: 300}
+	results, err := svc.FindAvailableRemnants(context.Background(), minDim)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(results))
+	}
+	if results[0].ID != remID {
+		t.Errorf("result ID = %v, want %v", results[0].ID, remID)
+	}
+}
+
+// TestFindAvailableRemnants_BoundingBoxSmallerThanRequired_NotReturned verifies
+// that a remnant whose bounding_box is smaller than the requested dimension is
+// excluded by the store.  The mock simulates the filtered store response (the
+// actual SQL WHERE clause is covered by integration tests).
+func TestFindAvailableRemnants_BoundingBoxSmallerThanRequired_NotReturned(t *testing.T) {
+	// bounding_box is 400×200 — store would filter this out for minDim 600×300.
+	st := &mockStore{selectAvailableRemnantsResult: []Remnant{}} // store returns empty
+	svc := NewService(st)
+
+	minDim := domain.Dimension{LengthMM: 600, WidthMM: 300}
+	results, err := svc.FindAvailableRemnants(context.Background(), minDim)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(results) != 0 {
+		t.Errorf("expected 0 results when bounding_box is smaller than required, got %d", len(results))
+	}
+}
