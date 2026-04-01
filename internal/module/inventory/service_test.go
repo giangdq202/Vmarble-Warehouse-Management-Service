@@ -59,6 +59,11 @@ type mockStore struct {
 	selectAvailableRemnantsResult []Remnant
 	selectAvailableRemnantsErr    error
 
+	// selectRemnantsByFilter
+	selectRemnantsByFilterResult []Remnant
+	selectRemnantsByFilterTotal  int
+	selectRemnantsByFilterErr    error
+
 	// selectRemnantsByBoardSheet
 	selectRemnantsByBoardSheetResult []Remnant
 	selectRemnantsByBoardSheetErr    error
@@ -80,6 +85,10 @@ type mockStore struct {
 
 	// markRemnantWasteAtomically
 	markRemnantWasteAtomicallyErr error
+
+	// selectActiveStorageLocations
+	selectActiveStorageLocationsResult []StorageLocation
+	selectActiveStorageLocationsErr    error
 }
 
 func (m *mockStore) insertLot(_ context.Context, _ InventoryLot) error {
@@ -134,6 +143,12 @@ func (m *mockStore) allocateRemnantAtomically(_ context.Context, _ uuid.UUID, _ 
 }
 func (m *mockStore) markRemnantWasteAtomically(_ context.Context, _ uuid.UUID) error {
 	return m.markRemnantWasteAtomicallyErr
+}
+func (m *mockStore) selectRemnantsByFilter(_ context.Context, _ RemnantFilter, _ httpkit.PageParams) ([]Remnant, int, error) {
+	return m.selectRemnantsByFilterResult, m.selectRemnantsByFilterTotal, m.selectRemnantsByFilterErr
+}
+func (m *mockStore) selectActiveStorageLocations(_ context.Context) ([]StorageLocation, error) {
+	return m.selectActiveStorageLocationsResult, m.selectActiveStorageLocationsErr
 }
 
 // ── helpers ──────────────────────────────────────────────────────────────────
@@ -2168,5 +2183,189 @@ func TestNestedCut_ParentBoardID_ConsistentAcrossAllLevels(t *testing.T) {
 				t.Errorf("ParentRemnantID = %v, want %v (direct parent)", newRemnant.ParentRemnantID, sourceID)
 			}
 		})
+	}
+}
+
+// ── Issue 2.6 — ListRemnants, GetRemnantLineageByRemnant, ListStorageLocations ─
+
+// TestListRemnants_DefaultsToAvailableStatus verifies that when no status is
+// specified in the filter, the service sets it to AVAILABLE before delegating.
+func TestListRemnants_DefaultsToAvailableStatus(t *testing.T) {
+	boardID := uuid.New()
+	rem := availableRemnant(uuid.New(), boardID)
+
+	st := &mockStore{
+		selectRemnantsByFilterResult: []Remnant{rem},
+		selectRemnantsByFilterTotal:  1,
+	}
+	svc := NewService(st)
+
+	result, err := svc.ListRemnants(context.Background(), RemnantFilter{}, httpkit.PageParams{
+		Page: 1, Limit: 10,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.TotalItems != 1 {
+		t.Errorf("TotalItems = %d, want 1", result.TotalItems)
+	}
+	if len(result.Items) != 1 {
+		t.Fatalf("len(Items) = %d, want 1", len(result.Items))
+	}
+	if result.Items[0].ID != rem.ID {
+		t.Errorf("Items[0].ID = %v, want %v", result.Items[0].ID, rem.ID)
+	}
+}
+
+// TestListRemnants_ExplicitStatusForwarded verifies that an explicit status
+// filter (e.g. WASTE) is forwarded to the store as-is.
+func TestListRemnants_ExplicitStatusForwarded(t *testing.T) {
+	st := &mockStore{
+		selectRemnantsByFilterResult: []Remnant{},
+		selectRemnantsByFilterTotal:  0,
+	}
+	svc := NewService(st)
+
+	_, err := svc.ListRemnants(context.Background(), RemnantFilter{
+		Status: domain.RemnantWaste,
+	}, httpkit.PageParams{Page: 1, Limit: 10})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+// TestListRemnants_Pagination verifies that PagedResult metadata is computed
+// correctly: TotalPages, CurrentPage, Limit.
+func TestListRemnants_Pagination(t *testing.T) {
+	// Simulate 25 total matching rows, page 2 of 3 (limit=10).
+	items := make([]Remnant, 10)
+	for i := range items {
+		items[i] = availableRemnant(uuid.New(), uuid.New())
+	}
+	st := &mockStore{
+		selectRemnantsByFilterResult: items,
+		selectRemnantsByFilterTotal:  25,
+	}
+	svc := NewService(st)
+
+	result, err := svc.ListRemnants(context.Background(), RemnantFilter{}, httpkit.PageParams{
+		Page: 2, Limit: 10,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.TotalItems != 25 {
+		t.Errorf("TotalItems = %d, want 25", result.TotalItems)
+	}
+	if result.TotalPages != 3 {
+		t.Errorf("TotalPages = %d, want 3", result.TotalPages)
+	}
+	if result.CurrentPage != 2 {
+		t.Errorf("CurrentPage = %d, want 2", result.CurrentPage)
+	}
+	if result.Limit != 10 {
+		t.Errorf("Limit = %d, want 10", result.Limit)
+	}
+	if len(result.Items) != 10 {
+		t.Errorf("len(Items) = %d, want 10", len(result.Items))
+	}
+}
+
+// TestListRemnants_StoreError_Propagates verifies that a store error is
+// returned unwrapped so the handler can map it correctly.
+func TestListRemnants_StoreError_Propagates(t *testing.T) {
+	st := &mockStore{selectRemnantsByFilterErr: domain.NewBizError(domain.ErrNotFound, "db error")}
+	svc := NewService(st)
+
+	_, err := svc.ListRemnants(context.Background(), RemnantFilter{}, httpkit.PageParams{Page: 1, Limit: 10})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+}
+
+// TestGetRemnantLineageByRemnant_HappyPath verifies that the service resolves
+// parent_board_id from the remnant and returns the full lineage.
+func TestGetRemnantLineageByRemnant_HappyPath(t *testing.T) {
+	boardID := uuid.New()
+	remID := uuid.New()
+	child1 := availableRemnant(uuid.New(), boardID)
+	child2 := availableRemnant(uuid.New(), boardID)
+
+	st := &mockStore{
+		selectRemnantByIDResult:          Remnant{ID: remID, ParentBoardID: boardID, Status: domain.RemnantAvailable},
+		selectRemnantsByBoardSheetResult: []Remnant{child1, child2},
+	}
+	svc := NewService(st)
+
+	lineage, err := svc.GetRemnantLineageByRemnant(context.Background(), remID)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(lineage) != 2 {
+		t.Errorf("expected 2 remnants in lineage, got %d", len(lineage))
+	}
+}
+
+// TestGetRemnantLineageByRemnant_NotFound propagates ErrNotFound when the
+// remnant does not exist.
+func TestGetRemnantLineageByRemnant_NotFound(t *testing.T) {
+	st := &mockStore{
+		selectRemnantByIDErr: domain.NewBizError(domain.ErrNotFound, "remnant not found"),
+	}
+	svc := NewService(st)
+
+	_, err := svc.GetRemnantLineageByRemnant(context.Background(), uuid.New())
+	if !errors.Is(err, domain.ErrNotFound) {
+		t.Errorf("expected ErrNotFound, got %v", err)
+	}
+}
+
+// TestListStorageLocations_HappyPath verifies that active locations are
+// returned correctly.
+func TestListStorageLocations_HappyPath(t *testing.T) {
+	loc1 := StorageLocation{ID: uuid.New(), Zone: "A", Rack: "01", Shelf: "01", Label: "A-01-01", Barcode: "BC001", IsActive: true}
+	loc2 := StorageLocation{ID: uuid.New(), Zone: "A", Rack: "01", Shelf: "02", Label: "A-01-02", Barcode: "BC002", IsActive: true}
+
+	st := &mockStore{selectActiveStorageLocationsResult: []StorageLocation{loc1, loc2}}
+	svc := NewService(st)
+
+	locs, err := svc.ListStorageLocations(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(locs) != 2 {
+		t.Fatalf("expected 2 locations, got %d", len(locs))
+	}
+	if locs[0].Zone != "A" || locs[1].Label != "A-01-02" {
+		t.Errorf("unexpected location data: %+v", locs)
+	}
+}
+
+// TestListStorageLocations_Empty_ReturnsEmptySlice verifies that nil is not
+// returned when there are no active locations.
+func TestListStorageLocations_Empty_ReturnsEmptySlice(t *testing.T) {
+	st := &mockStore{selectActiveStorageLocationsResult: []StorageLocation{}}
+	svc := NewService(st)
+
+	locs, err := svc.ListStorageLocations(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if locs == nil {
+		t.Error("expected empty slice, got nil")
+	}
+	if len(locs) != 0 {
+		t.Errorf("expected 0 locations, got %d", len(locs))
+	}
+}
+
+// TestListStorageLocations_StoreError_Propagates verifies error propagation.
+func TestListStorageLocations_StoreError_Propagates(t *testing.T) {
+	st := &mockStore{selectActiveStorageLocationsErr: domain.NewBizError(domain.ErrNotFound, "db error")}
+	svc := NewService(st)
+
+	_, err := svc.ListStorageLocations(context.Background())
+	if err == nil {
+		t.Fatal("expected error, got nil")
 	}
 }

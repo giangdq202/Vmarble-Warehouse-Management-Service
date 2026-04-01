@@ -282,6 +282,51 @@ func (s *pgStore) selectAvailableRemnantsByMinDimension(ctx context.Context, min
 	return scanRemnants(rows)
 }
 
+// selectRemnantsByFilter returns a paginated slice of remnants that match f,
+// plus the total count of matching rows (for pagination metadata).
+// Status defaults to AVAILABLE when f.Status is empty.
+// Dimension filters use COALESCE(bounding_box_*, *_mm) so that remnants
+// created without an explicit bounding box are still matched correctly.
+func (s *pgStore) selectRemnantsByFilter(ctx context.Context, f RemnantFilter, p httpkit.PageParams) ([]Remnant, int, error) {
+	status := f.Status
+	if status == "" {
+		status = domain.RemnantAvailable
+	}
+
+	const baseWhere = `
+	WHERE status = $1
+	  AND ($2 = 0 OR COALESCE(bounding_box_length_mm, length_mm) >= $2)
+	  AND ($3 = 0 OR COALESCE(bounding_box_width_mm,  width_mm)  >= $3)`
+
+	var total int
+	if err := s.pool.QueryRow(ctx,
+		`SELECT COUNT(*) FROM remnants`+baseWhere,
+		string(status), f.MinLengthMM, f.MinWidthMM,
+	).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("count remnants by filter: %w", err)
+	}
+
+	rows, err := s.pool.Query(ctx,
+		`SELECT id, parent_board_id, parent_remnant_id, length_mm, width_mm, status, allocated_to_wo_id,
+		        supplier_code, lot_batch, grain_pattern, quality_grade,
+		        bounding_box_length_mm, bounding_box_width_mm, bin_location_id, created_at
+		 FROM remnants`+baseWhere+`
+		 ORDER BY (COALESCE(bounding_box_length_mm, length_mm) * COALESCE(bounding_box_width_mm, width_mm)) ASC
+		 LIMIT $4 OFFSET $5`,
+		string(status), f.MinLengthMM, f.MinWidthMM, p.Limit, p.Offset(),
+	)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+
+	items, err := scanRemnants(rows)
+	if err != nil {
+		return nil, 0, err
+	}
+	return items, total, nil
+}
+
 func (s *pgStore) selectRemnantsByBoardSheet(ctx context.Context, boardSheetID uuid.UUID) ([]Remnant, error) {
 	rows, err := s.pool.Query(ctx,
 		`SELECT id, parent_board_id, parent_remnant_id, length_mm, width_mm, status, allocated_to_wo_id,
@@ -536,6 +581,29 @@ func (s *pgStore) markRemnantWasteAtomically(ctx context.Context, remnantID uuid
 		return fmt.Errorf("commit transaction: %w", err)
 	}
 	return nil
+}
+
+func (s *pgStore) selectActiveStorageLocations(ctx context.Context) ([]StorageLocation, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT id, zone, rack, shelf, label, barcode, is_active, created_at
+		 FROM storage_locations
+		 WHERE is_active = TRUE
+		 ORDER BY zone, rack, shelf`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var locs []StorageLocation
+	for rows.Next() {
+		var l StorageLocation
+		if err := rows.Scan(&l.ID, &l.Zone, &l.Rack, &l.Shelf,
+			&l.Label, &l.Barcode, &l.IsActive, &l.CreatedAt); err != nil {
+			return nil, err
+		}
+		locs = append(locs, l)
+	}
+	return locs, rows.Err()
 }
 
 func scanRemnants(rows pgx.Rows) ([]Remnant, error) {
