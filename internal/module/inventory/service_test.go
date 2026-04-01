@@ -1824,3 +1824,349 @@ func TestFindAvailableRemnants_BoundingBoxSmallerThanRequired_NotReturned(t *tes
 		t.Errorf("expected 0 results when bounding_box is smaller than required, got %d", len(results))
 	}
 }
+
+// ── Issue 2.5 — Nested Remnant Cutting (BR-K04 lineage, 3-level deep) ──────
+
+// TestNestedRemnantCutting_ThreeLevels simulates the full chain:
+//
+//	Board 2000×1000
+//	  └─ cut → Remnant L1 (1000×500)  [ParentBoardID=board, ParentRemnantID=nil]
+//	       └─ cut → Remnant L2 (500×250) [ParentBoardID=board, ParentRemnantID=L1]
+//	            └─ cut → Remnant L3 (200×200) [ParentBoardID=board, ParentRemnantID=L2]
+//
+// It verifies that ParentBoardID stays anchored to the original board at every
+// level (BR-K04) and that ParentRemnantID tracks the direct parent.
+func TestNestedRemnantCutting_ThreeLevels(t *testing.T) {
+	boardID := uuid.New()
+	woID := uuid.New()
+	skuID := uuid.New()
+
+	// ── Level 1: cut Board → Remnant L1 ─────────────────────────────────────
+	//
+	// Source: board sheet (2000×1000). Used 900×400, remnant 1000×500.
+	sheetID := uuid.New()
+	stL1 := &mockStore{selectSheetByIDResult: availableSheet(sheetID)}
+	svc := NewService(stL1)
+
+	dimL1 := domain.Dimension{LengthMM: 1000, WidthMM: 500}
+
+	resL1, err := svc.RecordCut(context.Background(), RecordCutInput{
+		SheetID:          ptr(sheetID),
+		WorkOrderID:      woID,
+		SKUID:            skuID,
+		UsedDimension:    domain.Dimension{LengthMM: 900, WidthMM: 400},
+		RemnantDimension: &dimL1,
+	})
+	if err != nil {
+		t.Fatalf("L1 cut failed: %v", err)
+	}
+	remnantL1 := stL1.recordCutAtomicallyOp.NewRemnant
+	if remnantL1 == nil {
+		t.Fatal("L1: NewRemnant must be non-nil")
+	}
+	if remnantL1.ParentBoardID != sheetID {
+		t.Errorf("L1 ParentBoardID = %v, want sheetID %v", remnantL1.ParentBoardID, sheetID)
+	}
+	if remnantL1.ParentRemnantID != nil {
+		t.Errorf("L1 ParentRemnantID = %v, want nil (direct child of board)", remnantL1.ParentRemnantID)
+	}
+	remnantL1ID := resL1.RemnantID
+	if remnantL1ID == nil {
+		t.Fatal("L1 result RemnantID must be set")
+	}
+
+	// ── Level 2: cut Remnant L1 → Remnant L2 ────────────────────────────────
+	//
+	// L1 is 1000×500 = 500_000 mm². Used 400×200, remnant 500×250 = 125_000 mm².
+	// Total 80_000+125_000 = 205_000 ≤ 500_000 ✓
+	remL1InStore := Remnant{
+		ID:            *remnantL1ID,
+		ParentBoardID: sheetID, // lineage from L1
+		Dimensions:    dimL1,
+		Status:        domain.RemnantAvailable,
+		CreatedAt:     time.Now().UTC(),
+	}
+	dimL2 := domain.Dimension{LengthMM: 500, WidthMM: 250}
+	stL2 := &mockStore{selectRemnantByIDResult: remL1InStore}
+	svc = NewService(stL2)
+
+	resL2, err := svc.RecordCut(context.Background(), RecordCutInput{
+		RemnantID:        remnantL1ID,
+		WorkOrderID:      woID,
+		SKUID:            skuID,
+		UsedDimension:    domain.Dimension{LengthMM: 400, WidthMM: 200},
+		RemnantDimension: &dimL2,
+	})
+	if err != nil {
+		t.Fatalf("L2 cut failed: %v", err)
+	}
+	remnantL2 := stL2.recordCutAtomicallyOp.NewRemnant
+	if remnantL2 == nil {
+		t.Fatal("L2: NewRemnant must be non-nil")
+	}
+	// ParentBoardID must stay anchored to the original board, not L1.
+	if remnantL2.ParentBoardID != sheetID {
+		t.Errorf("L2 ParentBoardID = %v, want sheetID %v (must bubble from L1.ParentBoardID)", remnantL2.ParentBoardID, sheetID)
+	}
+	if remnantL2.ParentRemnantID == nil || *remnantL2.ParentRemnantID != *remnantL1ID {
+		t.Errorf("L2 ParentRemnantID = %v, want L1.ID %v", remnantL2.ParentRemnantID, *remnantL1ID)
+	}
+	remnantL2ID := resL2.RemnantID
+	if remnantL2ID == nil {
+		t.Fatal("L2 result RemnantID must be set")
+	}
+
+	// ── Level 3: cut Remnant L2 → Remnant L3 ────────────────────────────────
+	//
+	// L2 is 500×250 = 125_000 mm². Used 200×150, remnant 200×200 = 40_000 mm².
+	// Total 30_000+40_000 = 70_000 ≤ 125_000 ✓
+	remL2InStore := Remnant{
+		ID:              *remnantL2ID,
+		ParentBoardID:   sheetID, // lineage inherited from L1 through L2
+		ParentRemnantID: remnantL1ID,
+		Dimensions:      dimL2,
+		Status:          domain.RemnantAvailable,
+		CreatedAt:       time.Now().UTC(),
+	}
+	dimL3 := domain.Dimension{LengthMM: 200, WidthMM: 200}
+	stL3 := &mockStore{selectRemnantByIDResult: remL2InStore}
+	svc = NewService(stL3)
+
+	resL3, err := svc.RecordCut(context.Background(), RecordCutInput{
+		RemnantID:        remnantL2ID,
+		WorkOrderID:      woID,
+		SKUID:            skuID,
+		UsedDimension:    domain.Dimension{LengthMM: 200, WidthMM: 150},
+		RemnantDimension: &dimL3,
+	})
+	if err != nil {
+		t.Fatalf("L3 cut failed: %v", err)
+	}
+	remnantL3 := stL3.recordCutAtomicallyOp.NewRemnant
+	if remnantL3 == nil {
+		t.Fatal("L3: NewRemnant must be non-nil")
+	}
+	// ParentBoardID must still be the original board.
+	if remnantL3.ParentBoardID != sheetID {
+		t.Errorf("L3 ParentBoardID = %v, want sheetID %v (must bubble across 3 levels)", remnantL3.ParentBoardID, sheetID)
+	}
+	if remnantL3.ParentRemnantID == nil || *remnantL3.ParentRemnantID != *remnantL2ID {
+		t.Errorf("L3 ParentRemnantID = %v, want L2.ID %v", remnantL3.ParentRemnantID, *remnantL2ID)
+	}
+	if resL3.RemnantID == nil {
+		t.Fatal("L3 result RemnantID must be set")
+	}
+	_ = boardID // kept to make the intent explicit
+}
+
+// TestNestedCut_AreaConservation_L2ExceedsL1_Rejected verifies that BR-K03 is
+// evaluated against the *source remnant's* area (L1: 1000×500) and NOT the
+// original board's area (2000×1000). A used+remnant combination that fits
+// inside the board but exceeds L1 must be rejected with ErrAreaConservation.
+func TestNestedCut_AreaConservation_L2ExceedsL1_Rejected(t *testing.T) {
+	boardID := uuid.New()
+	remnantL1ID := uuid.New()
+
+	// L1 is 1000×500 = 500_000 mm².
+	remL1 := Remnant{
+		ID:            remnantL1ID,
+		ParentBoardID: boardID,
+		Dimensions:    domain.Dimension{LengthMM: 1000, WidthMM: 500},
+		Status:        domain.RemnantAvailable,
+		CreatedAt:     time.Now().UTC(),
+	}
+	st := &mockStore{selectRemnantByIDResult: remL1}
+	svc := NewService(st)
+
+	// used 800×400 = 320_000, remnant 600×400 = 240_000.
+	// Total 560_000 > 500_000 (L1 area) — must be rejected.
+	// But 560_000 < 2_000_000 (board area) — wrong check would let this pass.
+	usedDim := domain.Dimension{LengthMM: 800, WidthMM: 400}
+	remDim := domain.Dimension{LengthMM: 600, WidthMM: 400}
+
+	_, err := svc.RecordCut(context.Background(), RecordCutInput{
+		RemnantID:        ptr(remnantL1ID),
+		WorkOrderID:      uuid.New(),
+		SKUID:            uuid.New(),
+		UsedDimension:    usedDim,
+		RemnantDimension: &remDim,
+	})
+	if !errors.Is(err, domain.ErrAreaConservation) {
+		t.Errorf("expected ErrAreaConservation when used+remnant exceeds L1 area, got %v", err)
+	}
+	if st.recordCutAtomicallyCalled {
+		t.Error("recordCutAtomically must NOT be called when BR-K03 fails")
+	}
+}
+
+// TestNestedCut_GetRemnantLineage_ReturnsAllLevels verifies that
+// GetRemnantLineage(boardID) returns all remnants across all levels that share
+// the same parent_board_id, regardless of nesting depth.
+// The store mock simulates a DB query that filters by parent_board_id only.
+func TestNestedCut_GetRemnantLineage_ReturnsAllLevels(t *testing.T) {
+	boardID := uuid.New()
+	remL1ID := uuid.New()
+	remL2ID := uuid.New()
+	remL3ID := uuid.New()
+
+	remL1 := Remnant{
+		ID:              remL1ID,
+		ParentBoardID:   boardID,
+		ParentRemnantID: nil,
+		Dimensions:      domain.Dimension{LengthMM: 1000, WidthMM: 500},
+		Status:          domain.RemnantAvailable,
+		CreatedAt:       time.Now().UTC(),
+	}
+	remL2 := Remnant{
+		ID:              remL2ID,
+		ParentBoardID:   boardID,
+		ParentRemnantID: &remL1ID,
+		Dimensions:      domain.Dimension{LengthMM: 500, WidthMM: 250},
+		Status:          domain.RemnantAvailable,
+		CreatedAt:       time.Now().UTC(),
+	}
+	remL3 := Remnant{
+		ID:              remL3ID,
+		ParentBoardID:   boardID,
+		ParentRemnantID: &remL2ID,
+		Dimensions:      domain.Dimension{LengthMM: 200, WidthMM: 200},
+		Status:          domain.RemnantAvailable,
+		CreatedAt:       time.Now().UTC(),
+	}
+
+	st := &mockStore{
+		selectRemnantsByBoardSheetResult: []Remnant{remL1, remL2, remL3},
+	}
+	svc := NewService(st)
+
+	lineage, err := svc.GetRemnantLineage(context.Background(), boardID)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(lineage) != 3 {
+		t.Fatalf("expected 3 remnants in lineage (L1+L2+L3), got %d", len(lineage))
+	}
+
+	// Build an id→remnant map for order-independent checks.
+	byID := make(map[uuid.UUID]Remnant, 3)
+	for _, r := range lineage {
+		byID[r.ID] = r
+	}
+
+	l1, ok := byID[remL1ID]
+	if !ok {
+		t.Fatal("L1 remnant missing from lineage")
+	}
+	if l1.ParentBoardID != boardID {
+		t.Errorf("L1 ParentBoardID = %v, want %v", l1.ParentBoardID, boardID)
+	}
+	if l1.ParentRemnantID != nil {
+		t.Errorf("L1 ParentRemnantID = %v, want nil", l1.ParentRemnantID)
+	}
+
+	l2, ok := byID[remL2ID]
+	if !ok {
+		t.Fatal("L2 remnant missing from lineage")
+	}
+	if l2.ParentBoardID != boardID {
+		t.Errorf("L2 ParentBoardID = %v, want %v", l2.ParentBoardID, boardID)
+	}
+	if l2.ParentRemnantID == nil || *l2.ParentRemnantID != remL1ID {
+		t.Errorf("L2 ParentRemnantID = %v, want %v", l2.ParentRemnantID, remL1ID)
+	}
+
+	l3, ok := byID[remL3ID]
+	if !ok {
+		t.Fatal("L3 remnant missing from lineage")
+	}
+	if l3.ParentBoardID != boardID {
+		t.Errorf("L3 ParentBoardID = %v, want %v", l3.ParentBoardID, boardID)
+	}
+	if l3.ParentRemnantID == nil || *l3.ParentRemnantID != remL2ID {
+		t.Errorf("L3 ParentRemnantID = %v, want %v", l3.ParentRemnantID, remL2ID)
+	}
+}
+
+// TestNestedCut_ParentBoardID_ConsistentAcrossAllLevels is a table-driven test
+// that checks the lineage invariant for up to 4 levels of nesting. Each case
+// starts from a pre-built remnant that already has a ParentBoardID and verifies
+// that the newly produced remnant inherits the same ParentBoardID (not a new one).
+func TestNestedCut_ParentBoardID_ConsistentAcrossAllLevels(t *testing.T) {
+	boardID := uuid.New()
+	woID := uuid.New()
+	skuID := uuid.New()
+
+	// sourceDim is large enough that used+remnant always fits.
+	sourceDim := domain.Dimension{LengthMM: 2000, WidthMM: 1000}
+	usedDim := domain.Dimension{LengthMM: 100, WidthMM: 100}
+	remnantDim := domain.Dimension{LengthMM: 200, WidthMM: 200}
+
+	cases := []struct {
+		name               string
+		sourceParentBoard  uuid.UUID
+		sourceParentRemnant *uuid.UUID
+		wantParentBoard    uuid.UUID
+	}{
+		{
+			name:               "L1_source_is_board_child",
+			sourceParentBoard:  boardID,
+			sourceParentRemnant: nil,
+			wantParentBoard:    boardID,
+		},
+		{
+			name:               "L2_source_is_L1_remnant",
+			sourceParentBoard:  boardID,
+			sourceParentRemnant: ptr(uuid.New()),
+			wantParentBoard:    boardID,
+		},
+		{
+			name:               "L3_source_is_L2_remnant",
+			sourceParentBoard:  boardID,
+			sourceParentRemnant: ptr(uuid.New()),
+			wantParentBoard:    boardID,
+		},
+		{
+			name:               "L4_source_is_L3_remnant",
+			sourceParentBoard:  boardID,
+			sourceParentRemnant: ptr(uuid.New()),
+			wantParentBoard:    boardID,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			sourceID := uuid.New()
+			source := Remnant{
+				ID:              sourceID,
+				ParentBoardID:   tc.sourceParentBoard,
+				ParentRemnantID: tc.sourceParentRemnant,
+				Dimensions:      sourceDim,
+				Status:          domain.RemnantAvailable,
+				CreatedAt:       time.Now().UTC(),
+			}
+			st := &mockStore{selectRemnantByIDResult: source}
+			svc := NewService(st)
+
+			_, err := svc.RecordCut(context.Background(), RecordCutInput{
+				RemnantID:        ptr(sourceID),
+				WorkOrderID:      woID,
+				SKUID:            skuID,
+				UsedDimension:    usedDim,
+				RemnantDimension: &remnantDim,
+			})
+			if err != nil {
+				t.Fatalf("RecordCut failed: %v", err)
+			}
+			newRemnant := st.recordCutAtomicallyOp.NewRemnant
+			if newRemnant == nil {
+				t.Fatal("NewRemnant must be non-nil")
+			}
+			if newRemnant.ParentBoardID != tc.wantParentBoard {
+				t.Errorf("ParentBoardID = %v, want %v", newRemnant.ParentBoardID, tc.wantParentBoard)
+			}
+			if newRemnant.ParentRemnantID == nil || *newRemnant.ParentRemnantID != sourceID {
+				t.Errorf("ParentRemnantID = %v, want %v (direct parent)", newRemnant.ParentRemnantID, sourceID)
+			}
+		})
+	}
+}
