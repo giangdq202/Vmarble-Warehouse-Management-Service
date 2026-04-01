@@ -444,6 +444,11 @@ const docTemplate = `{
         },
         "/api/v1/inventory/cuts": {
             "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "consumes": [
                     "application/json"
                 ],
@@ -495,6 +500,11 @@ const docTemplate = `{
         },
         "/api/v1/inventory/lots": {
             "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "produces": [
                     "application/json"
                 ],
@@ -553,6 +563,11 @@ const docTemplate = `{
                 }
             },
             "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "consumes": [
                     "application/json"
                 ],
@@ -595,6 +610,11 @@ const docTemplate = `{
         },
         "/api/v1/inventory/remnants": {
             "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "produces": [
                     "application/json"
                 ],
@@ -661,6 +681,11 @@ const docTemplate = `{
         },
         "/api/v1/inventory/remnants/{id}/allocate": {
             "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "consumes": [
                     "application/json"
                 ],
@@ -722,6 +747,11 @@ const docTemplate = `{
         },
         "/api/v1/inventory/remnants/{id}/lineage": {
             "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Returns all remnants that share the same parent board as the given remnant, ordered by created_at ASC.",
                 "produces": [
                     "application/json"
@@ -772,6 +802,11 @@ const docTemplate = `{
         },
         "/api/v1/inventory/remnants/{id}/waste": {
             "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "produces": [
                     "application/json"
                 ],
@@ -821,6 +856,11 @@ const docTemplate = `{
         },
         "/api/v1/inventory/sheets": {
             "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "produces": [
                     "application/json"
                 ],
@@ -875,6 +915,11 @@ const docTemplate = `{
         },
         "/api/v1/inventory/sheets/{id}": {
             "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "produces": [
                     "application/json"
                 ],
@@ -921,6 +966,11 @@ const docTemplate = `{
         },
         "/api/v1/inventory/sheets/{id}/lineage": {
             "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "produces": [
                     "application/json"
                 ],
@@ -1745,6 +1795,11 @@ const docTemplate = `{
         },
         "/api/v1/storage-locations": {
             "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Returns all storage locations where is_active = true, ordered by zone, rack, shelf.",
                 "produces": [
                     "application/json"

@@ -41,6 +41,7 @@ func (h *Handler) Register(rg *gin.RouterGroup) {
 // @Accept       json
 // @Produce      json
 // @Param        body  body      ReceiveStockInput  true  "payload"
+// @Security     BearerAuth
 // @Success      201   {object}  InventoryLot
 // @Failure      400   {object}  map[string]string
 // @Router       /api/v1/inventory/lots [post]
@@ -67,6 +68,7 @@ func (h *Handler) receiveStock(c *gin.Context) {
 // @Param        search    query     string  false  "filter by supplier_ref (case-insensitive)"
 // @Param        sort_by   query     string  false  "sort column: supplier_ref (default received_at)"
 // @Param        order     query     string  false  "asc or desc (default desc)"
+// @Security     BearerAuth
 // @Success      200  {object}  httpkit.PagedResult[InventoryLot]
 // @Failure      500  {object}  map[string]string
 // @Router       /api/v1/inventory/lots [get]
@@ -89,6 +91,7 @@ func (h *Handler) listLots(c *gin.Context) {
 // @Param        limit    query     int     false  "items per page (default 10, max 100)"
 // @Param        sort_by  query     string  false  "sort column: length_mm|width_mm (default id)"
 // @Param        order    query     string  false  "asc or desc (default asc)"
+// @Security     BearerAuth
 // @Success      200  {object}  httpkit.PagedResult[BoardSheet]
 // @Failure      500  {object}  map[string]string
 // @Router       /api/v1/inventory/sheets [get]
@@ -108,6 +111,7 @@ func (h *Handler) listSheets(c *gin.Context) {
 // @Tags         inventory
 // @Produce      json
 // @Param        id   path      string  true  "sheet id (uuid)"
+// @Security     BearerAuth
 // @Success      200  {object}  BoardSheet
 // @Failure      400  {object}  map[string]string
 // @Failure      404  {object}  map[string]string
@@ -132,6 +136,7 @@ func (h *Handler) getSheet(c *gin.Context) {
 // @Tags         inventory
 // @Produce      json
 // @Param        id   path      string  true  "sheet id (uuid)"
+// @Security     BearerAuth
 // @Success      200  {array}   Remnant
 // @Failure      400  {object}  map[string]string
 // @Failure      404  {object}  map[string]string
@@ -157,6 +162,7 @@ func (h *Handler) lineage(c *gin.Context) {
 // @Accept       json
 // @Produce      json
 // @Param        body  body      RecordCutInput  true  "payload"
+// @Security     BearerAuth
 // @Success      201   {object}  CutResult
 // @Failure      400   {object}  map[string]string
 // @Failure      422   {object}  map[string]string
@@ -184,6 +190,7 @@ func (h *Handler) recordCut(c *gin.Context) {
 // @Param        status         query     string  false  "Remnant status (default: AVAILABLE)"  Enums(AVAILABLE,ALLOCATED,CONSUMED,WASTE)
 // @Param        page           query     int     false  "Page number (default 1)"
 // @Param        limit          query     int     false  "Items per page (default 10, max 100)"
+// @Security     BearerAuth
 // @Success      200            {object}  httpkit.PagedResult[Remnant]
 // @Failure      500            {object}  map[string]string
 // @Router       /api/v1/inventory/remnants [get]
@@ -214,6 +221,7 @@ func (h *Handler) listRemnants(c *gin.Context) {
 // @Tags         inventory
 // @Produce      json
 // @Param        id   path      string  true  "Remnant ID (uuid)"
+// @Security     BearerAuth
 // @Success      200  {array}   Remnant
 // @Failure      400  {object}  map[string]string
 // @Failure      404  {object}  map[string]string
@@ -238,6 +246,7 @@ func (h *Handler) getRemnantLineage(c *gin.Context) {
 // @Description  Returns all storage locations where is_active = true, ordered by zone, rack, shelf.
 // @Tags         inventory
 // @Produce      json
+// @Security     BearerAuth
 // @Success      200  {array}   StorageLocation
 // @Failure      500  {object}  map[string]string
 // @Router       /api/v1/storage-locations [get]
@@ -258,6 +267,7 @@ func (h *Handler) listStorageLocations(c *gin.Context) {
 // @Produce      json
 // @Param        id    path      string  true  "remnant id (uuid)"
 // @Param        body  body      object  true  "payload"  SchemaExample({"work_order_id":"00000000-0000-0000-0000-000000000000"})
+// @Security     BearerAuth
 // @Success      200   {object}  map[string]string
 // @Failure      400   {object}  map[string]string
 // @Failure      409   {object}  map[string]string
@@ -287,6 +297,7 @@ func (h *Handler) allocateRemnant(c *gin.Context) {
 // @Tags         inventory
 // @Produce      json
 // @Param        id   path      string  true  "remnant id (uuid)"
+// @Security     BearerAuth
 // @Success      200  {object}  map[string]string
 // @Failure      400  {object}  map[string]string
 // @Failure      409  {object}  map[string]string
