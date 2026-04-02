@@ -918,6 +918,8 @@ paths:
             additionalProperties:
               type: string
             type: object
+      security:
+      - BearerAuth: []
       summary: Record cutting operation
       tags:
       - inventory
@@ -957,6 +959,8 @@ paths:
             additionalProperties:
               type: string
             type: object
+      security:
+      - BearerAuth: []
       summary: List inventory lots (paginated)
       tags:
       - inventory
@@ -983,6 +987,8 @@ paths:
             additionalProperties:
               type: string
             type: object
+      security:
+      - BearerAuth: []
       summary: Receive stock (create inventory lot)
       tags:
       - inventory
@@ -1027,6 +1033,8 @@ paths:
             additionalProperties:
               type: string
             type: object
+      security:
+      - BearerAuth: []
       summary: List remnants with filters (paginated)
       tags:
       - inventory
@@ -1067,6 +1075,8 @@ paths:
             additionalProperties:
               type: string
             type: object
+      security:
+      - BearerAuth: []
       summary: Allocate remnant to work order
       tags:
       - inventory
@@ -1101,6 +1111,8 @@ paths:
             additionalProperties:
               type: string
             type: object
+      security:
+      - BearerAuth: []
       summary: Get full lineage tree for a remnant
       tags:
       - inventory
@@ -1133,6 +1145,8 @@ paths:
             additionalProperties:
               type: string
             type: object
+      security:
+      - BearerAuth: []
       summary: Mark remnant as waste
       tags:
       - inventory
@@ -1168,6 +1182,8 @@ paths:
             additionalProperties:
               type: string
             type: object
+      security:
+      - BearerAuth: []
       summary: List available board sheets (paginated)
       tags:
       - inventory
@@ -1198,6 +1214,8 @@ paths:
             additionalProperties:
               type: string
             type: object
+      security:
+      - BearerAuth: []
       summary: Get board sheet
       tags:
       - inventory
@@ -1230,6 +1248,8 @@ paths:
             additionalProperties:
               type: string
             type: object
+      security:
+      - BearerAuth: []
       summary: Get remnant lineage by sheet
       tags:
       - inventory
@@ -1757,6 +1777,8 @@ paths:
             additionalProperties:
               type: string
             type: object
+      security:
+      - BearerAuth: []
       summary: List active storage locations
       tags:
       - inventory
