@@ -2369,3 +2369,113 @@ func TestListStorageLocations_StoreError_Propagates(t *testing.T) {
 		t.Fatal("expected error, got nil")
 	}
 }
+
+// ── Issue 2.6 — ListRemnants filter forwarding ────────────────────────────────
+
+// filterCapturingMockStore extends mockStore to capture the RemnantFilter
+// that the service passes down to selectRemnantsByFilter.  This lets tests
+// assert that the service is forwarding filter values correctly without
+// depending on pgstore SQL behaviour.
+type filterCapturingMockStore struct {
+	mockStore
+	capturedFilter RemnantFilter
+}
+
+func (c *filterCapturingMockStore) selectRemnantsByFilter(_ context.Context, f RemnantFilter, _ httpkit.PageParams) ([]Remnant, int, error) {
+	c.capturedFilter = f
+	return c.selectRemnantsByFilterResult, c.selectRemnantsByFilterTotal, c.selectRemnantsByFilterErr
+}
+
+// TestListRemnants_FilterByMinDimension verifies that non-zero MinLengthMM /
+// MinWidthMM values are forwarded to the store unmodified.
+func TestListRemnants_FilterByMinDimension(t *testing.T) {
+	boardID := uuid.New()
+	rem := availableRemnant(uuid.New(), boardID)
+
+	st := &filterCapturingMockStore{
+		mockStore: mockStore{
+			selectRemnantsByFilterResult: []Remnant{rem},
+			selectRemnantsByFilterTotal:  1,
+		},
+	}
+	svc := NewService(st)
+
+	f := RemnantFilter{
+		MinLengthMM: 800,
+		MinWidthMM:  400,
+	}
+	result, err := svc.ListRemnants(context.Background(), f, httpkit.PageParams{Page: 1, Limit: 10})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(result.Items) != 1 {
+		t.Errorf("Items = %d, want 1", len(result.Items))
+	}
+	// Verify the filter values reached the store.
+	if st.capturedFilter.MinLengthMM != 800 {
+		t.Errorf("capturedFilter.MinLengthMM = %d, want 800", st.capturedFilter.MinLengthMM)
+	}
+	if st.capturedFilter.MinWidthMM != 400 {
+		t.Errorf("capturedFilter.MinWidthMM = %d, want 400", st.capturedFilter.MinWidthMM)
+	}
+}
+
+// TestListRemnants_FilterByStatus verifies that an explicit status filter is
+// forwarded to the store exactly as supplied (no overwriting by the default).
+func TestListRemnants_FilterByStatus(t *testing.T) {
+	st := &filterCapturingMockStore{
+		mockStore: mockStore{
+			selectRemnantsByFilterResult: []Remnant{},
+			selectRemnantsByFilterTotal:  0,
+		},
+	}
+	svc := NewService(st)
+
+	f := RemnantFilter{Status: domain.RemnantWaste}
+	_, err := svc.ListRemnants(context.Background(), f, httpkit.PageParams{Page: 1, Limit: 10})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Status must be forwarded to the store as WASTE, not overwritten to AVAILABLE.
+	if st.capturedFilter.Status != domain.RemnantWaste {
+		t.Errorf("capturedFilter.Status = %v, want WASTE", st.capturedFilter.Status)
+	}
+}
+
+// TestListRemnants_NoFilter_ReturnsAll verifies that when no filter fields are
+// set the service defaults Status to AVAILABLE and passes zero dimension
+// thresholds — meaning the store query applies no dimension filter.
+func TestListRemnants_NoFilter_ReturnsAll(t *testing.T) {
+	boardID := uuid.New()
+	items := []Remnant{
+		availableRemnant(uuid.New(), boardID),
+		availableRemnant(uuid.New(), boardID),
+		availableRemnant(uuid.New(), boardID),
+	}
+	st := &filterCapturingMockStore{
+		mockStore: mockStore{
+			selectRemnantsByFilterResult: items,
+			selectRemnantsByFilterTotal:  3,
+		},
+	}
+	svc := NewService(st)
+
+	result, err := svc.ListRemnants(context.Background(), RemnantFilter{}, httpkit.PageParams{Page: 1, Limit: 10})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(result.Items) != 3 {
+		t.Errorf("Items = %d, want 3", len(result.Items))
+	}
+	// Default status must be AVAILABLE when not specified.
+	if st.capturedFilter.Status != domain.RemnantAvailable {
+		t.Errorf("capturedFilter.Status = %v, want AVAILABLE (default)", st.capturedFilter.Status)
+	}
+	// No dimension filter should be applied (zero values passed to store).
+	if st.capturedFilter.MinLengthMM != 0 {
+		t.Errorf("capturedFilter.MinLengthMM = %d, want 0 (no filter)", st.capturedFilter.MinLengthMM)
+	}
+	if st.capturedFilter.MinWidthMM != 0 {
+		t.Errorf("capturedFilter.MinWidthMM = %d, want 0 (no filter)", st.capturedFilter.MinWidthMM)
+	}
+}

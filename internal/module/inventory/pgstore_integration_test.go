@@ -797,3 +797,385 @@ func TestIntegration_ListAvailableSheets_Empty_WhenNoneAvailable(t *testing.T) {
 		t.Errorf("total_pages = %d, want at least 1", result.TotalPages)
 	}
 }
+
+// ── Sprint-2 tests (2.7 DoD) ─────────────────────────────────────────────────
+
+// TestPGStore_InheritanceRoundtrip verifies that material attributes set on a
+// board_sheet are persisted to the DB and then propagated to the new remnant
+// row when RecordCut is called — end-to-end through the real pgstore layer.
+func TestPGStore_InheritanceRoundtrip(t *testing.T) {
+	pool := getPool(t)
+	truncateInventory(t)
+	matID := seedMaterial(t, pool)
+	svc := newSvc(pool)
+
+	// 1. Receive stock: insert a lot + one sheet.  The sheet has no material
+	//    attrs yet; we will update them directly to simulate a sheet that was
+	//    enriched after receipt (e.g. via a separate admin endpoint).
+	lot, err := svc.ReceiveStock(context.Background(), ReceiveStockInput{
+		MaterialID:   matID,
+		Dimensions:   testDim2000x1000,
+		CostPerSheet: testCost,
+		Quantity:     1,
+		SupplierRef:  "INHERIT-SUP-001",
+	})
+	if err != nil {
+		t.Fatalf("ReceiveStock: %v", err)
+	}
+	_ = lot
+
+	// 2. Fetch the sheet ID.
+	sheetsResult, err := svc.ListAvailableSheets(context.Background(), httpkit.PageParams{Page: 1, Limit: 1000})
+	if err != nil {
+		t.Fatalf("ListAvailableSheets: %v", err)
+	}
+	if len(sheetsResult.Items) != 1 {
+		t.Fatalf("expected 1 sheet, got %d", len(sheetsResult.Items))
+	}
+	sheetID := sheetsResult.Items[0].ID
+
+	// 3. Patch the sheet row in the DB with supplier_code so RecordCut can
+	//    inherit it.  This simulates having a richer insert path or admin update.
+	wantSupplierCode := "SUP-VN-ROUNDTRIP"
+	wantLotBatch := "LOT-2026-RT"
+	wantGrainPattern := "VERTICAL"
+	wantQualityGrade := "A"
+	_, err = pool.Exec(context.Background(),
+		`UPDATE board_sheets
+		 SET supplier_code = $1, lot_batch = $2, grain_pattern = $3, quality_grade = $4
+		 WHERE id = $5`,
+		wantSupplierCode, wantLotBatch, wantGrainPattern, wantQualityGrade, sheetID,
+	)
+	if err != nil {
+		t.Fatalf("patch board_sheet attrs: %v", err)
+	}
+
+	// 4. RecordCut: consume the sheet and produce a remnant.
+	remnantDim := testDim1000x500
+	cutResult, err := svc.RecordCut(context.Background(), RecordCutInput{
+		SheetID:          ptrUUID(sheetID),
+		WorkOrderID:      uuid.New(),
+		SKUID:            uuid.New(),
+		UsedDimension:    testDim1000x500,
+		RemnantDimension: &remnantDim,
+	})
+	if err != nil {
+		t.Fatalf("RecordCut: %v", err)
+	}
+	if cutResult.RemnantID == nil {
+		t.Fatal("RemnantID must be set")
+	}
+
+	// 5. Read the remnant back via the public API (FindAvailableRemnants queries
+	//    the real DB and returns all material attributes) and verify inheritance.
+	available, err := svc.FindAvailableRemnants(context.Background(), testDim100x100)
+	if err != nil {
+		t.Fatalf("FindAvailableRemnants after cut: %v", err)
+	}
+	var rem *Remnant
+	for i := range available {
+		if available[i].ID == *cutResult.RemnantID {
+			rem = &available[i]
+			break
+		}
+	}
+	if rem == nil {
+		t.Fatal("newly created remnant not found in available list")
+	}
+
+	if rem.SupplierCode == nil || *rem.SupplierCode != wantSupplierCode {
+		t.Errorf("remnant.SupplierCode = %v, want %q", rem.SupplierCode, wantSupplierCode)
+	}
+	if rem.LotBatch == nil || *rem.LotBatch != wantLotBatch {
+		t.Errorf("remnant.LotBatch = %v, want %q", rem.LotBatch, wantLotBatch)
+	}
+	if rem.GrainPattern == nil || *rem.GrainPattern != wantGrainPattern {
+		t.Errorf("remnant.GrainPattern = %v, want %q", rem.GrainPattern, wantGrainPattern)
+	}
+	if rem.QualityGrade == nil || *rem.QualityGrade != wantQualityGrade {
+		t.Errorf("remnant.QualityGrade = %v, want %q", rem.QualityGrade, wantQualityGrade)
+	}
+	if rem.ParentBoardID != sheetID {
+		t.Errorf("remnant.ParentBoardID = %v, want sheetID %v", rem.ParentBoardID, sheetID)
+	}
+}
+
+// TestPGStore_NestedRemnantLineage cuts 3 levels deep (sheet → L1 → L2 → L3),
+// then calls GetRemnantLineage and verifies the complete parent chain stored in
+// the DB: ParentBoardID is the original sheet at every level; ParentRemnantID
+// tracks the direct parent at each intermediate level.
+func TestPGStore_NestedRemnantLineage(t *testing.T) {
+	pool := getPool(t)
+	truncateInventory(t)
+	matID := seedMaterial(t, pool)
+	svc := newSvc(pool)
+
+	// Seed 1 sheet 2000×1000.
+	svc.ReceiveStock(context.Background(), ReceiveStockInput{
+		MaterialID:   matID,
+		Dimensions:   testDim2000x1000,
+		CostPerSheet: testCost,
+		Quantity:     1,
+	})
+	sheetsResult, _ := svc.ListAvailableSheets(context.Background(), httpkit.PageParams{Page: 1, Limit: 1000})
+	sheetID := sheetsResult.Items[0].ID
+
+	// Level 1: sheet → remnant L1 (1000×500).
+	// used 900×400 + remnant 1000×500 = 360_000 + 500_000 = 860_000 ≤ 2_000_000 ✓
+	dimL1 := domain.Dimension{LengthMM: 1000, WidthMM: 500}
+	r1, err := svc.RecordCut(context.Background(), RecordCutInput{
+		SheetID:          ptrUUID(sheetID),
+		WorkOrderID:      uuid.New(),
+		SKUID:            uuid.New(),
+		UsedDimension:    domain.Dimension{LengthMM: 900, WidthMM: 400},
+		RemnantDimension: &dimL1,
+	})
+	if err != nil {
+		t.Fatalf("L1 cut: %v", err)
+	}
+	if r1.RemnantID == nil {
+		t.Fatal("L1 RemnantID must be set")
+	}
+
+	// Level 2: L1 (1000×500) → remnant L2 (500×250).
+	// used 400×200 = 80_000 + remnant 500×250 = 125_000 → total 205_000 ≤ 500_000 ✓
+	dimL2 := domain.Dimension{LengthMM: 500, WidthMM: 250}
+	r2, err := svc.RecordCut(context.Background(), RecordCutInput{
+		RemnantID:        r1.RemnantID,
+		WorkOrderID:      uuid.New(),
+		SKUID:            uuid.New(),
+		UsedDimension:    domain.Dimension{LengthMM: 400, WidthMM: 200},
+		RemnantDimension: &dimL2,
+	})
+	if err != nil {
+		t.Fatalf("L2 cut: %v", err)
+	}
+	if r2.RemnantID == nil {
+		t.Fatal("L2 RemnantID must be set")
+	}
+
+	// Level 3: L2 (500×250) → remnant L3 (200×200).
+	// used 200×150 = 30_000 + remnant 200×200 = 40_000 → total 70_000 ≤ 125_000 ✓
+	dimL3 := domain.Dimension{LengthMM: 200, WidthMM: 200}
+	r3, err := svc.RecordCut(context.Background(), RecordCutInput{
+		RemnantID:        r2.RemnantID,
+		WorkOrderID:      uuid.New(),
+		SKUID:            uuid.New(),
+		UsedDimension:    domain.Dimension{LengthMM: 200, WidthMM: 150},
+		RemnantDimension: &dimL3,
+	})
+	if err != nil {
+		t.Fatalf("L3 cut: %v", err)
+	}
+	if r3.RemnantID == nil {
+		t.Fatal("L3 RemnantID must be set")
+	}
+
+	// Query the full lineage from the original board sheet.
+	lineage, err := svc.GetRemnantLineage(context.Background(), sheetID)
+	if err != nil {
+		t.Fatalf("GetRemnantLineage: %v", err)
+	}
+
+	// There should be exactly 3 remnants, one per level.
+	if len(lineage) != 3 {
+		t.Fatalf("lineage length = %d, want 3 (L1+L2+L3)", len(lineage))
+	}
+
+	// Build an id-keyed map for order-independent assertions.
+	byID := make(map[uuid.UUID]Remnant, 3)
+	for _, r := range lineage {
+		byID[r.ID] = r
+	}
+
+	// ── L1 ────────────────────────────────────────────────────────────────────
+	l1, ok := byID[*r1.RemnantID]
+	if !ok {
+		t.Fatal("L1 remnant not found in lineage")
+	}
+	if l1.ParentBoardID != sheetID {
+		t.Errorf("L1.ParentBoardID = %v, want sheetID %v", l1.ParentBoardID, sheetID)
+	}
+	if l1.ParentRemnantID != nil {
+		t.Errorf("L1.ParentRemnantID = %v, want nil (direct child of board)", l1.ParentRemnantID)
+	}
+
+	// ── L2 ────────────────────────────────────────────────────────────────────
+	l2, ok := byID[*r2.RemnantID]
+	if !ok {
+		t.Fatal("L2 remnant not found in lineage")
+	}
+	if l2.ParentBoardID != sheetID {
+		t.Errorf("L2.ParentBoardID = %v, want sheetID %v", l2.ParentBoardID, sheetID)
+	}
+	if l2.ParentRemnantID == nil || *l2.ParentRemnantID != *r1.RemnantID {
+		t.Errorf("L2.ParentRemnantID = %v, want L1 %v", l2.ParentRemnantID, *r1.RemnantID)
+	}
+
+	// ── L3 ────────────────────────────────────────────────────────────────────
+	l3, ok := byID[*r3.RemnantID]
+	if !ok {
+		t.Fatal("L3 remnant not found in lineage")
+	}
+	if l3.ParentBoardID != sheetID {
+		t.Errorf("L3.ParentBoardID = %v, want sheetID %v", l3.ParentBoardID, sheetID)
+	}
+	if l3.ParentRemnantID == nil || *l3.ParentRemnantID != *r2.RemnantID {
+		t.Errorf("L3.ParentRemnantID = %v, want L2 %v", l3.ParentRemnantID, *r2.RemnantID)
+	}
+}
+
+// TestPGStore_BoundingBoxSearch verifies the COALESCE(bounding_box_*, *_mm)
+// filter in selectAvailableRemnantsByMinDimension and selectRemnantsByFilter:
+//
+//   - A remnant whose bounding_box is smaller than the requested min dimension
+//     must NOT appear in the results.
+//   - A remnant whose bounding_box meets or exceeds the min dimension MUST appear.
+//   - A remnant created without an explicit bounding_box (defaults to actual dim)
+//     is filtered correctly against the actual dimension.
+func TestPGStore_BoundingBoxSearch(t *testing.T) {
+	pool := getPool(t)
+	truncateInventory(t)
+	matID := seedMaterial(t, pool)
+	svc := newSvc(pool)
+
+	// Seed 1 sheet 2000×1000.
+	svc.ReceiveStock(context.Background(), ReceiveStockInput{
+		MaterialID:   matID,
+		Dimensions:   testDim2000x1000,
+		CostPerSheet: testCost,
+		Quantity:     1,
+	})
+	sheetsResult, _ := svc.ListAvailableSheets(context.Background(), httpkit.PageParams{Page: 1, Limit: 1000})
+	sheetID := sheetsResult.Items[0].ID
+
+	// Cut 1: produce remnant A (800×400) with bounding_box explicitly set to
+	// 600×300 — simulating a chipped corner that reduces the usable area.
+	// used 1000×500 + remnant 800×400 = 500_000 + 320_000 = 820_000 ≤ 2_000_000 ✓
+	dimA := domain.Dimension{LengthMM: 800, WidthMM: 400}
+	bbALen := 600
+	bbAWid := 300
+	rA, err := svc.RecordCut(context.Background(), RecordCutInput{
+		SheetID:             ptrUUID(sheetID),
+		WorkOrderID:         uuid.New(),
+		SKUID:               uuid.New(),
+		UsedDimension:       testDim1000x500,
+		RemnantDimension:    &dimA,
+		BoundingBoxLengthMM: &bbALen,
+		BoundingBoxWidthMM:  &bbAWid,
+	})
+	if err != nil {
+		t.Fatalf("cut remnant A: %v", err)
+	}
+	if rA.RemnantID == nil {
+		t.Fatal("remnant A ID must be set")
+	}
+
+	// We need a second source to cut remnant B.  Seed a second sheet.
+	svc.ReceiveStock(context.Background(), ReceiveStockInput{
+		MaterialID:   matID,
+		Dimensions:   testDim2000x1000,
+		CostPerSheet: testCost,
+		Quantity:     1,
+	})
+	sheetsResult2, _ := svc.ListAvailableSheets(context.Background(), httpkit.PageParams{Page: 1, Limit: 1000})
+	// Pick the sheet that hasn't been issued yet.
+	var sheetID2 uuid.UUID
+	for _, sh := range sheetsResult2.Items {
+		if sh.Status == "AVAILABLE" {
+			sheetID2 = sh.ID
+			break
+		}
+	}
+	if sheetID2 == uuid.Nil {
+		t.Fatal("could not find second available sheet")
+	}
+
+	// Cut 2: produce remnant B (800×400) with NO explicit bounding_box → defaults
+	// to actual dimension 800×400.
+	dimB := domain.Dimension{LengthMM: 800, WidthMM: 400}
+	rB, err := svc.RecordCut(context.Background(), RecordCutInput{
+		SheetID:          ptrUUID(sheetID2),
+		WorkOrderID:      uuid.New(),
+		SKUID:            uuid.New(),
+		UsedDimension:    testDim1000x500,
+		RemnantDimension: &dimB,
+		// No bounding_box → defaults to 800×400.
+	})
+	if err != nil {
+		t.Fatalf("cut remnant B: %v", err)
+	}
+	if rB.RemnantID == nil {
+		t.Fatal("remnant B ID must be set")
+	}
+
+	// ── Test 1: FindAvailableRemnants with minDim = 700×350 ──────────────────
+	// Remnant A bounding_box = 600×300 < 700×350 → must be excluded.
+	// Remnant B bounding_box = 800×400 ≥ 700×350 → must be included.
+	minDim := domain.Dimension{LengthMM: 700, WidthMM: 350}
+	found, err := svc.FindAvailableRemnants(context.Background(), minDim)
+	if err != nil {
+		t.Fatalf("FindAvailableRemnants(700×350): %v", err)
+	}
+	for _, r := range found {
+		if r.ID == *rA.RemnantID {
+			t.Error("remnant A (bounding_box 600×300) must NOT appear for minDim 700×350")
+		}
+	}
+	foundB := false
+	for _, r := range found {
+		if r.ID == *rB.RemnantID {
+			foundB = true
+		}
+	}
+	if !foundB {
+		t.Error("remnant B (bounding_box 800×400) must appear for minDim 700×350")
+	}
+
+	// ── Test 2: FindAvailableRemnants with minDim = 500×250 ──────────────────
+	// Both remnants satisfy 500×250 → both must appear.
+	minDimSmall := domain.Dimension{LengthMM: 500, WidthMM: 250}
+	foundSmall, err := svc.FindAvailableRemnants(context.Background(), minDimSmall)
+	if err != nil {
+		t.Fatalf("FindAvailableRemnants(500×250): %v", err)
+	}
+	foundASmall, foundBSmall := false, false
+	for _, r := range foundSmall {
+		if r.ID == *rA.RemnantID {
+			foundASmall = true
+		}
+		if r.ID == *rB.RemnantID {
+			foundBSmall = true
+		}
+	}
+	if !foundASmall {
+		t.Error("remnant A (bounding_box 600×300) must appear for minDim 500×250")
+	}
+	if !foundBSmall {
+		t.Error("remnant B (bounding_box 800×400) must appear for minDim 500×250")
+	}
+
+	// ── Test 3: ListRemnants with MinLengthMM/MinWidthMM filter ──────────────
+	// Using the paginated API with same min-dim as Test 1.
+	pageResult, err := svc.ListRemnants(context.Background(),
+		RemnantFilter{MinLengthMM: 700, MinWidthMM: 350},
+		httpkit.PageParams{Page: 1, Limit: 100},
+	)
+	if err != nil {
+		t.Fatalf("ListRemnants(min 700×350): %v", err)
+	}
+	for _, r := range pageResult.Items {
+		if r.ID == *rA.RemnantID {
+			t.Error("remnant A must NOT appear in ListRemnants for min 700×350")
+		}
+	}
+	foundBPaged := false
+	for _, r := range pageResult.Items {
+		if r.ID == *rB.RemnantID {
+			foundBPaged = true
+		}
+	}
+	if !foundBPaged {
+		t.Error("remnant B must appear in ListRemnants for min 700×350")
+	}
+}
