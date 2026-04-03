@@ -23,55 +23,102 @@ You are writing tests for the VMARBLE Warehouse Management Service (Go 1.24).
 
 ## Test patterns
 
-### Table-driven test template
-```go
-func TestService_MethodName(t *testing.T) {
-    tests := []struct {
-        name    string
-        input   InputDTO
-        setup   func(mockStore *mockStore)
-        want    OutputDTO
-        wantErr error
-    }{
-        {
-            name:  "success case",
-            input: InputDTO{...},
-            setup: func(ms *mockStore) {
-                ms.findByIDFn = func(ctx context.Context, id uuid.UUID) (*Entity, error) {
-                    return &Entity{...}, nil
-                }
-            },
-            want: OutputDTO{...},
-        },
-        {
-            name:    "not found",
-            input:   InputDTO{ID: unknownID},
-            setup:   func(ms *mockStore) {
-                ms.findByIDFn = func(ctx context.Context, id uuid.UUID) (*Entity, error) {
-                    return nil, domain.ErrNotFound
-                }
-            },
-            wantErr: domain.ErrNotFound,
-        },
-    }
+### mockStore pattern
 
-    for _, tt := range tests {
-        t.Run(tt.name, func(t *testing.T) {
-            ms := &mockStore{}
-            if tt.setup != nil {
-                tt.setup(ms)
-            }
-            svc := NewService(ms)
-            got, err := svc.Method(context.Background(), tt.input)
-            if tt.wantErr != nil {
-                assert.ErrorIs(t, err, tt.wantErr)
-                return
-            }
-            assert.NoError(t, err)
-            assert.Equal(t, tt.want, got)
-        })
+The `mockStore` in `service_test.go` uses **plain struct fields** — not function
+callbacks. Each store method reads from a matching field and returns it.
+
+```go
+// ── Declaration (add fields per store method) ─────────────────────────────────
+type mockStore struct {
+    // selectEntityByID
+    selectEntityByIDResult SomeEntity
+    selectEntityByIDErr    error
+
+    // insertEntity
+    insertEntityErr error
+
+    // recordWriteAtomically — inspect what the service passed in
+    recordWriteAtomicallyCalled bool
+    recordWriteAtomicallyOp    writeOp
+    recordWriteAtomicallyErr   error
+}
+
+// ── Implementation ────────────────────────────────────────────────────────────
+func (m *mockStore) selectEntityByID(_ context.Context, _ uuid.UUID) (SomeEntity, error) {
+    return m.selectEntityByIDResult, m.selectEntityByIDErr
+}
+func (m *mockStore) insertEntity(_ context.Context, _ SomeEntity) error {
+    return m.insertEntityErr
+}
+func (m *mockStore) recordWriteAtomically(_ context.Context, op writeOp) error {
+    m.recordWriteAtomicallyCalled = true
+    m.recordWriteAtomicallyOp = op
+    return m.recordWriteAtomicallyErr
+}
+```
+
+### Unit test pattern (no testify — stdlib only)
+
+```go
+func TestService_HappyPath(t *testing.T) {
+    entityID := uuid.New()
+    st := &mockStore{
+        selectEntityByIDResult: SomeEntity{ID: entityID, Status: "AVAILABLE"},
+    }
+    svc := NewService(st)
+
+    result, err := svc.DoSomething(context.Background(), DoSomethingInput{
+        EntityID: entityID,
+        // ...
+    })
+    if err != nil {
+        t.Fatalf("unexpected error: %v", err)
+    }
+    if result.ID == uuid.Nil {
+        t.Error("result.ID must be set")
     }
 }
+
+func TestService_NotFound_PropagatesError(t *testing.T) {
+    st := &mockStore{
+        selectEntityByIDErr: domain.NewBizError(domain.ErrNotFound, "not found"),
+    }
+    svc := NewService(st)
+
+    _, err := svc.DoSomething(context.Background(), DoSomethingInput{EntityID: uuid.New()})
+    if !errors.Is(err, domain.ErrNotFound) {
+        t.Errorf("expected ErrNotFound, got %v", err)
+    }
+}
+
+func TestService_AtomicNotCalledOnValidationFailure(t *testing.T) {
+    st := &mockStore{
+        selectEntityByIDResult: SomeEntity{Status: "ISSUED"}, // wrong status
+    }
+    svc := NewService(st)
+
+    _, err := svc.DoSomething(context.Background(), DoSomethingInput{EntityID: uuid.New()})
+    if !errors.Is(err, domain.ErrInvalidInput) {
+        t.Errorf("expected ErrInvalidInput, got %v", err)
+    }
+    if st.recordWriteAtomicallyCalled {
+        t.Error("atomic method must NOT be called when validation fails")
+    }
+}
+```
+
+### Helper utilities already in `service_test.go`
+
+```go
+// Generic pointer helper — use instead of &literal
+func ptr[T any](v T) *T { return &v }
+
+// Example dimension fixtures
+var (
+    dim2000x1000 = domain.Dimension{LengthMM: 2000, WidthMM: 1000}
+    dim1000x500  = domain.Dimension{LengthMM: 1000, WidthMM: 500}
+)
 ```
 
 ## Test rules
