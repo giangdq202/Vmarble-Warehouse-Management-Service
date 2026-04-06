@@ -203,6 +203,14 @@ Always wrap with `NewBizError(sentinel, humanMessage)`.
 5. Wire in `cmd/server/main.go`: create store → service → handler → `handler.Register(api)` (where `api` is a `*gin.RouterGroup`).
 6. Add migration(s) in `migrations/` with the next sequence number.
 
+## Sprint 3 Objectives (Current)
+
+1. **Push Notifications**: Real-time alerts for CNC operators via SSE/WebSockets.
+2. **Assignment System**: New `CNC_MANAGER` role. Manual and automated assignment of `WorkOrder`.
+3. **Staging Camera Fix**: Investigate HTTPS/Permissions issues on staging.
+4. **Global Pagination & Search**: Implement standard `httpkit.PageParams` for all lists (Admin & Kiosk).
+5. **Self QA**: Mandatory developer validation for every issue before PR.
+
 ## Open business decisions (blockers for automation)
 
 From spec section 8 — confirm before implementing smart algorithms:
