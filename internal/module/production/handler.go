@@ -6,6 +6,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/vmarble/warehouse-management-service/internal/domain"
+	"github.com/vmarble/warehouse-management-service/internal/platform/auth"
 	"github.com/vmarble/warehouse-management-service/internal/platform/httpkit"
 )
 
@@ -20,10 +21,14 @@ func NewHandler(s Service) *Handler {
 func (h *Handler) Register(rg *gin.RouterGroup) {
 	rg.POST("/work-orders", h.create)
 	rg.GET("/work-orders", h.list)
+	// /mine must be registered before /:id to avoid Gin treating "mine" as an id param.
+	rg.GET("/work-orders/mine", auth.RequireRole(auth.RoleCNC), h.listMine)
 	rg.GET("/work-orders/:id", h.get)
 	rg.POST("/work-orders/:id/advance", h.advance)
 	rg.POST("/work-orders/:id/consumptions", h.recordConsumption)
 	rg.GET("/work-orders/:id/consumptions", h.listConsumptions)
+	rg.POST("/work-orders/:id/assign", auth.RequireRole(auth.RoleCNCManager), h.assign)
+	rg.POST("/work-orders/:id/suggest-assignment", auth.RequireRole(auth.RoleCNCManager), h.suggestAssignment)
 }
 
 // createWorkOrder godoc
@@ -191,4 +196,101 @@ func (h *Handler) listConsumptions(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, records)
+}
+
+// assign godoc
+//
+// @Summary      Assign a PLANNED work order to a CNC operator
+// @Tags         production
+// @Accept       json
+// @Produce      json
+// @Security     BearerAuth
+// @Param        id    path      string  true  "work order id (uuid)"
+// @Param        body  body      object  true  "payload"  SchemaExample({"user_id":"<uuid>"})
+// @Success      200   {object}  WorkOrder
+// @Failure      400   {object}  map[string]string
+// @Failure      403   {object}  map[string]string
+// @Failure      404   {object}  map[string]string
+// @Failure      412   {object}  map[string]string
+// @Router       /api/v1/work-orders/{id}/assign [post]
+func (h *Handler) assign(c *gin.Context) {
+	woID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+	var body struct {
+		UserID uuid.UUID `json:"user_id"`
+	}
+	if !httpkit.Bind(c, &body) {
+		return
+	}
+	if body.UserID == uuid.Nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "user_id is required"})
+		return
+	}
+	wo, err := h.svc.AssignWorkOrder(c.Request.Context(), AssignWorkOrderInput{
+		WorkOrderID: woID,
+		UserID:      body.UserID,
+	})
+	if err != nil {
+		httpkit.Error(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, wo)
+}
+
+// suggestAssignment godoc
+//
+// @Summary      Suggest the least-busy CNC operator for a work order
+// @Tags         production
+// @Produce      json
+// @Security     BearerAuth
+// @Param        id  path      string  true  "work order id (uuid)"
+// @Success      200 {object}  SuggestAssignmentResult
+// @Failure      400 {object}  map[string]string
+// @Failure      403 {object}  map[string]string
+// @Failure      404 {object}  map[string]string
+// @Router       /api/v1/work-orders/{id}/suggest-assignment [post]
+func (h *Handler) suggestAssignment(c *gin.Context) {
+	woID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+	result, err := h.svc.SuggestAssignment(c.Request.Context(), woID)
+	if err != nil {
+		httpkit.Error(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, result)
+}
+
+// listMine godoc
+//
+// @Summary      List work orders assigned to the authenticated CNC operator
+// @Tags         production
+// @Produce      json
+// @Security     BearerAuth
+// @Success      200 {array}   WorkOrder
+// @Failure      401 {object}  map[string]string
+// @Failure      403 {object}  map[string]string
+// @Router       /api/v1/work-orders/mine [get]
+func (h *Handler) listMine(c *gin.Context) {
+	id, ok := auth.FromContext(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		return
+	}
+	userID, err := uuid.Parse(id.UserID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "invalid user id in token"})
+		return
+	}
+	wos, err := h.svc.ListWorkOrdersByAssignee(c.Request.Context(), userID)
+	if err != nil {
+		httpkit.Error(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, wos)
 }
