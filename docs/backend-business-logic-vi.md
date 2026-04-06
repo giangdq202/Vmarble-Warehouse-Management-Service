@@ -257,9 +257,16 @@ Mỗi barcode đính kèm một carcass thành phẩm chứa các trường tố
 | Kế toán | Nhập PO, costing, dòng tiền | CRUD PO, xem toàn bộ costing, export báo cáo tài chính |
 | Bộ phận Kế hoạch | Lập Production Plan | Tạo / duyệt Production Plan từ PO, xem tồn kho |
 | Quản lý Kho | Nhập xuất nguyên liệu, vật tư | CRUD giao dịch kho, nhập remnant, nhập tiêu hao vật tư phụ |
-| Vận hành CNC | Chạy máy, báo kết quả cắt | Xem lệnh cắt, cập nhật trạng thái cắt, scan barcode |
+| Quản lý CNC (CNC Manager) | Điều phối sản xuất CNC | Giao Work Order cho CNC, xem tiến độ toàn xưởng, ưu tiên lệnh cắt |
+| Vận hành CNC | Chạy máy, báo kết quả cắt | Xem danh sách Work Order được giao, cập nhật trạng thái cắt, scan barcode |
 | Tổ trưởng SX | Quản lý gia công | Báo cáo tiêu hao vật tư phụ, cập nhật trạng thái Work Order |
 | Admin / Sếp | Xem toàn bộ hệ thống | Read-only trên tất cả module, xem dashboard tổng hợp |
+
+## 5.1 Quy tắc Giao việc (Assignment)
+
+- **Giao thủ công**: CNC Manager chọn Work Order và gán trực tiếp cho 1 tài khoản Vận hành CNC.
+- **Giao tự động (Gợi ý)**: Hệ thống gợi ý gán cho CNC đang có ít Work Order ở trạng thái `IN_CUTTING` nhất.
+- **Thông báo**: Khi có lệnh gán mới, hệ thống push notification tới thiết bị của CNC được gán.
 
 ---
 
