@@ -29,10 +29,18 @@ type mockStore struct {
 	selectWorkOrdersByPlanResult []WorkOrder
 	selectWorkOrdersByPlanErr    error
 
+	// selectWorkOrdersByAssignee
+	selectWorkOrdersByAssigneeResult []WorkOrder
+	selectWorkOrdersByAssigneeErr    error
+
 	// updateWorkOrderStatus — record calls for inspection
 	updateWorkOrderStatusCalled bool
 	updateWorkOrderStatusArg    string
 	updateWorkOrderStatusErr    error
+
+	// updateWorkOrderAssignment — record calls for inspection
+	updateWorkOrderAssignmentCalled bool
+	updateWorkOrderAssignmentErr    error
 
 	// insertConsumption
 	insertConsumptionErr error
@@ -44,6 +52,14 @@ type mockStore struct {
 	// hasMetalConsumption
 	hasMetalConsumptionResult bool
 	hasMetalConsumptionErr    error
+
+	// selectInCuttingCountByUser
+	selectInCuttingCountByUserResult map[uuid.UUID]int
+	selectInCuttingCountByUserErr    error
+
+	// selectCNCUserIDs
+	selectCNCUserIDsResult []uuid.UUID
+	selectCNCUserIDsErr    error
 }
 
 func (m *mockStore) insertWorkOrder(_ context.Context, _ WorkOrder) error {
@@ -58,10 +74,17 @@ func (m *mockStore) selectWorkOrderByID(_ context.Context, _ uuid.UUID) (WorkOrd
 func (m *mockStore) selectWorkOrdersByPlan(_ context.Context, _ uuid.UUID) ([]WorkOrder, error) {
 	return m.selectWorkOrdersByPlanResult, m.selectWorkOrdersByPlanErr
 }
+func (m *mockStore) selectWorkOrdersByAssignee(_ context.Context, _ uuid.UUID) ([]WorkOrder, error) {
+	return m.selectWorkOrdersByAssigneeResult, m.selectWorkOrdersByAssigneeErr
+}
 func (m *mockStore) updateWorkOrderStatus(_ context.Context, _ uuid.UUID, status string) error {
 	m.updateWorkOrderStatusCalled = true
 	m.updateWorkOrderStatusArg = status
 	return m.updateWorkOrderStatusErr
+}
+func (m *mockStore) updateWorkOrderAssignment(_ context.Context, _ uuid.UUID, _ uuid.UUID, _ time.Time) error {
+	m.updateWorkOrderAssignmentCalled = true
+	return m.updateWorkOrderAssignmentErr
 }
 func (m *mockStore) insertConsumption(_ context.Context, _ ConsumptionRecord) error {
 	return m.insertConsumptionErr
@@ -71,6 +94,12 @@ func (m *mockStore) selectConsumptionsByWO(_ context.Context, _ uuid.UUID) ([]Co
 }
 func (m *mockStore) hasMetalConsumption(_ context.Context, _ uuid.UUID) (bool, error) {
 	return m.hasMetalConsumptionResult, m.hasMetalConsumptionErr
+}
+func (m *mockStore) selectInCuttingCountByUser(_ context.Context) (map[uuid.UUID]int, error) {
+	return m.selectInCuttingCountByUserResult, m.selectInCuttingCountByUserErr
+}
+func (m *mockStore) selectCNCUserIDs(_ context.Context) ([]uuid.UUID, error) {
+	return m.selectCNCUserIDsResult, m.selectCNCUserIDsErr
 }
 
 // mockPlanChecker satisfies PlanChecker.
@@ -93,10 +122,24 @@ func (m *mockSKUChecker) GetSKU(_ context.Context, _ uuid.UUID) (SKUInfo, error)
 	return m.result, m.err
 }
 
+// mockUserChecker satisfies UserChecker.
+type mockUserChecker struct {
+	result UserInfo
+	err    error
+}
+
+func (m *mockUserChecker) GetUser(_ context.Context, _ uuid.UUID) (UserInfo, error) {
+	return m.result, m.err
+}
+
 // ── helpers ───────────────────────────────────────────────────────────────────
 
 func newSvc(st *mockStore, pc *mockPlanChecker, sc *mockSKUChecker) Service {
-	return NewService(st, pc, sc)
+	return NewService(st, pc, sc, &mockUserChecker{})
+}
+
+func newSvcWithUser(st *mockStore, pc *mockPlanChecker, sc *mockSKUChecker, uc *mockUserChecker) Service {
+	return NewService(st, pc, sc, uc)
 }
 
 // approvedPlan returns a PlanChecker that returns an APPROVED plan.
@@ -871,5 +914,314 @@ func TestWorkOrderStatus_Next_ReturnsNextInChain(t *testing.T) {
 		if ok && next != tc.wantNext {
 			t.Errorf("%s.Next() = %v, want %v", tc.status, next, tc.wantNext)
 		}
+	}
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// AssignWorkOrder
+// ═════════════════════════════════════════════════════════════════════════════
+
+func TestAssignWorkOrder_HappyPath(t *testing.T) {
+	woID := uuid.New()
+	userID := uuid.New()
+	wo := plannedWO(woID, uuid.New(), uuid.New())
+	st := &mockStore{selectWorkOrderByIDResult: wo}
+	uc := &mockUserChecker{result: UserInfo{ID: userID, Role: "cnc"}}
+
+	svc := newSvcWithUser(st, approvedPlan(uuid.New()), skuNoMetal(uuid.New()), uc)
+
+	result, err := svc.AssignWorkOrder(context.Background(), AssignWorkOrderInput{
+		WorkOrderID: woID,
+		UserID:      userID,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.AssignedTo == nil || *result.AssignedTo != userID {
+		t.Errorf("AssignedTo = %v, want %v", result.AssignedTo, userID)
+	}
+	if result.AssignedAt == nil {
+		t.Error("AssignedAt must be set")
+	}
+	if !st.updateWorkOrderAssignmentCalled {
+		t.Error("store.updateWorkOrderAssignment must be called")
+	}
+}
+
+func TestAssignWorkOrder_WorkOrderNotFound_PropagatesError(t *testing.T) {
+	st := &mockStore{selectWorkOrderByIDErr: domain.NewBizError(domain.ErrNotFound, "not found")}
+	uc := &mockUserChecker{result: UserInfo{Role: "cnc"}}
+
+	svc := newSvcWithUser(st, approvedPlan(uuid.New()), skuNoMetal(uuid.New()), uc)
+
+	_, err := svc.AssignWorkOrder(context.Background(), AssignWorkOrderInput{
+		WorkOrderID: uuid.New(),
+		UserID:      uuid.New(),
+	})
+	if !errors.Is(err, domain.ErrNotFound) {
+		t.Errorf("expected ErrNotFound, got %v", err)
+	}
+}
+
+func TestAssignWorkOrder_WorkOrderNotPlanned_IsPreconditionFailed(t *testing.T) {
+	woID := uuid.New()
+	nonPlannedStatuses := []domain.WorkOrderStatus{
+		domain.WOInCutting, domain.WOInProcessing, domain.WOCompleted, domain.WOCosted,
+	}
+	for _, status := range nonPlannedStatuses {
+		t.Run(string(status), func(t *testing.T) {
+			st := &mockStore{selectWorkOrderByIDResult: woWithStatus(woID, status)}
+			uc := &mockUserChecker{result: UserInfo{Role: "cnc"}}
+
+			svc := newSvcWithUser(st, approvedPlan(uuid.New()), skuNoMetal(uuid.New()), uc)
+
+			_, err := svc.AssignWorkOrder(context.Background(), AssignWorkOrderInput{
+				WorkOrderID: woID,
+				UserID:      uuid.New(),
+			})
+			if !errors.Is(err, domain.ErrPreconditionFailed) {
+				t.Errorf("status %s: expected ErrPreconditionFailed, got %v", status, err)
+			}
+			if st.updateWorkOrderAssignmentCalled {
+				t.Error("store.updateWorkOrderAssignment must NOT be called when WO is not PLANNED")
+			}
+		})
+	}
+}
+
+func TestAssignWorkOrder_UserNotFound_PropagatesError(t *testing.T) {
+	woID := uuid.New()
+	st := &mockStore{selectWorkOrderByIDResult: plannedWO(woID, uuid.New(), uuid.New())}
+	uc := &mockUserChecker{err: domain.NewBizError(domain.ErrNotFound, "user not found")}
+
+	svc := newSvcWithUser(st, approvedPlan(uuid.New()), skuNoMetal(uuid.New()), uc)
+
+	_, err := svc.AssignWorkOrder(context.Background(), AssignWorkOrderInput{
+		WorkOrderID: woID,
+		UserID:      uuid.New(),
+	})
+	if !errors.Is(err, domain.ErrNotFound) {
+		t.Errorf("expected ErrNotFound, got %v", err)
+	}
+}
+
+func TestAssignWorkOrder_UserNotCNC_IsInvalidInput(t *testing.T) {
+	woID := uuid.New()
+	nonCNCRoles := []string{"admin", "warehouse", "cnc_manager", "planner"}
+	for _, role := range nonCNCRoles {
+		t.Run(role, func(t *testing.T) {
+			st := &mockStore{selectWorkOrderByIDResult: plannedWO(woID, uuid.New(), uuid.New())}
+			uc := &mockUserChecker{result: UserInfo{ID: uuid.New(), Role: role}}
+
+			svc := newSvcWithUser(st, approvedPlan(uuid.New()), skuNoMetal(uuid.New()), uc)
+
+			_, err := svc.AssignWorkOrder(context.Background(), AssignWorkOrderInput{
+				WorkOrderID: woID,
+				UserID:      uuid.New(),
+			})
+			if !errors.Is(err, domain.ErrInvalidInput) {
+				t.Errorf("role %s: expected ErrInvalidInput, got %v", role, err)
+			}
+			if st.updateWorkOrderAssignmentCalled {
+				t.Error("store.updateWorkOrderAssignment must NOT be called when role validation fails")
+			}
+		})
+	}
+}
+
+func TestAssignWorkOrder_StoreError_Propagates(t *testing.T) {
+	woID := uuid.New()
+	dbErr := errors.New("db write failed")
+	st := &mockStore{
+		selectWorkOrderByIDResult:    plannedWO(woID, uuid.New(), uuid.New()),
+		updateWorkOrderAssignmentErr: dbErr,
+	}
+	uc := &mockUserChecker{result: UserInfo{ID: uuid.New(), Role: "cnc"}}
+
+	svc := newSvcWithUser(st, approvedPlan(uuid.New()), skuNoMetal(uuid.New()), uc)
+
+	_, err := svc.AssignWorkOrder(context.Background(), AssignWorkOrderInput{
+		WorkOrderID: woID,
+		UserID:      uuid.New(),
+	})
+	if !errors.Is(err, dbErr) {
+		t.Errorf("expected store error to propagate, got %v", err)
+	}
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// SuggestAssignment
+// ═════════════════════════════════════════════════════════════════════════════
+
+func TestSuggestAssignment_NoCuttingWOs_ReturnsFirstCNCUser(t *testing.T) {
+	woID := uuid.New()
+	user1 := uuid.MustParse("00000000-0000-0000-0000-000000000001")
+	user2 := uuid.MustParse("00000000-0000-0000-0000-000000000002")
+	st := &mockStore{
+		selectWorkOrderByIDResult:        plannedWO(woID, uuid.New(), uuid.New()),
+		selectCNCUserIDsResult:           []uuid.UUID{user1, user2},
+		selectInCuttingCountByUserResult: map[uuid.UUID]int{}, // none in cutting
+	}
+
+	svc := newSvc(st, approvedPlan(uuid.New()), skuNoMetal(uuid.New()))
+
+	result, err := svc.SuggestAssignment(context.Background(), woID)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// With zero load, user1 is selected (first in UUID order).
+	if result.UserID != user1 {
+		t.Errorf("UserID = %v, want %v", result.UserID, user1)
+	}
+	if result.InCuttingCount != 0 {
+		t.Errorf("InCuttingCount = %d, want 0", result.InCuttingCount)
+	}
+}
+
+func TestSuggestAssignment_SelectsLeastBusyUser(t *testing.T) {
+	woID := uuid.New()
+	user1 := uuid.MustParse("00000000-0000-0000-0000-000000000001")
+	user2 := uuid.MustParse("00000000-0000-0000-0000-000000000002")
+	user3 := uuid.MustParse("00000000-0000-0000-0000-000000000003")
+	st := &mockStore{
+		selectWorkOrderByIDResult: plannedWO(woID, uuid.New(), uuid.New()),
+		selectCNCUserIDsResult:    []uuid.UUID{user1, user2, user3},
+		selectInCuttingCountByUserResult: map[uuid.UUID]int{
+			user1: 3,
+			user2: 1, // least busy
+			user3: 2,
+		},
+	}
+
+	svc := newSvc(st, approvedPlan(uuid.New()), skuNoMetal(uuid.New()))
+
+	result, err := svc.SuggestAssignment(context.Background(), woID)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.UserID != user2 {
+		t.Errorf("UserID = %v, want user2 (least busy)", result.UserID)
+	}
+	if result.InCuttingCount != 1 {
+		t.Errorf("InCuttingCount = %d, want 1", result.InCuttingCount)
+	}
+}
+
+func TestSuggestAssignment_TiedUsers_SelectsFirstByUUID(t *testing.T) {
+	woID := uuid.New()
+	user1 := uuid.MustParse("00000000-0000-0000-0000-000000000001")
+	user2 := uuid.MustParse("00000000-0000-0000-0000-000000000002")
+	st := &mockStore{
+		selectWorkOrderByIDResult: plannedWO(woID, uuid.New(), uuid.New()),
+		selectCNCUserIDsResult:    []uuid.UUID{user1, user2},
+		selectInCuttingCountByUserResult: map[uuid.UUID]int{
+			user1: 2,
+			user2: 2, // tied
+		},
+	}
+
+	svc := newSvc(st, approvedPlan(uuid.New()), skuNoMetal(uuid.New()))
+
+	result, err := svc.SuggestAssignment(context.Background(), woID)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// user1 wins the tie because UUID sort puts it first.
+	if result.UserID != user1 {
+		t.Errorf("UserID = %v, want user1 (tie broken by UUID order)", result.UserID)
+	}
+}
+
+func TestSuggestAssignment_NoCNCUsers_IsNotFound(t *testing.T) {
+	woID := uuid.New()
+	st := &mockStore{
+		selectWorkOrderByIDResult: plannedWO(woID, uuid.New(), uuid.New()),
+		selectCNCUserIDsResult:    nil, // empty
+	}
+
+	svc := newSvc(st, approvedPlan(uuid.New()), skuNoMetal(uuid.New()))
+
+	_, err := svc.SuggestAssignment(context.Background(), woID)
+	if !errors.Is(err, domain.ErrNotFound) {
+		t.Errorf("expected ErrNotFound when no CNC users, got %v", err)
+	}
+}
+
+func TestSuggestAssignment_WorkOrderNotFound_PropagatesError(t *testing.T) {
+	st := &mockStore{
+		selectWorkOrderByIDErr: domain.NewBizError(domain.ErrNotFound, "not found"),
+	}
+
+	svc := newSvc(st, approvedPlan(uuid.New()), skuNoMetal(uuid.New()))
+
+	_, err := svc.SuggestAssignment(context.Background(), uuid.New())
+	if !errors.Is(err, domain.ErrNotFound) {
+		t.Errorf("expected ErrNotFound, got %v", err)
+	}
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// ListWorkOrdersByAssignee
+// ═════════════════════════════════════════════════════════════════════════════
+
+func TestListWorkOrdersByAssignee_ReturnsAssignedWOs(t *testing.T) {
+	userID := uuid.New()
+	wo1 := plannedWO(uuid.New(), uuid.New(), uuid.New())
+	wo2 := plannedWO(uuid.New(), uuid.New(), uuid.New())
+	st := &mockStore{selectWorkOrdersByAssigneeResult: []WorkOrder{wo1, wo2}}
+
+	svc := newSvc(st, approvedPlan(uuid.New()), skuNoMetal(uuid.New()))
+
+	wos, err := svc.ListWorkOrdersByAssignee(context.Background(), userID)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(wos) != 2 {
+		t.Errorf("len = %d, want 2", len(wos))
+	}
+}
+
+func TestListWorkOrdersByAssignee_StoreError_Propagates(t *testing.T) {
+	dbErr := errors.New("query failed")
+	st := &mockStore{selectWorkOrdersByAssigneeErr: dbErr}
+
+	svc := newSvc(st, approvedPlan(uuid.New()), skuNoMetal(uuid.New()))
+
+	_, err := svc.ListWorkOrdersByAssignee(context.Background(), uuid.New())
+	if !errors.Is(err, dbErr) {
+		t.Errorf("expected store error to propagate, got %v", err)
+	}
+}
+
+func TestSuggestAssignment_StoreSelectCNCUsersError_Propagates(t *testing.T) {
+	woID := uuid.New()
+	dbErr := errors.New("db error")
+	st := &mockStore{
+		selectWorkOrderByIDResult: plannedWO(woID, uuid.New(), uuid.New()),
+		selectCNCUserIDsErr:       dbErr,
+	}
+
+	svc := newSvc(st, approvedPlan(uuid.New()), skuNoMetal(uuid.New()))
+
+	_, err := svc.SuggestAssignment(context.Background(), woID)
+	if !errors.Is(err, dbErr) {
+		t.Errorf("expected store error to propagate, got %v", err)
+	}
+}
+
+func TestSuggestAssignment_StoreLoadError_Propagates(t *testing.T) {
+	woID := uuid.New()
+	dbErr := errors.New("db error")
+	st := &mockStore{
+		selectWorkOrderByIDResult:        plannedWO(woID, uuid.New(), uuid.New()),
+		selectCNCUserIDsResult:           []uuid.UUID{uuid.New()},
+		selectInCuttingCountByUserErr:    dbErr,
+	}
+
+	svc := newSvc(st, approvedPlan(uuid.New()), skuNoMetal(uuid.New()))
+
+	_, err := svc.SuggestAssignment(context.Background(), woID)
+	if !errors.Is(err, dbErr) {
+		t.Errorf("expected store error to propagate, got %v", err)
 	}
 }

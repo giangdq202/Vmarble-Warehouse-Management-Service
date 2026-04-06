@@ -6,16 +6,18 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/vmarble/warehouse-management-service/internal/domain"
+	"github.com/vmarble/warehouse-management-service/internal/platform/auth"
 )
 
 type service struct {
 	s  store
 	pc PlanChecker
 	sc SKUChecker
+	uc UserChecker
 }
 
-func NewService(s store, pc PlanChecker, sc SKUChecker) Service {
-	return &service{s: s, pc: pc, sc: sc}
+func NewService(s store, pc PlanChecker, sc SKUChecker, uc UserChecker) Service {
+	return &service{s: s, pc: pc, sc: sc, uc: uc}
 }
 
 func (svc *service) CreateWorkOrder(ctx context.Context, in CreateWOInput) (WorkOrder, error) {
@@ -56,6 +58,10 @@ func (svc *service) ListWorkOrders(ctx context.Context) ([]WorkOrder, error) {
 
 func (svc *service) ListWorkOrdersByPlan(ctx context.Context, planID uuid.UUID) ([]WorkOrder, error) {
 	return svc.s.selectWorkOrdersByPlan(ctx, planID)
+}
+
+func (svc *service) ListWorkOrdersByAssignee(ctx context.Context, userID uuid.UUID) ([]WorkOrder, error) {
+	return svc.s.selectWorkOrdersByAssignee(ctx, userID)
 }
 
 func (svc *service) AdvanceStatus(ctx context.Context, woID uuid.UUID, to domain.WorkOrderStatus) error {
@@ -103,13 +109,13 @@ func (svc *service) RecordConsumption(ctx context.Context, in RecordConsumptionI
 
 	now := time.Now()
 	cr := ConsumptionRecord{
-		ID:            uuid.New(),
-		WorkOrderID:   in.WorkOrderID,
-		MaterialID:    in.MaterialID,
-		MaterialType:  in.MaterialType,
-		Unit:          in.Unit,
-		Quantity:      in.Quantity,
-		CreatedAt:     now,
+		ID:           uuid.New(),
+		WorkOrderID:  in.WorkOrderID,
+		MaterialID:   in.MaterialID,
+		MaterialType: in.MaterialType,
+		Unit:         in.Unit,
+		Quantity:     in.Quantity,
+		CreatedAt:    now,
 	}
 	if err := svc.s.insertConsumption(ctx, cr); err != nil {
 		return ConsumptionRecord{}, err
@@ -123,4 +129,71 @@ func (svc *service) ListConsumptions(ctx context.Context, woID uuid.UUID) ([]Con
 		return nil, err
 	}
 	return svc.s.selectConsumptionsByWO(ctx, woID)
+}
+
+// AssignWorkOrder assigns a PLANNED WorkOrder to a CNC operator.
+// Only users with role "cnc" can be assigned.
+// Only WorkOrders in status PLANNED can be assigned.
+func (svc *service) AssignWorkOrder(ctx context.Context, in AssignWorkOrderInput) (WorkOrder, error) {
+	wo, err := svc.s.selectWorkOrderByID(ctx, in.WorkOrderID)
+	if err != nil {
+		return WorkOrder{}, err
+	}
+
+	if wo.Status != domain.WOPlanned {
+		return WorkOrder{}, domain.NewBizError(domain.ErrPreconditionFailed, "only PLANNED work orders can be assigned")
+	}
+
+	u, err := svc.uc.GetUser(ctx, in.UserID)
+	if err != nil {
+		return WorkOrder{}, err
+	}
+
+	if u.Role != string(auth.RoleCNC) {
+		return WorkOrder{}, domain.NewBizError(domain.ErrInvalidInput, "assigned user must have role 'cnc'")
+	}
+
+	assignedAt := time.Now()
+	if err := svc.s.updateWorkOrderAssignment(ctx, in.WorkOrderID, in.UserID, assignedAt); err != nil {
+		return WorkOrder{}, err
+	}
+
+	wo.AssignedTo = &in.UserID
+	wo.AssignedAt = &assignedAt
+	return wo, nil
+}
+
+// SuggestAssignment returns the CNC user with the fewest WorkOrders currently
+// in status IN_CUTTING (Least Busy algorithm). Ties are broken by UUID ordering
+// for determinism.
+func (svc *service) SuggestAssignment(ctx context.Context, woID uuid.UUID) (SuggestAssignmentResult, error) {
+	if _, err := svc.s.selectWorkOrderByID(ctx, woID); err != nil {
+		return SuggestAssignmentResult{}, err
+	}
+
+	cncUsers, err := svc.s.selectCNCUserIDs(ctx)
+	if err != nil {
+		return SuggestAssignmentResult{}, err
+	}
+	if len(cncUsers) == 0 {
+		return SuggestAssignmentResult{}, domain.NewBizError(domain.ErrNotFound, "no CNC operators available for assignment")
+	}
+
+	load, err := svc.s.selectInCuttingCountByUser(ctx)
+	if err != nil {
+		return SuggestAssignmentResult{}, err
+	}
+
+	// Pick the user with the lowest current IN_CUTTING count.
+	// cncUsers is ordered by id (UUID) so ties are broken deterministically.
+	bestUser := cncUsers[0]
+	bestCount := load[bestUser] // 0 if not in map
+	for _, uid := range cncUsers[1:] {
+		if c := load[uid]; c < bestCount {
+			bestUser = uid
+			bestCount = c
+		}
+	}
+
+	return SuggestAssignmentResult{UserID: bestUser, InCuttingCount: bestCount}, nil
 }

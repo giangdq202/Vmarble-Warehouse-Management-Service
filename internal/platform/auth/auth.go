@@ -22,6 +22,7 @@ const (
 	RolePlanner    Role = "planner"
 	RoleWarehouse  Role = "warehouse"
 	RoleCNC        Role = "cnc"
+	RoleCNCManager Role = "cnc_manager"
 	RoleForeman    Role = "foreman"
 )
 
@@ -32,6 +33,7 @@ var validRoles = map[Role]bool{
 	RolePlanner:    true,
 	RoleWarehouse:  true,
 	RoleCNC:        true,
+	RoleCNCManager: true,
 	RoleForeman:    true,
 }
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
 
 	"github.com/vmarble/warehouse-management-service/internal/domain"
@@ -42,6 +43,10 @@ func (s *service) Login(ctx context.Context, in LoginInput) (LoginResult, error)
 		return LoginResult{}, domain.NewBizError(domain.ErrInvalidInput, "invalid username or password")
 	}
 
+	if !u.IsActive {
+		return LoginResult{}, domain.NewBizError(domain.ErrPreconditionFailed, "account is disabled")
+	}
+
 	exp := time.Now().Add(tokenTTL)
 	token := auth.SignToken(s.secret, u.ID.String(), auth.Role(u.Role), exp)
 
@@ -50,4 +55,12 @@ func (s *service) Login(ctx context.Context, in LoginInput) (LoginResult, error)
 		Role:      u.Role,
 		ExpiresAt: exp.UTC(),
 	}, nil
+}
+
+func (s *service) GetUser(ctx context.Context, userID uuid.UUID) (UserInfo, error) {
+	u, err := s.st.selectUserByID(ctx, userID)
+	if err != nil {
+		return UserInfo{}, err
+	}
+	return UserInfo{ID: u.ID, Role: u.Role}, nil
 }

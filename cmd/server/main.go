@@ -84,6 +84,7 @@ func main() {
 		productionStore,
 		&planAdapter{svc: planningSvc},
 		&skuAdapter{svc: catalogSvc},
+		&userAdapter{svc: authnSvc},
 	)
 
 	costingSvc := costing.NewService(
@@ -166,6 +167,18 @@ func (a *skuAdapter) GetSKU(ctx context.Context, skuID uuid.UUID) (production.SK
 		return production.SKUInfo{}, err
 	}
 	return production.SKUInfo{ID: s.ID, RequiresMetal: s.RequiresMetal}, nil
+}
+
+type userAdapter struct {
+	svc authn.Service
+}
+
+func (a *userAdapter) GetUser(ctx context.Context, userID uuid.UUID) (production.UserInfo, error) {
+	u, err := a.svc.GetUser(ctx, userID)
+	if err != nil {
+		return production.UserInfo{}, err
+	}
+	return production.UserInfo{ID: u.ID, Role: u.Role}, nil
 }
 
 type woAdapter struct {

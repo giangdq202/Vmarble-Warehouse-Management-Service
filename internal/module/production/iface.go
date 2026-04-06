@@ -15,12 +15,14 @@ type CreateWOInput struct {
 }
 
 type WorkOrder struct {
-	ID        uuid.UUID            `json:"id"`
-	PlanID    uuid.UUID            `json:"plan_id"`
-	SKUID     uuid.UUID            `json:"sku_id"`
-	Quantity  int                   `json:"quantity"`
-	Status    domain.WorkOrderStatus `json:"status"`
-	CreatedAt time.Time            `json:"created_at"`
+	ID         uuid.UUID              `json:"id"`
+	PlanID     uuid.UUID              `json:"plan_id"`
+	SKUID      uuid.UUID              `json:"sku_id"`
+	Quantity   int                    `json:"quantity"`
+	Status     domain.WorkOrderStatus `json:"status"`
+	AssignedTo *uuid.UUID             `json:"assigned_to,omitempty"`
+	AssignedAt *time.Time             `json:"assigned_at,omitempty"`
+	CreatedAt  time.Time              `json:"created_at"`
 }
 
 type RecordConsumptionInput struct {
@@ -32,13 +34,23 @@ type RecordConsumptionInput struct {
 }
 
 type ConsumptionRecord struct {
-	ID            uuid.UUID `json:"id"`
-	WorkOrderID   uuid.UUID `json:"work_order_id"`
-	MaterialID    uuid.UUID `json:"material_id"`
-	MaterialType  string    `json:"material_type"`
-	Quantity      float64   `json:"quantity"`
-	Unit          string    `json:"unit"`
-	CreatedAt     time.Time `json:"created_at"`
+	ID           uuid.UUID `json:"id"`
+	WorkOrderID  uuid.UUID `json:"work_order_id"`
+	MaterialID   uuid.UUID `json:"material_id"`
+	MaterialType string    `json:"material_type"`
+	Quantity     float64   `json:"quantity"`
+	Unit         string    `json:"unit"`
+	CreatedAt    time.Time `json:"created_at"`
+}
+
+type AssignWorkOrderInput struct {
+	WorkOrderID uuid.UUID
+	UserID      uuid.UUID
+}
+
+type SuggestAssignmentResult struct {
+	UserID         uuid.UUID `json:"user_id"`
+	InCuttingCount int       `json:"in_cutting_count"`
 }
 
 type Service interface {
@@ -46,7 +58,10 @@ type Service interface {
 	GetWorkOrder(ctx context.Context, woID uuid.UUID) (WorkOrder, error)
 	ListWorkOrders(ctx context.Context) ([]WorkOrder, error)
 	ListWorkOrdersByPlan(ctx context.Context, planID uuid.UUID) ([]WorkOrder, error)
+	ListWorkOrdersByAssignee(ctx context.Context, userID uuid.UUID) ([]WorkOrder, error)
 	AdvanceStatus(ctx context.Context, woID uuid.UUID, to domain.WorkOrderStatus) error
 	RecordConsumption(ctx context.Context, in RecordConsumptionInput) (ConsumptionRecord, error)
 	ListConsumptions(ctx context.Context, woID uuid.UUID) ([]ConsumptionRecord, error)
+	AssignWorkOrder(ctx context.Context, in AssignWorkOrderInput) (WorkOrder, error)
+	SuggestAssignment(ctx context.Context, woID uuid.UUID) (SuggestAssignmentResult, error)
 }
