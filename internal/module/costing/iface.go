@@ -6,6 +6,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/vmarble/warehouse-management-service/internal/domain"
+	"github.com/vmarble/warehouse-management-service/internal/platform/httpkit"
 )
 
 type CostingRecord struct {
@@ -23,5 +24,5 @@ type Service interface {
 	ComputeCost(ctx context.Context, workOrderID uuid.UUID) (CostingRecord, error)
 	FinalizeCost(ctx context.Context, workOrderID uuid.UUID) error
 	GetCostingRecord(ctx context.Context, workOrderID uuid.UUID) (CostingRecord, error)
-	ListCostingRecords(ctx context.Context) ([]CostingRecord, error)
+	ListCostingRecords(ctx context.Context, p httpkit.PageParams, finalized *bool) (httpkit.PagedResult[CostingRecord], error)
 }

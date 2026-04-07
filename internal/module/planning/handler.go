@@ -33,6 +33,8 @@ func (h *Handler) Register(rg *gin.RouterGroup) {
 // @Param        body  body      CreatePlanInput  true  "payload"
 // @Success      201   {object}  Plan
 // @Failure      400   {object}  map[string]string
+// @Security     BearerAuth
+// @Failure      401  {object}  map[string]string
 // @Router       /api/v1/plans [post]
 func (h *Handler) create(c *gin.Context) {
 	var in CreatePlanInput
@@ -52,16 +54,25 @@ func (h *Handler) create(c *gin.Context) {
 // @Summary      List production plans
 // @Tags         planning
 // @Produce      json
-// @Success      200  {array}   Plan
+// @Param        page     query     int     false  "page number (default 1)"
+// @Param        limit    query     int     false  "items per page (default 10, max 100)"
+// @Param        status   query     string  false  "filter by status: DRAFT, APPROVED, CANCELED"
+// @Param        sort_by  query     string  false  "sort column: created_at, deadline (default created_at)"
+// @Param        order    query     string  false  "sort direction: asc, desc (default desc)"
+// @Success      200  {object}  httpkit.PagedResult[Plan]
 // @Failure      500  {object}  map[string]string
+// @Security     BearerAuth
+// @Failure      401  {object}  map[string]string
 // @Router       /api/v1/plans [get]
 func (h *Handler) list(c *gin.Context) {
-	plans, err := h.svc.ListPlans(c.Request.Context())
+	p := httpkit.BindPageParams(c)
+	status := c.Query("status")
+	result, err := h.svc.ListPlans(c.Request.Context(), p, status)
 	if err != nil {
 		httpkit.Error(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, plans)
+	c.JSON(http.StatusOK, result)
 }
 
 // getPlan godoc
@@ -73,6 +84,8 @@ func (h *Handler) list(c *gin.Context) {
 // @Success      200  {object}  Plan
 // @Failure      400  {object}  map[string]string
 // @Failure      404  {object}  map[string]string
+// @Security     BearerAuth
+// @Failure      401  {object}  map[string]string
 // @Router       /api/v1/plans/{id} [get]
 func (h *Handler) get(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
@@ -97,6 +110,8 @@ func (h *Handler) get(c *gin.Context) {
 // @Success      200  {object}  map[string]string
 // @Failure      400  {object}  map[string]string
 // @Failure      409  {object}  map[string]string
+// @Security     BearerAuth
+// @Failure      401  {object}  map[string]string
 // @Router       /api/v1/plans/{id}/approve [post]
 func (h *Handler) approve(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
@@ -120,6 +135,8 @@ func (h *Handler) approve(c *gin.Context) {
 // @Success      200  {object}  map[string]string
 // @Failure      400  {object}  map[string]string
 // @Failure      409  {object}  map[string]string
+// @Security     BearerAuth
+// @Failure      401  {object}  map[string]string
 // @Router       /api/v1/plans/{id}/cancel [post]
 func (h *Handler) cancel(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))

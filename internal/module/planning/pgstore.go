@@ -3,11 +3,13 @@ package planning
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/vmarble/warehouse-management-service/internal/domain"
+	"github.com/vmarble/warehouse-management-service/internal/platform/httpkit"
 )
 
 type pgStore struct {
@@ -27,24 +29,47 @@ func (s *pgStore) insertPlan(ctx context.Context, p Plan) error {
 	return err
 }
 
-func (s *pgStore) selectPlans(ctx context.Context) ([]Plan, error) {
-	rows, err := s.pool.Query(ctx,
-		`SELECT id, po_id, status, deadline, created_at FROM production_plans ORDER BY created_at DESC`,
+func (s *pgStore) selectPlansPaged(ctx context.Context, p httpkit.PageParams, status string) ([]Plan, int, error) {
+	sortCol := "created_at"
+	if p.SortBy == "deadline" {
+		sortCol = "deadline"
+	}
+	orderDir := "DESC"
+	if p.Order == "asc" {
+		orderDir = "ASC"
+	}
+
+	var total int
+	if err := s.pool.QueryRow(ctx,
+		`SELECT COUNT(*) FROM production_plans WHERE ($1::text = '' OR status = $1)`,
+		status,
+	).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+
+	query := fmt.Sprintf(
+		`SELECT id, po_id, status, deadline, created_at
+		 FROM production_plans
+		 WHERE ($1::text = '' OR status = $1)
+		 ORDER BY %s %s
+		 LIMIT $2 OFFSET $3`,
+		sortCol, orderDir,
 	)
+	rows, err := s.pool.Query(ctx, query, status, p.Limit, p.Offset())
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	defer rows.Close()
 
 	var plans []Plan
 	for rows.Next() {
-		var p Plan
-		if err := rows.Scan(&p.ID, &p.POID, &p.Status, &p.Deadline, &p.CreatedAt); err != nil {
-			return nil, err
+		var plan Plan
+		if err := rows.Scan(&plan.ID, &plan.POID, &plan.Status, &plan.Deadline, &plan.CreatedAt); err != nil {
+			return nil, 0, err
 		}
-		plans = append(plans, p)
+		plans = append(plans, plan)
 	}
-	return plans, rows.Err()
+	return plans, total, rows.Err()
 }
 
 func (s *pgStore) selectPlanByID(ctx context.Context, id uuid.UUID) (Plan, error) {

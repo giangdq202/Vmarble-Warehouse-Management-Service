@@ -7,6 +7,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/vmarble/warehouse-management-service/internal/domain"
 	"github.com/vmarble/warehouse-management-service/internal/platform/auth"
+	"github.com/vmarble/warehouse-management-service/internal/platform/httpkit"
 )
 
 type service struct {
@@ -52,8 +53,12 @@ func (svc *service) GetWorkOrder(ctx context.Context, woID uuid.UUID) (WorkOrder
 	return svc.s.selectWorkOrderByID(ctx, woID)
 }
 
-func (svc *service) ListWorkOrders(ctx context.Context) ([]WorkOrder, error) {
-	return svc.s.selectWorkOrders(ctx)
+func (svc *service) ListWorkOrders(ctx context.Context, p httpkit.PageParams, status string) (httpkit.PagedResult[WorkOrder], error) {
+	wos, total, err := svc.s.selectWorkOrdersPaged(ctx, p, status)
+	if err != nil {
+		return httpkit.PagedResult[WorkOrder]{}, err
+	}
+	return httpkit.NewPagedResult(wos, total, p), nil
 }
 
 func (svc *service) ListWorkOrdersByPlan(ctx context.Context, planID uuid.UUID) ([]WorkOrder, error) {

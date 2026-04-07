@@ -5,11 +5,12 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/vmarble/warehouse-management-service/internal/platform/httpkit"
 )
 
 type store interface {
 	insertWorkOrder(ctx context.Context, wo WorkOrder) error
-	selectWorkOrders(ctx context.Context) ([]WorkOrder, error)
+	selectWorkOrdersPaged(ctx context.Context, p httpkit.PageParams, status string) ([]WorkOrder, int, error)
 	selectWorkOrderByID(ctx context.Context, id uuid.UUID) (WorkOrder, error)
 	selectWorkOrdersByPlan(ctx context.Context, planID uuid.UUID) ([]WorkOrder, error)
 	selectWorkOrdersByAssignee(ctx context.Context, userID uuid.UUID) ([]WorkOrder, error)

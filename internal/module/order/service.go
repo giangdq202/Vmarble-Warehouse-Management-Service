@@ -6,6 +6,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/vmarble/warehouse-management-service/internal/domain"
+	"github.com/vmarble/warehouse-management-service/internal/platform/httpkit"
 )
 
 type service struct {
@@ -72,8 +73,12 @@ func (svc *service) GetPO(ctx context.Context, poID uuid.UUID) (PO, error) {
 	return po, nil
 }
 
-func (svc *service) ListPOs(ctx context.Context) ([]PO, error) {
-	return svc.s.selectPOs(ctx)
+func (svc *service) ListPOs(ctx context.Context, p httpkit.PageParams) (httpkit.PagedResult[PO], error) {
+	pos, total, err := svc.s.selectPOsPaged(ctx, p)
+	if err != nil {
+		return httpkit.PagedResult[PO]{}, err
+	}
+	return httpkit.NewPagedResult(pos, total, p), nil
 }
 
 func (svc *service) GetLineItemsByPO(ctx context.Context, poID uuid.UUID) ([]LineItem, error) {

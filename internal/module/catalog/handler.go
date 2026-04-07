@@ -38,6 +38,8 @@ func (h *Handler) Register(rg *gin.RouterGroup) {
 // @Param        body  body      CreateMaterialInput  true  "payload"
 // @Success      201   {object}  Material
 // @Failure      400   {object}  map[string]string
+// @Security     BearerAuth
+// @Failure      401  {object}  map[string]string
 // @Router       /api/v1/materials [post]
 func (h *Handler) createMaterial(c *gin.Context) {
 	var in CreateMaterialInput
@@ -64,6 +66,8 @@ func (h *Handler) createMaterial(c *gin.Context) {
 // @Param        order    query     string  false  "asc or desc (default asc)"
 // @Success      200  {object}  httpkit.PagedResult[Material]
 // @Failure      500  {object}  map[string]string
+// @Security     BearerAuth
+// @Failure      401  {object}  map[string]string
 // @Router       /api/v1/materials [get]
 func (h *Handler) listMaterials(c *gin.Context) {
 	p := httpkit.BindPageParams(c)
@@ -84,6 +88,8 @@ func (h *Handler) listMaterials(c *gin.Context) {
 // @Success      200  {object}  Material
 // @Failure      400  {object}  map[string]string
 // @Failure      404  {object}  map[string]string
+// @Security     BearerAuth
+// @Failure      401  {object}  map[string]string
 // @Router       /api/v1/materials/{id} [get]
 func (h *Handler) getMaterial(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
@@ -108,6 +114,8 @@ func (h *Handler) getMaterial(c *gin.Context) {
 // @Param        body  body      CreateSKUInput  true  "payload"
 // @Success      201   {object}  SKU
 // @Failure      400   {object}  map[string]string
+// @Security     BearerAuth
+// @Failure      401  {object}  map[string]string
 // @Router       /api/v1/skus [post]
 func (h *Handler) createSKU(c *gin.Context) {
 	var in CreateSKUInput
@@ -134,6 +142,8 @@ func (h *Handler) createSKU(c *gin.Context) {
 // @Param        order    query     string  false  "asc or desc (default asc)"
 // @Success      200  {object}  httpkit.PagedResult[SKU]
 // @Failure      500  {object}  map[string]string
+// @Security     BearerAuth
+// @Failure      401  {object}  map[string]string
 // @Router       /api/v1/skus [get]
 func (h *Handler) listSKUs(c *gin.Context) {
 	p := httpkit.BindPageParams(c)
@@ -154,6 +164,8 @@ func (h *Handler) listSKUs(c *gin.Context) {
 // @Success      200  {object}  SKU
 // @Failure      400  {object}  map[string]string
 // @Failure      404  {object}  map[string]string
+// @Security     BearerAuth
+// @Failure      401  {object}  map[string]string
 // @Router       /api/v1/skus/{id} [get]
 func (h *Handler) getSKU(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
@@ -180,6 +192,8 @@ func (h *Handler) getSKU(c *gin.Context) {
 // @Success      200   {object}  BOM
 // @Failure      400   {object}  map[string]string
 // @Failure      404   {object}  map[string]string
+// @Security     BearerAuth
+// @Failure      401  {object}  map[string]string
 // @Router       /api/v1/skus/{id}/bom [put]
 func (h *Handler) setBOM(c *gin.Context) {
 	skuID, err := uuid.Parse(c.Param("id"))
@@ -209,6 +223,8 @@ func (h *Handler) setBOM(c *gin.Context) {
 // @Success      200  {object}  BOM
 // @Failure      400  {object}  map[string]string
 // @Failure      404  {object}  map[string]string
+// @Security     BearerAuth
+// @Failure      401  {object}  map[string]string
 // @Router       /api/v1/skus/{id}/bom [get]
 func (h *Handler) getBOM(c *gin.Context) {
 	skuID, err := uuid.Parse(c.Param("id"))

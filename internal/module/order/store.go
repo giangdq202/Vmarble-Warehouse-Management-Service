@@ -4,11 +4,12 @@ import (
 	"context"
 
 	"github.com/google/uuid"
+	"github.com/vmarble/warehouse-management-service/internal/platform/httpkit"
 )
 
 type store interface {
 	insertPO(ctx context.Context, p PO) error
-	selectPOs(ctx context.Context) ([]PO, error)
+	selectPOsPaged(ctx context.Context, p httpkit.PageParams) ([]PO, int, error)
 	selectPOByID(ctx context.Context, id uuid.UUID) (PO, error)
 	insertLineItems(ctx context.Context, items []LineItem) error
 	selectLineItemsByPO(ctx context.Context, poID uuid.UUID) ([]LineItem, error)
