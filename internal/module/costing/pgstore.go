@@ -3,11 +3,13 @@ package costing
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/vmarble/warehouse-management-service/internal/domain"
+	"github.com/vmarble/warehouse-management-service/internal/platform/httpkit"
 )
 
 type pgStore struct {
@@ -59,22 +61,11 @@ func (s *pgStore) updateCostingRecord(ctx context.Context, r CostingRecord) erro
 }
 
 func (s *pgStore) selectCostingRecordByWO(ctx context.Context, woID uuid.UUID) (CostingRecord, error) {
-	var r CostingRecord
-	err := s.pool.QueryRow(ctx,
-		`SELECT id, work_order_id, sku_id,
-			material_cost_amount, material_cost_currency,
-			auxiliary_cost_amount, auxiliary_cost_currency,
-			total_cost_amount, total_cost_currency,
-			finalized, created_at
-		FROM costing_records WHERE work_order_id = $1`,
+	row := s.pool.QueryRow(ctx,
+		`SELECT `+selectCostingCols+` FROM costing_records WHERE work_order_id = $1`,
 		woID,
-	).Scan(
-		&r.ID, &r.WorkOrderID, &r.SKUID,
-		&r.MaterialCost.Amount, &r.MaterialCost.Currency,
-		&r.AuxiliaryCost.Amount, &r.AuxiliaryCost.Currency,
-		&r.TotalCost.Amount, &r.TotalCost.Currency,
-		&r.Finalized, &r.CreatedAt,
 	)
+	r, err := scanCostingRecord(row)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return CostingRecord{}, domain.ErrNotFound
@@ -84,35 +75,61 @@ func (s *pgStore) selectCostingRecordByWO(ctx context.Context, woID uuid.UUID) (
 	return r, nil
 }
 
-func (s *pgStore) selectCostingRecords(ctx context.Context) ([]CostingRecord, error) {
-	rows, err := s.pool.Query(ctx,
-		`SELECT id, work_order_id, sku_id,
-			material_cost_amount, material_cost_currency,
-			auxiliary_cost_amount, auxiliary_cost_currency,
-			total_cost_amount, total_cost_currency,
-			finalized, created_at
-		FROM costing_records ORDER BY created_at`,
+const selectCostingCols = `id, work_order_id, sku_id,
+	material_cost_amount, material_cost_currency,
+	auxiliary_cost_amount, auxiliary_cost_currency,
+	total_cost_amount, total_cost_currency,
+	finalized, created_at`
+
+func scanCostingRecord(row interface{ Scan(...any) error }) (CostingRecord, error) {
+	var r CostingRecord
+	err := row.Scan(
+		&r.ID, &r.WorkOrderID, &r.SKUID,
+		&r.MaterialCost.Amount, &r.MaterialCost.Currency,
+		&r.AuxiliaryCost.Amount, &r.AuxiliaryCost.Currency,
+		&r.TotalCost.Amount, &r.TotalCost.Currency,
+		&r.Finalized, &r.CreatedAt,
 	)
+	return r, err
+}
+
+func (s *pgStore) selectCostingRecordsPaged(ctx context.Context, p httpkit.PageParams, finalized *bool) ([]CostingRecord, int, error) {
+	orderDir := "ASC"
+	if p.Order == "desc" {
+		orderDir = "DESC"
+	}
+
+	var total int
+	if err := s.pool.QueryRow(ctx,
+		`SELECT COUNT(*) FROM costing_records WHERE ($1::boolean IS NULL OR finalized = $1)`,
+		finalized,
+	).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+
+	query := fmt.Sprintf(
+		`SELECT `+selectCostingCols+`
+		 FROM costing_records
+		 WHERE ($1::boolean IS NULL OR finalized = $1)
+		 ORDER BY created_at %s
+		 LIMIT $2 OFFSET $3`,
+		orderDir,
+	)
+	rows, err := s.pool.Query(ctx, query, finalized, p.Limit, p.Offset())
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	defer rows.Close()
 
 	var out []CostingRecord
 	for rows.Next() {
-		var r CostingRecord
-		if err := rows.Scan(
-			&r.ID, &r.WorkOrderID, &r.SKUID,
-			&r.MaterialCost.Amount, &r.MaterialCost.Currency,
-			&r.AuxiliaryCost.Amount, &r.AuxiliaryCost.Currency,
-			&r.TotalCost.Amount, &r.TotalCost.Currency,
-			&r.Finalized, &r.CreatedAt,
-		); err != nil {
-			return nil, err
+		r, err := scanCostingRecord(rows)
+		if err != nil {
+			return nil, 0, err
 		}
 		out = append(out, r)
 	}
-	return out, rows.Err()
+	return out, total, rows.Err()
 }
 
 func (s *pgStore) finalizeCostingRecord(ctx context.Context, woID uuid.UUID) error {

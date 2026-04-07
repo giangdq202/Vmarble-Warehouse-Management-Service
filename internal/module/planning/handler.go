@@ -52,16 +52,23 @@ func (h *Handler) create(c *gin.Context) {
 // @Summary      List production plans
 // @Tags         planning
 // @Produce      json
-// @Success      200  {array}   Plan
+// @Param        page     query     int     false  "page number (default 1)"
+// @Param        limit    query     int     false  "items per page (default 10, max 100)"
+// @Param        status   query     string  false  "filter by status: DRAFT, APPROVED, CANCELED"
+// @Param        sort_by  query     string  false  "sort column: created_at, deadline (default created_at)"
+// @Param        order    query     string  false  "sort direction: asc, desc (default desc)"
+// @Success      200  {object}  httpkit.PagedResult[Plan]
 // @Failure      500  {object}  map[string]string
 // @Router       /api/v1/plans [get]
 func (h *Handler) list(c *gin.Context) {
-	plans, err := h.svc.ListPlans(c.Request.Context())
+	p := httpkit.BindPageParams(c)
+	status := c.Query("status")
+	result, err := h.svc.ListPlans(c.Request.Context(), p, status)
 	if err != nil {
 		httpkit.Error(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, plans)
+	c.JSON(http.StatusOK, result)
 }
 
 // getPlan godoc

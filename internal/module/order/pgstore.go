@@ -3,11 +3,13 @@ package order
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/vmarble/warehouse-management-service/internal/domain"
+	"github.com/vmarble/warehouse-management-service/internal/platform/httpkit"
 )
 
 type pgStore struct {
@@ -27,24 +29,50 @@ func (s *pgStore) insertPO(ctx context.Context, p PO) error {
 	return err
 }
 
-func (s *pgStore) selectPOs(ctx context.Context) ([]PO, error) {
-	rows, err := s.pool.Query(ctx,
-		`SELECT id, code, expected_delivery, created_at FROM purchase_orders ORDER BY created_at DESC`,
+func (s *pgStore) selectPOsPaged(ctx context.Context, p httpkit.PageParams) ([]PO, int, error) {
+	search := "%" + p.Search + "%"
+
+	sortCol := "created_at"
+	switch p.SortBy {
+	case "code", "expected_delivery":
+		sortCol = p.SortBy
+	}
+	orderDir := "DESC"
+	if p.Order == "asc" {
+		orderDir = "ASC"
+	}
+
+	var total int
+	if err := s.pool.QueryRow(ctx,
+		`SELECT COUNT(*) FROM purchase_orders WHERE code ILIKE $1`,
+		search,
+	).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+
+	query := fmt.Sprintf(
+		`SELECT id, code, expected_delivery, created_at
+		 FROM purchase_orders
+		 WHERE code ILIKE $1
+		 ORDER BY %s %s
+		 LIMIT $2 OFFSET $3`,
+		sortCol, orderDir,
 	)
+	rows, err := s.pool.Query(ctx, query, search, p.Limit, p.Offset())
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	defer rows.Close()
 
 	var pos []PO
 	for rows.Next() {
-		var p PO
-		if err := rows.Scan(&p.ID, &p.Code, &p.ExpectedDelivery, &p.CreatedAt); err != nil {
-			return nil, err
+		var po PO
+		if err := rows.Scan(&po.ID, &po.Code, &po.ExpectedDelivery, &po.CreatedAt); err != nil {
+			return nil, 0, err
 		}
-		pos = append(pos, p)
+		pos = append(pos, po)
 	}
-	return pos, rows.Err()
+	return pos, total, rows.Err()
 }
 
 func (s *pgStore) selectPOByID(ctx context.Context, id uuid.UUID) (PO, error) {

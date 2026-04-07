@@ -6,6 +6,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/vmarble/warehouse-management-service/internal/domain"
+	"github.com/vmarble/warehouse-management-service/internal/platform/httpkit"
 )
 
 type CreateLineItemInput struct {
@@ -39,7 +40,7 @@ type PO struct {
 type Service interface {
 	CreatePO(ctx context.Context, in CreatePOInput) (PO, error)
 	GetPO(ctx context.Context, poID uuid.UUID) (PO, error)
-	ListPOs(ctx context.Context) ([]PO, error)
+	ListPOs(ctx context.Context, p httpkit.PageParams) (httpkit.PagedResult[PO], error)
 	GetLineItemsByPO(ctx context.Context, poID uuid.UUID) ([]LineItem, error)
 	GetLineItemsBySKU(ctx context.Context, skuID uuid.UUID) ([]LineItem, error)
 }

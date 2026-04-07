@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/vmarble/warehouse-management-service/internal/domain"
+	"github.com/vmarble/warehouse-management-service/internal/platform/httpkit"
 )
 
 type service struct {
@@ -91,6 +92,10 @@ func (s *service) GetCostingRecord(ctx context.Context, workOrderID uuid.UUID) (
 	return s.st.selectCostingRecordByWO(ctx, workOrderID)
 }
 
-func (s *service) ListCostingRecords(ctx context.Context) ([]CostingRecord, error) {
-	return s.st.selectCostingRecords(ctx)
+func (s *service) ListCostingRecords(ctx context.Context, p httpkit.PageParams, finalized *bool) (httpkit.PagedResult[CostingRecord], error) {
+	records, total, err := s.st.selectCostingRecordsPaged(ctx, p, finalized)
+	if err != nil {
+		return httpkit.PagedResult[CostingRecord]{}, err
+	}
+	return httpkit.NewPagedResult(records, total, p), nil
 }

@@ -3,12 +3,14 @@ package production
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/vmarble/warehouse-management-service/internal/domain"
+	"github.com/vmarble/warehouse-management-service/internal/platform/httpkit"
 )
 
 type pgStore struct {
@@ -43,12 +45,35 @@ func scanWorkOrder(row interface {
 
 const selectWOCols = `id, plan_id, sku_id, quantity, status, assigned_to, assigned_at, created_at`
 
-func (s *pgStore) selectWorkOrders(ctx context.Context) ([]WorkOrder, error) {
-	rows, err := s.pool.Query(ctx,
-		`SELECT `+selectWOCols+` FROM work_orders ORDER BY created_at DESC`,
+func (s *pgStore) selectWorkOrdersPaged(ctx context.Context, p httpkit.PageParams, status string) ([]WorkOrder, int, error) {
+	sortCol := "created_at"
+	if p.SortBy == "status" {
+		sortCol = "status"
+	}
+	orderDir := "DESC"
+	if p.Order == "asc" {
+		orderDir = "ASC"
+	}
+
+	var total int
+	if err := s.pool.QueryRow(ctx,
+		`SELECT COUNT(*) FROM work_orders WHERE ($1::text = '' OR status = $1)`,
+		status,
+	).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+
+	query := fmt.Sprintf(
+		`SELECT `+selectWOCols+`
+		 FROM work_orders
+		 WHERE ($1::text = '' OR status = $1)
+		 ORDER BY %s %s
+		 LIMIT $2 OFFSET $3`,
+		sortCol, orderDir,
 	)
+	rows, err := s.pool.Query(ctx, query, status, p.Limit, p.Offset())
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	defer rows.Close()
 
@@ -56,11 +81,11 @@ func (s *pgStore) selectWorkOrders(ctx context.Context) ([]WorkOrder, error) {
 	for rows.Next() {
 		wo, err := scanWorkOrder(rows)
 		if err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		out = append(out, wo)
 	}
-	return out, rows.Err()
+	return out, total, rows.Err()
 }
 
 func (s *pgStore) selectWorkOrderByID(ctx context.Context, id uuid.UUID) (WorkOrder, error) {

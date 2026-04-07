@@ -6,6 +6,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/vmarble/warehouse-management-service/internal/domain"
+	"github.com/vmarble/warehouse-management-service/internal/platform/httpkit"
 )
 
 type service struct {
@@ -69,19 +70,20 @@ func (svc *service) GetPlan(ctx context.Context, planID uuid.UUID) (Plan, error)
 	return plan, nil
 }
 
-func (svc *service) ListPlans(ctx context.Context) ([]Plan, error) {
-	plans, err := svc.s.selectPlans(ctx)
+func (svc *service) ListPlans(ctx context.Context, p httpkit.PageParams, status string) (httpkit.PagedResult[Plan], error) {
+	plans, total, err := svc.s.selectPlansPaged(ctx, p, status)
 	if err != nil {
-		return nil, err
+		return httpkit.PagedResult[Plan]{}, err
 	}
+	// Hydrate each plan's items inline.
 	for i := range plans {
 		items, err := svc.s.selectPlanItemsByPlanID(ctx, plans[i].ID)
 		if err != nil {
-			return nil, err
+			return httpkit.PagedResult[Plan]{}, err
 		}
 		plans[i].Items = items
 	}
-	return plans, nil
+	return httpkit.NewPagedResult(plans, total, p), nil
 }
 
 func (svc *service) ApprovePlan(ctx context.Context, planID uuid.UUID) error {

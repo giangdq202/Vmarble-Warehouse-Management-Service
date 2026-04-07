@@ -100,14 +100,24 @@ func (h *Handler) get(c *gin.Context) {
 // @Summary      List costing records
 // @Tags         costing
 // @Produce      json
-// @Success      200  {array}   CostingRecord
+// @Param        page       query     int     false  "page number (default 1)"
+// @Param        limit      query     int     false  "items per page (default 10, max 100)"
+// @Param        finalized  query     bool    false  "filter by finalized: true or false (omit for all)"
+// @Param        order      query     string  false  "sort direction: asc, desc (default asc)"
+// @Success      200  {object}  httpkit.PagedResult[CostingRecord]
 // @Failure      500  {object}  map[string]string
 // @Router       /api/v1/costing [get]
 func (h *Handler) list(c *gin.Context) {
-	records, err := h.svc.ListCostingRecords(c.Request.Context())
+	p := httpkit.BindPageParams(c)
+	var finalized *bool
+	if v := c.Query("finalized"); v != "" {
+		b := v == "true"
+		finalized = &b
+	}
+	result, err := h.svc.ListCostingRecords(c.Request.Context(), p, finalized)
 	if err != nil {
 		httpkit.Error(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, records)
+	c.JSON(http.StatusOK, result)
 }

@@ -51,16 +51,22 @@ func (h *Handler) create(c *gin.Context) {
 // @Summary      List POs
 // @Tags         order
 // @Produce      json
-// @Success      200  {array}   PO
+// @Param        page     query     int     false  "page number (default 1)"
+// @Param        limit    query     int     false  "items per page (default 10, max 100)"
+// @Param        search   query     string  false  "search by PO code (ILIKE)"
+// @Param        sort_by  query     string  false  "sort column: code, expected_delivery (default created_at)"
+// @Param        order    query     string  false  "sort direction: asc, desc (default desc)"
+// @Success      200  {object}  httpkit.PagedResult[PO]
 // @Failure      500  {object}  map[string]string
 // @Router       /api/v1/pos [get]
 func (h *Handler) list(c *gin.Context) {
-	pos, err := h.svc.ListPOs(c.Request.Context())
+	p := httpkit.BindPageParams(c)
+	result, err := h.svc.ListPOs(c.Request.Context(), p)
 	if err != nil {
 		httpkit.Error(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, pos)
+	c.JSON(http.StatusOK, result)
 }
 
 // getPO godoc

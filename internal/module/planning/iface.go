@@ -6,6 +6,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/vmarble/warehouse-management-service/internal/domain"
+	"github.com/vmarble/warehouse-management-service/internal/platform/httpkit"
 )
 
 type CreatePlanInput struct {
@@ -38,7 +39,7 @@ type PlanItem struct {
 type Service interface {
 	CreatePlan(ctx context.Context, in CreatePlanInput) (Plan, error)
 	GetPlan(ctx context.Context, planID uuid.UUID) (Plan, error)
-	ListPlans(ctx context.Context) ([]Plan, error)
+	ListPlans(ctx context.Context, p httpkit.PageParams, status string) (httpkit.PagedResult[Plan], error)
 	ApprovePlan(ctx context.Context, planID uuid.UUID) error
 	CancelPlan(ctx context.Context, planID uuid.UUID) error
 }
