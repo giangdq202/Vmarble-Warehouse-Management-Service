@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/vmarble/warehouse-management-service/internal/domain"
+	"github.com/vmarble/warehouse-management-service/internal/platform/httpkit"
 )
 
 // ── mockStore ─────────────────────────────────────────────────────────────────
@@ -51,6 +52,10 @@ func (m *mockStore) selectCostingRecordByWO(_ context.Context, _ uuid.UUID) (Cos
 
 func (m *mockStore) selectCostingRecords(_ context.Context) ([]CostingRecord, error) {
 	return m.listResult, m.listErr
+}
+
+func (m *mockStore) selectCostingRecordsPaged(_ context.Context, _ httpkit.PageParams, _ *bool) ([]CostingRecord, int, error) {
+	return m.listResult, len(m.listResult), m.listErr
 }
 
 func (m *mockStore) finalizeCostingRecord(_ context.Context, _ uuid.UUID) error {
@@ -614,12 +619,12 @@ func TestListCostingRecords_ReturnsAll(t *testing.T) {
 	st := &mockStore{listResult: records}
 	svc := newSvc(st, &mockWOR{}, &mockCDR{}, zeroCONR())
 
-	got, err := svc.ListCostingRecords(context.Background())
+	got, err := svc.ListCostingRecords(context.Background(), httpkit.PageParams{Page: 1, Limit: 10}, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(got) != len(records) {
-		t.Errorf("len = %d, want %d", len(got), len(records))
+	if len(got.Items) != len(records) {
+		t.Errorf("len = %d, want %d", len(got.Items), len(records))
 	}
 }
 
@@ -627,12 +632,12 @@ func TestListCostingRecords_Empty_ReturnsNil(t *testing.T) {
 	st := &mockStore{listResult: nil}
 	svc := newSvc(st, &mockWOR{}, &mockCDR{}, zeroCONR())
 
-	got, err := svc.ListCostingRecords(context.Background())
+	got, err := svc.ListCostingRecords(context.Background(), httpkit.PageParams{Page: 1, Limit: 10}, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(got) != 0 {
-		t.Errorf("expected empty slice, got %d elements", len(got))
+	if len(got.Items) != 0 {
+		t.Errorf("expected empty slice, got %d elements", len(got.Items))
 	}
 }
 
@@ -641,7 +646,7 @@ func TestListCostingRecords_StoreError_Propagates(t *testing.T) {
 	st := &mockStore{listErr: storeErr}
 	svc := newSvc(st, &mockWOR{}, &mockCDR{}, zeroCONR())
 
-	_, err := svc.ListCostingRecords(context.Background())
+	_, err := svc.ListCostingRecords(context.Background(), httpkit.PageParams{Page: 1, Limit: 10}, nil)
 
 	if !errors.Is(err, storeErr) {
 		t.Errorf("expected list error to propagate, got %v", err)

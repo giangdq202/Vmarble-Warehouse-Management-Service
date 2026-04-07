@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/vmarble/warehouse-management-service/internal/domain"
+	"github.com/vmarble/warehouse-management-service/internal/platform/httpkit"
 )
 
 // ── mock implementations ──────────────────────────────────────────────────────
@@ -67,6 +68,10 @@ func (m *mockStore) insertWorkOrder(_ context.Context, _ WorkOrder) error {
 }
 func (m *mockStore) selectWorkOrders(_ context.Context) ([]WorkOrder, error) {
 	return m.selectWorkOrdersResult, m.selectWorkOrdersErr
+}
+
+func (m *mockStore) selectWorkOrdersPaged(_ context.Context, _ httpkit.PageParams, _ string) ([]WorkOrder, int, error) {
+	return m.selectWorkOrdersResult, len(m.selectWorkOrdersResult), m.selectWorkOrdersErr
 }
 func (m *mockStore) selectWorkOrderByID(_ context.Context, _ uuid.UUID) (WorkOrder, error) {
 	return m.selectWorkOrderByIDResult, m.selectWorkOrderByIDErr
@@ -341,12 +346,12 @@ func TestListWorkOrders_ReturnsAll(t *testing.T) {
 
 	svc := newSvc(st, approvedPlan(uuid.New()), skuNoMetal(uuid.New()))
 
-	wos, err := svc.ListWorkOrders(context.Background())
+	wos, err := svc.ListWorkOrders(context.Background(), httpkit.PageParams{Page: 1, Limit: 10}, "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(wos) != 2 {
-		t.Errorf("len = %d, want 2", len(wos))
+	if len(wos.Items) != 2 {
+		t.Errorf("len = %d, want 2", len(wos.Items))
 	}
 }
 
@@ -355,7 +360,7 @@ func TestListWorkOrders_StoreError_Propagates(t *testing.T) {
 	st := &mockStore{selectWorkOrdersErr: dbErr}
 	svc := newSvc(st, approvedPlan(uuid.New()), skuNoMetal(uuid.New()))
 
-	_, err := svc.ListWorkOrders(context.Background())
+	_, err := svc.ListWorkOrders(context.Background(), httpkit.PageParams{Page: 1, Limit: 10}, "")
 	if !errors.Is(err, dbErr) {
 		t.Errorf("expected store error, got %v", err)
 	}

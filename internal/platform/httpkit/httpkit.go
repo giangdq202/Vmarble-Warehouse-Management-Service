@@ -41,7 +41,11 @@ func NewPagedResult[T any](items []T, totalItems int, params PageParams) PagedRe
 	if items == nil {
 		items = []T{}
 	}
-	totalPages := (totalItems + params.Limit - 1) / params.Limit
+	limit := params.Limit
+	if limit <= 0 {
+		limit = defaultPageLimit
+	}
+	totalPages := (totalItems + limit - 1) / limit
 	if totalPages == 0 {
 		totalPages = 1
 	}
@@ -50,7 +54,7 @@ func NewPagedResult[T any](items []T, totalItems int, params PageParams) PagedRe
 		TotalItems:  totalItems,
 		TotalPages:  totalPages,
 		CurrentPage: params.Page,
-		Limit:       params.Limit,
+		Limit:       limit,
 	}
 }
 
