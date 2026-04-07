@@ -1,4 +1,4 @@
-.PHONY: dev run build test test-integration lint swagger migrate-up migrate-down migrate-create docker-up docker-down
+.PHONY: dev run build test test-integration lint swagger migrate-up migrate-down migrate-create docker-up docker-down docker-rebuild
 
 # Load .env if it exists
 ifneq (,$(wildcard ./.env))
@@ -40,7 +40,7 @@ lint:
 # ── API Docs (Swagger) ───────────────────────────────────────
 
 swagger:
-	$(SWAG) init --parseInternal --parseGoList=false -g main.go -d ./cmd/server,./internal/domain,./internal/module/authn,./internal/module/barcode,./internal/module/catalog,./internal/module/costing,./internal/module/inventory,./internal/module/order,./internal/module/planning,./internal/module/production,./internal/platform/auth,./internal/platform/config,./internal/platform/httpkit,./internal/platform/postgres -o docs
+	$(SWAG) init --parseInternal --parseDependency --parseDepth 2 -g cmd/server/main.go -o docs
 
 # ── Database Migrations ─────────────────────────────────────
 
@@ -61,3 +61,7 @@ docker-up:
 
 docker-down:
 	docker compose down -v
+
+docker-rebuild:
+	docker compose build --no-cache
+	docker compose up -d --force-recreate
