@@ -50,10 +50,6 @@ func (m *mockStore) selectCostingRecordByWO(_ context.Context, _ uuid.UUID) (Cos
 	return m.selectByWOResult, m.selectByWOErr
 }
 
-func (m *mockStore) selectCostingRecords(_ context.Context) ([]CostingRecord, error) {
-	return m.listResult, m.listErr
-}
-
 func (m *mockStore) selectCostingRecordsPaged(_ context.Context, _ httpkit.PageParams, _ *bool) ([]CostingRecord, int, error) {
 	return m.listResult, len(m.listResult), m.listErr
 }
