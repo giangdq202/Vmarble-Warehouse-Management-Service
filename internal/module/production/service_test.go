@@ -66,10 +66,6 @@ type mockStore struct {
 func (m *mockStore) insertWorkOrder(_ context.Context, _ WorkOrder) error {
 	return m.insertWorkOrderErr
 }
-func (m *mockStore) selectWorkOrders(_ context.Context) ([]WorkOrder, error) {
-	return m.selectWorkOrdersResult, m.selectWorkOrdersErr
-}
-
 func (m *mockStore) selectWorkOrdersPaged(_ context.Context, _ httpkit.PageParams, _ string) ([]WorkOrder, int, error) {
 	return m.selectWorkOrdersResult, len(m.selectWorkOrdersResult), m.selectWorkOrdersErr
 }

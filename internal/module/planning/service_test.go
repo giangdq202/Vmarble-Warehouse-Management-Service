@@ -43,10 +43,6 @@ func (m *mockStore) insertPlan(_ context.Context, _ Plan) error {
 	return m.insertPlanErr
 }
 
-func (m *mockStore) selectPlans(_ context.Context) ([]Plan, error) {
-	return m.selectPlansResult, m.selectPlansErr
-}
-
 func (m *mockStore) selectPlansPaged(_ context.Context, _ httpkit.PageParams, _ string) ([]Plan, int, error) {
 	return m.selectPlansResult, len(m.selectPlansResult), m.selectPlansErr
 }

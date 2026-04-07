@@ -42,10 +42,6 @@ func (m *mockStore) insertPO(_ context.Context, _ PO) error {
 	return m.insertPOErr
 }
 
-func (m *mockStore) selectPOs(_ context.Context) ([]PO, error) {
-	return m.selectPOsResult, m.selectPOsErr
-}
-
 func (m *mockStore) selectPOsPaged(_ context.Context, _ httpkit.PageParams) ([]PO, int, error) {
 	return m.selectPOsResult, len(m.selectPOsResult), m.selectPOsErr
 }
