@@ -32,6 +32,8 @@ func (h *Handler) Register(rg *gin.RouterGroup) {
 // @Param        body  body      GenerateBarcodeInput  true  "payload"
 // @Success      201   {object}  Barcode
 // @Failure      400   {object}  map[string]string
+// @Security     BearerAuth
+// @Failure      401  {object}  map[string]string
 // @Router       /api/v1/barcodes [post]
 func (h *Handler) generate(c *gin.Context) {
 	var in GenerateBarcodeInput
@@ -55,6 +57,8 @@ func (h *Handler) generate(c *gin.Context) {
 // @Success      200  {object}  Barcode
 // @Failure      400  {object}  map[string]string
 // @Failure      404  {object}  map[string]string
+// @Security     BearerAuth
+// @Failure      401  {object}  map[string]string
 // @Router       /api/v1/barcodes/{id} [get]
 func (h *Handler) lookup(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
@@ -81,6 +85,8 @@ func (h *Handler) lookup(c *gin.Context) {
 // @Success      201   {object}  ScanEvent
 // @Failure      400   {object}  map[string]string
 // @Failure      409   {object}  map[string]string
+// @Security     BearerAuth
+// @Failure      401  {object}  map[string]string
 // @Router       /api/v1/barcodes/{id}/scans [post]
 func (h *Handler) recordScan(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
@@ -110,6 +116,8 @@ func (h *Handler) recordScan(c *gin.Context) {
 // @Success      200  {array}   ScanEvent
 // @Failure      400  {object}  map[string]string
 // @Failure      404  {object}  map[string]string
+// @Security     BearerAuth
+// @Failure      401  {object}  map[string]string
 // @Router       /api/v1/barcodes/{id}/scans [get]
 func (h *Handler) listScans(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))

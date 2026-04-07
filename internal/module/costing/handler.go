@@ -33,6 +33,8 @@ func (h *Handler) Register(rg *gin.RouterGroup) {
 // @Failure      400          {object}  map[string]string
 // @Failure      409          {object}  map[string]string
 // @Failure      422          {object}  map[string]string
+// @Security     BearerAuth
+// @Failure      401  {object}  map[string]string
 // @Router       /api/v1/costing/{workOrderID}/compute [post]
 func (h *Handler) compute(c *gin.Context) {
 	woID, err := uuid.Parse(c.Param("workOrderID"))
@@ -57,6 +59,8 @@ func (h *Handler) compute(c *gin.Context) {
 // @Success      200          {object}  map[string]string
 // @Failure      400          {object}  map[string]string
 // @Failure      409          {object}  map[string]string
+// @Security     BearerAuth
+// @Failure      401  {object}  map[string]string
 // @Router       /api/v1/costing/{workOrderID}/finalize [post]
 func (h *Handler) finalize(c *gin.Context) {
 	woID, err := uuid.Parse(c.Param("workOrderID"))
@@ -80,6 +84,8 @@ func (h *Handler) finalize(c *gin.Context) {
 // @Success      200          {object}  CostingRecord
 // @Failure      400          {object}  map[string]string
 // @Failure      404          {object}  map[string]string
+// @Security     BearerAuth
+// @Failure      401  {object}  map[string]string
 // @Router       /api/v1/costing/{workOrderID} [get]
 func (h *Handler) get(c *gin.Context) {
 	woID, err := uuid.Parse(c.Param("workOrderID"))
@@ -106,6 +112,8 @@ func (h *Handler) get(c *gin.Context) {
 // @Param        order      query     string  false  "sort direction: asc, desc (default asc)"
 // @Success      200  {object}  httpkit.PagedResult[CostingRecord]
 // @Failure      500  {object}  map[string]string
+// @Security     BearerAuth
+// @Failure      401  {object}  map[string]string
 // @Router       /api/v1/costing [get]
 func (h *Handler) list(c *gin.Context) {
 	p := httpkit.BindPageParams(c)

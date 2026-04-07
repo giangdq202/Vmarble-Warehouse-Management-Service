@@ -33,6 +33,8 @@ func (h *Handler) Register(rg *gin.RouterGroup) {
 // @Param        body  body      CreatePlanInput  true  "payload"
 // @Success      201   {object}  Plan
 // @Failure      400   {object}  map[string]string
+// @Security     BearerAuth
+// @Failure      401  {object}  map[string]string
 // @Router       /api/v1/plans [post]
 func (h *Handler) create(c *gin.Context) {
 	var in CreatePlanInput
@@ -59,6 +61,8 @@ func (h *Handler) create(c *gin.Context) {
 // @Param        order    query     string  false  "sort direction: asc, desc (default desc)"
 // @Success      200  {object}  httpkit.PagedResult[Plan]
 // @Failure      500  {object}  map[string]string
+// @Security     BearerAuth
+// @Failure      401  {object}  map[string]string
 // @Router       /api/v1/plans [get]
 func (h *Handler) list(c *gin.Context) {
 	p := httpkit.BindPageParams(c)
@@ -80,6 +84,8 @@ func (h *Handler) list(c *gin.Context) {
 // @Success      200  {object}  Plan
 // @Failure      400  {object}  map[string]string
 // @Failure      404  {object}  map[string]string
+// @Security     BearerAuth
+// @Failure      401  {object}  map[string]string
 // @Router       /api/v1/plans/{id} [get]
 func (h *Handler) get(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
@@ -104,6 +110,8 @@ func (h *Handler) get(c *gin.Context) {
 // @Success      200  {object}  map[string]string
 // @Failure      400  {object}  map[string]string
 // @Failure      409  {object}  map[string]string
+// @Security     BearerAuth
+// @Failure      401  {object}  map[string]string
 // @Router       /api/v1/plans/{id}/approve [post]
 func (h *Handler) approve(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
@@ -127,6 +135,8 @@ func (h *Handler) approve(c *gin.Context) {
 // @Success      200  {object}  map[string]string
 // @Failure      400  {object}  map[string]string
 // @Failure      409  {object}  map[string]string
+// @Security     BearerAuth
+// @Failure      401  {object}  map[string]string
 // @Router       /api/v1/plans/{id}/cancel [post]
 func (h *Handler) cancel(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))

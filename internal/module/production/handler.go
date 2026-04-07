@@ -40,6 +40,8 @@ func (h *Handler) Register(rg *gin.RouterGroup) {
 // @Param        body  body      CreateWOInput  true  "payload"
 // @Success      201   {object}  WorkOrder
 // @Failure      400   {object}  map[string]string
+// @Security     BearerAuth
+// @Failure      401  {object}  map[string]string
 // @Router       /api/v1/work-orders [post]
 func (h *Handler) create(c *gin.Context) {
 	var in CreateWOInput
@@ -69,6 +71,8 @@ func (h *Handler) create(c *gin.Context) {
 // @Success      200      {array}   WorkOrder                       "full list (when plan_id is present)"
 // @Failure      400      {object}  map[string]string
 // @Failure      500      {object}  map[string]string
+// @Security     BearerAuth
+// @Failure      401  {object}  map[string]string
 // @Router       /api/v1/work-orders [get]
 func (h *Handler) list(c *gin.Context) {
 	planIDStr := c.Query("plan_id")
@@ -105,6 +109,8 @@ func (h *Handler) list(c *gin.Context) {
 // @Success      200  {object}  WorkOrder
 // @Failure      400  {object}  map[string]string
 // @Failure      404  {object}  map[string]string
+// @Security     BearerAuth
+// @Failure      401  {object}  map[string]string
 // @Router       /api/v1/work-orders/{id} [get]
 func (h *Handler) get(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
@@ -131,6 +137,8 @@ func (h *Handler) get(c *gin.Context) {
 // @Success      200   {object}  map[string]string
 // @Failure      400   {object}  map[string]string
 // @Failure      409   {object}  map[string]string
+// @Security     BearerAuth
+// @Failure      401  {object}  map[string]string
 // @Router       /api/v1/work-orders/{id}/advance [post]
 func (h *Handler) advance(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
@@ -162,6 +170,8 @@ func (h *Handler) advance(c *gin.Context) {
 // @Success      201   {object}  ConsumptionRecord
 // @Failure      400   {object}  map[string]string
 // @Failure      422   {object}  map[string]string
+// @Security     BearerAuth
+// @Failure      401  {object}  map[string]string
 // @Router       /api/v1/work-orders/{id}/consumptions [post]
 func (h *Handler) recordConsumption(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
@@ -191,6 +201,8 @@ func (h *Handler) recordConsumption(c *gin.Context) {
 // @Success      200  {array}   ConsumptionRecord
 // @Failure      400  {object}  map[string]string
 // @Failure      404  {object}  map[string]string
+// @Security     BearerAuth
+// @Failure      401  {object}  map[string]string
 // @Router       /api/v1/work-orders/{id}/consumptions [get]
 func (h *Handler) listConsumptions(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))

@@ -278,6 +278,21 @@ definitions:
       total_pages:
         type: integer
     type: object
+  httpkit.PagedResult-costing_CostingRecord:
+    properties:
+      current_page:
+        type: integer
+      items:
+        items:
+          $ref: '#/definitions/costing.CostingRecord'
+        type: array
+      limit:
+        type: integer
+      total_items:
+        type: integer
+      total_pages:
+        type: integer
+    type: object
   httpkit.PagedResult-inventory_BoardSheet:
     properties:
       current_page:
@@ -315,6 +330,51 @@ definitions:
       items:
         items:
           $ref: '#/definitions/inventory.Remnant'
+        type: array
+      limit:
+        type: integer
+      total_items:
+        type: integer
+      total_pages:
+        type: integer
+    type: object
+  httpkit.PagedResult-order_PO:
+    properties:
+      current_page:
+        type: integer
+      items:
+        items:
+          $ref: '#/definitions/order.PO'
+        type: array
+      limit:
+        type: integer
+      total_items:
+        type: integer
+      total_pages:
+        type: integer
+    type: object
+  httpkit.PagedResult-planning_Plan:
+    properties:
+      current_page:
+        type: integer
+      items:
+        items:
+          $ref: '#/definitions/planning.Plan'
+        type: array
+      limit:
+        type: integer
+      total_items:
+        type: integer
+      total_pages:
+        type: integer
+    type: object
+  httpkit.PagedResult-production_WorkOrder:
+    properties:
+      current_page:
+        type: integer
+      items:
+        items:
+          $ref: '#/definitions/production.WorkOrder'
         type: array
       limit:
         type: integer
@@ -589,8 +649,19 @@ definitions:
       work_order_id:
         type: string
     type: object
+  production.SuggestAssignmentResult:
+    properties:
+      in_cutting_count:
+        type: integer
+      user_id:
+        type: string
+    type: object
   production.WorkOrder:
     properties:
+      assigned_at:
+        type: string
+      assigned_to:
+        type: string
       created_at:
         type: string
       id:
@@ -668,6 +739,14 @@ paths:
             additionalProperties:
               type: string
             type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
       summary: Generate barcode
       tags:
       - barcode
@@ -692,12 +771,20 @@ paths:
             additionalProperties:
               type: string
             type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
         "404":
           description: Not Found
           schema:
             additionalProperties:
               type: string
             type: object
+      security:
+      - BearerAuth: []
       summary: Lookup barcode
       tags:
       - barcode
@@ -724,12 +811,20 @@ paths:
             additionalProperties:
               type: string
             type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
         "404":
           description: Not Found
           schema:
             additionalProperties:
               type: string
             type: object
+      security:
+      - BearerAuth: []
       summary: List scan events
       tags:
       - barcode
@@ -761,32 +856,63 @@ paths:
             additionalProperties:
               type: string
             type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
         "409":
           description: Conflict
           schema:
             additionalProperties:
               type: string
             type: object
+      security:
+      - BearerAuth: []
       summary: Record scan event
       tags:
       - barcode
   /api/v1/costing:
     get:
+      parameters:
+      - description: page number (default 1)
+        in: query
+        name: page
+        type: integer
+      - description: items per page (default 10, max 100)
+        in: query
+        name: limit
+        type: integer
+      - description: 'filter by finalized: true or false (omit for all)'
+        in: query
+        name: finalized
+        type: boolean
+      - description: 'sort direction: asc, desc (default asc)'
+        in: query
+        name: order
+        type: string
       produces:
       - application/json
       responses:
         "200":
           description: OK
           schema:
-            items:
-              $ref: '#/definitions/costing.CostingRecord'
-            type: array
+            $ref: '#/definitions/httpkit.PagedResult-costing_CostingRecord'
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
         "500":
           description: Internal Server Error
           schema:
             additionalProperties:
               type: string
             type: object
+      security:
+      - BearerAuth: []
       summary: List costing records
       tags:
       - costing
@@ -811,12 +937,20 @@ paths:
             additionalProperties:
               type: string
             type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
         "404":
           description: Not Found
           schema:
             additionalProperties:
               type: string
             type: object
+      security:
+      - BearerAuth: []
       summary: Get costing record by work order
       tags:
       - costing
@@ -841,6 +975,12 @@ paths:
             additionalProperties:
               type: string
             type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
         "409":
           description: Conflict
           schema:
@@ -853,6 +993,8 @@ paths:
             additionalProperties:
               type: string
             type: object
+      security:
+      - BearerAuth: []
       summary: Compute costing for a work order
       tags:
       - costing
@@ -879,12 +1021,20 @@ paths:
             additionalProperties:
               type: string
             type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
         "409":
           description: Conflict
           schema:
             additionalProperties:
               type: string
             type: object
+      security:
+      - BearerAuth: []
       summary: Finalize costing for a work order
       tags:
       - costing
@@ -1283,12 +1433,20 @@ paths:
           description: OK
           schema:
             $ref: '#/definitions/httpkit.PagedResult-catalog_Material'
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
         "500":
           description: Internal Server Error
           schema:
             additionalProperties:
               type: string
             type: object
+      security:
+      - BearerAuth: []
       summary: List materials (paginated)
       tags:
       - catalog
@@ -1315,6 +1473,14 @@ paths:
             additionalProperties:
               type: string
             type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
       summary: Create material
       tags:
       - catalog
@@ -1339,32 +1505,67 @@ paths:
             additionalProperties:
               type: string
             type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
         "404":
           description: Not Found
           schema:
             additionalProperties:
               type: string
             type: object
+      security:
+      - BearerAuth: []
       summary: Get material
       tags:
       - catalog
   /api/v1/plans:
     get:
+      parameters:
+      - description: page number (default 1)
+        in: query
+        name: page
+        type: integer
+      - description: items per page (default 10, max 100)
+        in: query
+        name: limit
+        type: integer
+      - description: 'filter by status: DRAFT, APPROVED, CANCELED'
+        in: query
+        name: status
+        type: string
+      - description: 'sort column: created_at, deadline (default created_at)'
+        in: query
+        name: sort_by
+        type: string
+      - description: 'sort direction: asc, desc (default desc)'
+        in: query
+        name: order
+        type: string
       produces:
       - application/json
       responses:
         "200":
           description: OK
           schema:
-            items:
-              $ref: '#/definitions/planning.Plan'
-            type: array
+            $ref: '#/definitions/httpkit.PagedResult-planning_Plan'
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
         "500":
           description: Internal Server Error
           schema:
             additionalProperties:
               type: string
             type: object
+      security:
+      - BearerAuth: []
       summary: List production plans
       tags:
       - planning
@@ -1391,6 +1592,14 @@ paths:
             additionalProperties:
               type: string
             type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
       summary: Create production plan
       tags:
       - planning
@@ -1415,12 +1624,20 @@ paths:
             additionalProperties:
               type: string
             type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
         "404":
           description: Not Found
           schema:
             additionalProperties:
               type: string
             type: object
+      security:
+      - BearerAuth: []
       summary: Get production plan
       tags:
       - planning
@@ -1447,12 +1664,20 @@ paths:
             additionalProperties:
               type: string
             type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
         "409":
           description: Conflict
           schema:
             additionalProperties:
               type: string
             type: object
+      security:
+      - BearerAuth: []
       summary: Approve production plan
       tags:
       - planning
@@ -1479,32 +1704,67 @@ paths:
             additionalProperties:
               type: string
             type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
         "409":
           description: Conflict
           schema:
             additionalProperties:
               type: string
             type: object
+      security:
+      - BearerAuth: []
       summary: Cancel production plan
       tags:
       - planning
   /api/v1/pos:
     get:
+      parameters:
+      - description: page number (default 1)
+        in: query
+        name: page
+        type: integer
+      - description: items per page (default 10, max 100)
+        in: query
+        name: limit
+        type: integer
+      - description: search by PO code (ILIKE)
+        in: query
+        name: search
+        type: string
+      - description: 'sort column: code, expected_delivery (default created_at)'
+        in: query
+        name: sort_by
+        type: string
+      - description: 'sort direction: asc, desc (default desc)'
+        in: query
+        name: order
+        type: string
       produces:
       - application/json
       responses:
         "200":
           description: OK
           schema:
-            items:
-              $ref: '#/definitions/order.PO'
-            type: array
+            $ref: '#/definitions/httpkit.PagedResult-order_PO'
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
         "500":
           description: Internal Server Error
           schema:
             additionalProperties:
               type: string
             type: object
+      security:
+      - BearerAuth: []
       summary: List POs
       tags:
       - order
@@ -1531,6 +1791,14 @@ paths:
             additionalProperties:
               type: string
             type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
       summary: Create PO
       tags:
       - order
@@ -1555,12 +1823,20 @@ paths:
             additionalProperties:
               type: string
             type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
         "404":
           description: Not Found
           schema:
             additionalProperties:
               type: string
             type: object
+      security:
+      - BearerAuth: []
       summary: Get PO
       tags:
       - order
@@ -1587,12 +1863,20 @@ paths:
             additionalProperties:
               type: string
             type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
         "404":
           description: Not Found
           schema:
             additionalProperties:
               type: string
             type: object
+      security:
+      - BearerAuth: []
       summary: List PO line items
       tags:
       - order
@@ -1626,12 +1910,20 @@ paths:
           description: OK
           schema:
             $ref: '#/definitions/httpkit.PagedResult-catalog_SKU'
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
         "500":
           description: Internal Server Error
           schema:
             additionalProperties:
               type: string
             type: object
+      security:
+      - BearerAuth: []
       summary: List SKUs (paginated)
       tags:
       - catalog
@@ -1658,6 +1950,14 @@ paths:
             additionalProperties:
               type: string
             type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
       summary: Create SKU
       tags:
       - catalog
@@ -1682,12 +1982,20 @@ paths:
             additionalProperties:
               type: string
             type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
         "404":
           description: Not Found
           schema:
             additionalProperties:
               type: string
             type: object
+      security:
+      - BearerAuth: []
       summary: Get SKU
       tags:
       - catalog
@@ -1712,12 +2020,20 @@ paths:
             additionalProperties:
               type: string
             type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
         "404":
           description: Not Found
           schema:
             additionalProperties:
               type: string
             type: object
+      security:
+      - BearerAuth: []
       summary: Get BOM for SKU
       tags:
       - catalog
@@ -1749,12 +2065,20 @@ paths:
             additionalProperties:
               type: string
             type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
         "404":
           description: Not Found
           schema:
             additionalProperties:
               type: string
             type: object
+      security:
+      - BearerAuth: []
       summary: Set BOM for SKU
       tags:
       - catalog
@@ -1785,15 +2109,36 @@ paths:
   /api/v1/work-orders:
     get:
       parameters:
-      - description: filter by plan id (uuid)
+      - description: filter by plan id (uuid) — returns full list, no pagination
         in: query
         name: plan_id
+        type: string
+      - description: page number (default 1)
+        in: query
+        name: page
+        type: integer
+      - description: items per page (default 10, max 100)
+        in: query
+        name: limit
+        type: integer
+      - description: 'filter by status: PLANNED, IN_CUTTING, IN_PROCESSING, COMPLETED,
+          COSTED'
+        in: query
+        name: status
+        type: string
+      - description: 'sort column: created_at, status (default created_at)'
+        in: query
+        name: sort_by
+        type: string
+      - description: 'sort direction: asc, desc (default desc)'
+        in: query
+        name: order
         type: string
       produces:
       - application/json
       responses:
         "200":
-          description: OK
+          description: full list (when plan_id is present)
           schema:
             items:
               $ref: '#/definitions/production.WorkOrder'
@@ -1804,12 +2149,20 @@ paths:
             additionalProperties:
               type: string
             type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
         "500":
           description: Internal Server Error
           schema:
             additionalProperties:
               type: string
             type: object
+      security:
+      - BearerAuth: []
       summary: List work orders
       tags:
       - production
@@ -1836,6 +2189,14 @@ paths:
             additionalProperties:
               type: string
             type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
       summary: Create work order
       tags:
       - production
@@ -1860,12 +2221,20 @@ paths:
             additionalProperties:
               type: string
             type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
         "404":
           description: Not Found
           schema:
             additionalProperties:
               type: string
             type: object
+      security:
+      - BearerAuth: []
       summary: Get work order
       tags:
       - production
@@ -1900,13 +2269,73 @@ paths:
             additionalProperties:
               type: string
             type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
         "409":
           description: Conflict
           schema:
             additionalProperties:
               type: string
             type: object
+      security:
+      - BearerAuth: []
       summary: Advance work order status
+      tags:
+      - production
+  /api/v1/work-orders/{id}/assign:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: work order id (uuid)
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: payload
+        in: body
+        name: body
+        required: true
+        schema:
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/production.WorkOrder'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "412":
+          description: Precondition Failed
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Assign a PLANNED work order to a CNC operator
       tags:
       - production
   /api/v1/work-orders/{id}/consumptions:
@@ -1932,12 +2361,20 @@ paths:
             additionalProperties:
               type: string
             type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
         "404":
           description: Not Found
           schema:
             additionalProperties:
               type: string
             type: object
+      security:
+      - BearerAuth: []
       summary: List consumption records for work order
       tags:
       - production
@@ -1969,13 +2406,87 @@ paths:
             additionalProperties:
               type: string
             type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
         "422":
           description: Unprocessable Entity
           schema:
             additionalProperties:
               type: string
             type: object
+      security:
+      - BearerAuth: []
       summary: Record material consumption for work order
+      tags:
+      - production
+  /api/v1/work-orders/{id}/suggest-assignment:
+    post:
+      parameters:
+      - description: work order id (uuid)
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/production.SuggestAssignmentResult'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Suggest the least-busy CNC operator for a work order
+      tags:
+      - production
+  /api/v1/work-orders/mine:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/production.WorkOrder'
+            type: array
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: List work orders assigned to the authenticated CNC operator
       tags:
       - production
   /healthz:
