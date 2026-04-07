@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/vmarble/warehouse-management-service/internal/domain"
+	"github.com/vmarble/warehouse-management-service/internal/platform/httpkit"
 )
 
 // ── mockStore ─────────────────────────────────────────────────────────────────
@@ -43,6 +44,10 @@ func (m *mockStore) insertPO(_ context.Context, _ PO) error {
 
 func (m *mockStore) selectPOs(_ context.Context) ([]PO, error) {
 	return m.selectPOsResult, m.selectPOsErr
+}
+
+func (m *mockStore) selectPOsPaged(_ context.Context, _ httpkit.PageParams) ([]PO, int, error) {
+	return m.selectPOsResult, len(m.selectPOsResult), m.selectPOsErr
 }
 
 func (m *mockStore) selectPOByID(_ context.Context, _ uuid.UUID) (PO, error) {
@@ -339,12 +344,12 @@ func TestListPOs_Empty_ReturnsNil(t *testing.T) {
 	st := &mockStore{selectPOsResult: nil}
 
 	svc := NewService(st)
-	pos, err := svc.ListPOs(context.Background())
+	pos, err := svc.ListPOs(context.Background(), httpkit.PageParams{Page: 1, Limit: 10})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(pos) != 0 {
-		t.Errorf("expected empty result, got %d items", len(pos))
+	if len(pos.Items) != 0 {
+		t.Errorf("expected empty result, got %d items", len(pos.Items))
 	}
 }
 
@@ -356,12 +361,12 @@ func TestListPOs_ReturnAll(t *testing.T) {
 	st := &mockStore{selectPOsResult: stored}
 
 	svc := NewService(st)
-	pos, err := svc.ListPOs(context.Background())
+	pos, err := svc.ListPOs(context.Background(), httpkit.PageParams{Page: 1, Limit: 10})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(pos) != 2 {
-		t.Errorf("len = %d, want 2", len(pos))
+	if len(pos.Items) != 2 {
+		t.Errorf("len = %d, want 2", len(pos.Items))
 	}
 }
 
@@ -370,7 +375,7 @@ func TestListPOs_StoreError_Propagates(t *testing.T) {
 	st := &mockStore{selectPOsErr: dbErr}
 
 	svc := NewService(st)
-	_, err := svc.ListPOs(context.Background())
+	_, err := svc.ListPOs(context.Background(), httpkit.PageParams{Page: 1, Limit: 10})
 
 	if !errors.Is(err, dbErr) {
 		t.Errorf("expected selectPOs error to propagate, got %v", err)

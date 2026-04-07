@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/vmarble/warehouse-management-service/internal/domain"
+	"github.com/vmarble/warehouse-management-service/internal/platform/httpkit"
 )
 
 // ── mockStore ─────────────────────────────────────────────────────────────────
@@ -44,6 +45,10 @@ func (m *mockStore) insertPlan(_ context.Context, _ Plan) error {
 
 func (m *mockStore) selectPlans(_ context.Context) ([]Plan, error) {
 	return m.selectPlansResult, m.selectPlansErr
+}
+
+func (m *mockStore) selectPlansPaged(_ context.Context, _ httpkit.PageParams, _ string) ([]Plan, int, error) {
+	return m.selectPlansResult, len(m.selectPlansResult), m.selectPlansErr
 }
 
 func (m *mockStore) selectPlanByID(_ context.Context, _ uuid.UUID) (Plan, error) {
@@ -301,7 +306,7 @@ func TestGetPlan_SelectItemsError_Propagates(t *testing.T) {
 
 // ── TestListPlans ─────────────────────────────────────────────────────────────
 
-func TestListPlans_PopulatesItemsForEachPlan(t *testing.T) {
+func TestListPlans_PopulatesItems(t *testing.T) {
 	planID1 := uuid.New()
 	planID2 := uuid.New()
 
@@ -317,17 +322,17 @@ func TestListPlans_PopulatesItemsForEachPlan(t *testing.T) {
 	}
 
 	svc := NewService(st)
-	plans, err := svc.ListPlans(context.Background())
+	plans, err := svc.ListPlans(context.Background(), httpkit.PageParams{Page: 1, Limit: 10}, "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(plans) != 2 {
-		t.Fatalf("len(plans) = %d, want 2", len(plans))
+	if len(plans.Items) != 2 {
+		t.Fatalf("len(plans.Items) = %d, want 2", len(plans.Items))
 	}
 	// Each plan must have its Items populated.
-	for i, p := range plans {
+	for i, p := range plans.Items {
 		if len(p.Items) == 0 {
-			t.Errorf("plans[%d].Items must be populated by ListPlans", i)
+			t.Errorf("plans.Items[%d].Items must be populated by ListPlans", i)
 		}
 	}
 }
@@ -336,12 +341,12 @@ func TestListPlans_Empty_ReturnsNil(t *testing.T) {
 	st := &mockStore{selectPlansResult: nil}
 
 	svc := NewService(st)
-	plans, err := svc.ListPlans(context.Background())
+	plans, err := svc.ListPlans(context.Background(), httpkit.PageParams{Page: 1, Limit: 10}, "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(plans) != 0 {
-		t.Errorf("expected empty result, got %d plans", len(plans))
+	if len(plans.Items) != 0 {
+		t.Errorf("expected empty result, got %d plans", len(plans.Items))
 	}
 }
 
@@ -350,7 +355,7 @@ func TestListPlans_SelectPlansError_Propagates(t *testing.T) {
 	st := &mockStore{selectPlansErr: dbErr}
 
 	svc := NewService(st)
-	_, err := svc.ListPlans(context.Background())
+	_, err := svc.ListPlans(context.Background(), httpkit.PageParams{Page: 1, Limit: 10}, "")
 
 	if !errors.Is(err, dbErr) {
 		t.Errorf("expected selectPlans error to propagate, got %v", err)
@@ -366,7 +371,7 @@ func TestListPlans_SelectItemsError_Propagates(t *testing.T) {
 	}
 
 	svc := NewService(st)
-	_, err := svc.ListPlans(context.Background())
+	_, err := svc.ListPlans(context.Background(), httpkit.PageParams{Page: 1, Limit: 10}, "")
 
 	if !errors.Is(err, dbErr) {
 		t.Errorf("expected selectPlanItemsByPlanID error to propagate in ListPlans, got %v", err)
