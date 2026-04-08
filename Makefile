@@ -57,11 +57,11 @@ migrate-create:
 # ── Docker ───────────────────────────────────────────────────
 
 docker-up:
-	docker compose up -d
+	docker-compose up -d
 
 docker-down:
-	docker compose down -v
+	docker-compose down -v
 
 docker-rebuild:
-	docker compose build --no-cache
-	docker compose up -d --force-recreate
+	docker-compose build --no-cache
+	docker-compose up -d --force-recreate
