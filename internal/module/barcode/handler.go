@@ -18,9 +18,38 @@ func NewHandler(s Service) *Handler {
 
 func (h *Handler) Register(rg *gin.RouterGroup) {
 	rg.POST("/barcodes", h.generate)
+	rg.GET("/barcodes", h.listByWorkOrder)
 	rg.GET("/barcodes/:id", h.lookup)
 	rg.POST("/barcodes/:id/scans", h.recordScan)
 	rg.GET("/barcodes/:id/scans", h.listScans)
+}
+
+// listBarcodesByWorkOrder godoc
+//
+// @Summary      List barcodes by work order
+// @Tags         barcode
+// @Produce      json
+// @Param        work_order_id  query     string  true  "work order id (uuid)"
+// @Success      200            {array}   Barcode
+// @Failure      400            {object}  map[string]string
+// @Security     BearerAuth
+// @Failure      401  {object}  map[string]string
+// @Router       /api/v1/barcodes [get]
+func (h *Handler) listByWorkOrder(c *gin.Context) {
+	woID, err := uuid.Parse(c.Query("work_order_id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid work_order_id"})
+		return
+	}
+	barcodes, err := h.svc.ListBarcodesByWorkOrder(c.Request.Context(), woID)
+	if err != nil {
+		httpkit.Error(c, err)
+		return
+	}
+	if barcodes == nil {
+		barcodes = []Barcode{}
+	}
+	c.JSON(http.StatusOK, barcodes)
 }
 
 // generateBarcode godoc

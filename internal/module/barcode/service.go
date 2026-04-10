@@ -55,6 +55,10 @@ func (s *service) LookupBarcode(ctx context.Context, barcodeID uuid.UUID) (Barco
 	return s.st.selectBarcodeByID(ctx, barcodeID)
 }
 
+func (s *service) ListBarcodesByWorkOrder(ctx context.Context, workOrderID uuid.UUID) ([]Barcode, error) {
+	return s.st.selectBarcodesByWorkOrder(ctx, workOrderID)
+}
+
 func (s *service) RecordScan(ctx context.Context, in RecordScanInput) (ScanEvent, error) {
 	if !validCheckpoint(in.Checkpoint) {
 		return ScanEvent{}, domain.NewBizError(domain.ErrInvalidInput, "invalid checkpoint")
