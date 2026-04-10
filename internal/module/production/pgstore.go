@@ -30,20 +30,29 @@ func (s *pgStore) insertWorkOrder(ctx context.Context, wo WorkOrder) error {
 	return err
 }
 
-// scanWorkOrder reads the 8-column projection used by all SELECT queries.
-// Columns: id, plan_id, sku_id, quantity, status, assigned_to, assigned_at, created_at
+// scanWorkOrder reads the 10-column projection used by all SELECT queries.
+// Columns: wo.id, wo.plan_id, wo.sku_id, s.code, s.name, wo.quantity, wo.status,
+//          wo.assigned_to, wo.assigned_at, wo.created_at
 func scanWorkOrder(row interface {
 	Scan(...any) error
 }) (WorkOrder, error) {
 	var wo WorkOrder
 	err := row.Scan(
-		&wo.ID, &wo.PlanID, &wo.SKUID, &wo.Quantity, &wo.Status,
-		&wo.AssignedTo, &wo.AssignedAt, &wo.CreatedAt,
+		&wo.ID, &wo.PlanID, &wo.SKUID, &wo.SKUCode, &wo.SKUName,
+		&wo.Quantity, &wo.Status, &wo.AssignedTo, &wo.AssignedAt, &wo.CreatedAt,
 	)
 	return wo, err
 }
 
-const selectWOCols = `id, plan_id, sku_id, quantity, status, assigned_to, assigned_at, created_at`
+// selectWOCols is the common column list for all WorkOrder SELECT queries.
+// Uses LEFT JOIN so that a WorkOrder whose SKU was deleted is not silently dropped.
+const selectWOCols = `
+	wo.id, wo.plan_id, wo.sku_id,
+	COALESCE(s.code, '') AS sku_code,
+	COALESCE(s.name, '') AS sku_name,
+	wo.quantity, wo.status, wo.assigned_to, wo.assigned_at, wo.created_at
+FROM work_orders wo
+LEFT JOIN skus s ON s.id = wo.sku_id`
 
 func (s *pgStore) selectWorkOrdersPaged(ctx context.Context, p httpkit.PageParams, status string) ([]WorkOrder, int, error) {
 	sortCol := "created_at"
@@ -65,9 +74,8 @@ func (s *pgStore) selectWorkOrdersPaged(ctx context.Context, p httpkit.PageParam
 
 	query := fmt.Sprintf(
 		`SELECT `+selectWOCols+`
-		 FROM work_orders
-		 WHERE ($1::text = '' OR status = $1)
-		 ORDER BY %s %s
+		 WHERE ($1::text = '' OR wo.status = $1)
+		 ORDER BY wo.%s %s
 		 LIMIT $2 OFFSET $3`,
 		sortCol, orderDir,
 	)
@@ -90,7 +98,7 @@ func (s *pgStore) selectWorkOrdersPaged(ctx context.Context, p httpkit.PageParam
 
 func (s *pgStore) selectWorkOrderByID(ctx context.Context, id uuid.UUID) (WorkOrder, error) {
 	row := s.pool.QueryRow(ctx,
-		`SELECT `+selectWOCols+` FROM work_orders WHERE id = $1`,
+		`SELECT `+selectWOCols+` WHERE wo.id = $1`,
 		id,
 	)
 	wo, err := scanWorkOrder(row)
@@ -105,7 +113,7 @@ func (s *pgStore) selectWorkOrderByID(ctx context.Context, id uuid.UUID) (WorkOr
 
 func (s *pgStore) selectWorkOrdersByPlan(ctx context.Context, planID uuid.UUID) ([]WorkOrder, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT `+selectWOCols+` FROM work_orders WHERE plan_id = $1 ORDER BY created_at`,
+		`SELECT `+selectWOCols+` WHERE wo.plan_id = $1 ORDER BY wo.created_at`,
 		planID,
 	)
 	if err != nil {
@@ -126,7 +134,7 @@ func (s *pgStore) selectWorkOrdersByPlan(ctx context.Context, planID uuid.UUID) 
 
 func (s *pgStore) selectWorkOrdersByAssignee(ctx context.Context, userID uuid.UUID) ([]WorkOrder, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT `+selectWOCols+` FROM work_orders WHERE assigned_to = $1 ORDER BY created_at DESC`,
+		`SELECT `+selectWOCols+` WHERE wo.assigned_to = $1 ORDER BY wo.created_at DESC`,
 		userID,
 	)
 	if err != nil {

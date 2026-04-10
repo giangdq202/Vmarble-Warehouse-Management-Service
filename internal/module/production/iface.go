@@ -19,6 +19,8 @@ type WorkOrder struct {
 	ID         uuid.UUID              `json:"id"`
 	PlanID     uuid.UUID              `json:"plan_id"`
 	SKUID      uuid.UUID              `json:"sku_id"`
+	SKUCode    string                 `json:"sku_code"`
+	SKUName    string                 `json:"sku_name"`
 	Quantity   int                    `json:"quantity"`
 	Status     domain.WorkOrderStatus `json:"status"`
 	AssignedTo *uuid.UUID             `json:"assigned_to,omitempty"`
