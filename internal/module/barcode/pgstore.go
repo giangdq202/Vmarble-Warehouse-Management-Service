@@ -45,6 +45,29 @@ func (s *pgStore) selectBarcodeByID(ctx context.Context, id uuid.UUID) (Barcode,
 	return b, nil
 }
 
+func (s *pgStore) selectBarcodesByWorkOrder(ctx context.Context, workOrderID uuid.UUID) ([]Barcode, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT id, work_order_id, sku_id, po_id, production_plan_id, sku_code, sku_name, dimensions, produced_date, created_at
+		 FROM barcodes WHERE work_order_id = $1 ORDER BY created_at`,
+		workOrderID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []Barcode
+	for rows.Next() {
+		var b Barcode
+		if err := rows.Scan(&b.ID, &b.WorkOrderID, &b.SKUID, &b.POID, &b.ProductionPlanID,
+			&b.SKUCode, &b.SKUName, &b.Dimensions, &b.ProducedDate, &b.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, b)
+	}
+	return out, rows.Err()
+}
+
 func (s *pgStore) insertScanEvent(ctx context.Context, e ScanEvent) error {
 	_, err := s.pool.Exec(ctx,
 		`INSERT INTO scan_events (id, barcode_id, checkpoint, scanned_by, scanned_at)

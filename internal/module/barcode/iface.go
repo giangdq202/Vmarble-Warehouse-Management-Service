@@ -56,6 +56,7 @@ type ScanEvent struct {
 type Service interface {
 	GenerateBarcode(ctx context.Context, in GenerateBarcodeInput) (Barcode, error)
 	LookupBarcode(ctx context.Context, barcodeID uuid.UUID) (Barcode, error)
+	ListBarcodesByWorkOrder(ctx context.Context, workOrderID uuid.UUID) ([]Barcode, error)
 	RecordScan(ctx context.Context, in RecordScanInput) (ScanEvent, error)
 	ListScans(ctx context.Context, barcodeID uuid.UUID) ([]ScanEvent, error)
 }
