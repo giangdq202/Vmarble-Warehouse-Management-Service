@@ -325,6 +325,33 @@ func TestGetWorkOrder_HappyPath(t *testing.T) {
 	}
 }
 
+// GetWorkOrder must pass SKUCode and SKUName through unchanged from the store.
+func TestGetWorkOrder_SKUFieldsPassThrough(t *testing.T) {
+	woID := uuid.New()
+	want := WorkOrder{
+		ID:      woID,
+		PlanID:  uuid.New(),
+		SKUID:   uuid.New(),
+		SKUCode: "TB-001",
+		SKUName: "Tủ bếp trên 1 cánh",
+		Quantity: 3,
+		Status:  domain.WOPlanned,
+	}
+	st := &mockStore{selectWorkOrderByIDResult: want}
+	svc := newSvc(st, approvedPlan(uuid.New()), skuNoMetal(uuid.New()))
+
+	got, err := svc.GetWorkOrder(context.Background(), woID)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got.SKUCode != want.SKUCode {
+		t.Errorf("SKUCode = %q, want %q", got.SKUCode, want.SKUCode)
+	}
+	if got.SKUName != want.SKUName {
+		t.Errorf("SKUName = %q, want %q", got.SKUName, want.SKUName)
+	}
+}
+
 func TestGetWorkOrder_NotFound_PropagatesError(t *testing.T) {
 	st := &mockStore{selectWorkOrderByIDErr: domain.NewBizError(domain.ErrNotFound, "not found")}
 	svc := newSvc(st, approvedPlan(uuid.New()), skuNoMetal(uuid.New()))
