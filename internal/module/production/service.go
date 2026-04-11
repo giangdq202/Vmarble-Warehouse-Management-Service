@@ -2,6 +2,7 @@ package production
 
 import (
 	"context"
+	"log/slog"
 	"time"
 
 	"github.com/google/uuid"
@@ -11,14 +12,15 @@ import (
 )
 
 type service struct {
-	s  store
-	pc PlanChecker
-	sc SKUChecker
-	uc UserChecker
+	s        store
+	pc       PlanChecker
+	sc       SKUChecker
+	uc       UserChecker
+	notifier WorkOrderNotifier
 }
 
-func NewService(s store, pc PlanChecker, sc SKUChecker, uc UserChecker) Service {
-	return &service{s: s, pc: pc, sc: sc, uc: uc}
+func NewService(s store, pc PlanChecker, sc SKUChecker, uc UserChecker, notifier WorkOrderNotifier) Service {
+	return &service{s: s, pc: pc, sc: sc, uc: uc, notifier: notifier}
 }
 
 func (svc *service) CreateWorkOrder(ctx context.Context, in CreateWOInput) (WorkOrder, error) {
@@ -165,6 +167,13 @@ func (svc *service) AssignWorkOrder(ctx context.Context, in AssignWorkOrderInput
 
 	wo.AssignedTo = &in.UserID
 	wo.AssignedAt = &assignedAt
+
+	if svc.notifier != nil {
+		if err := svc.notifier.NotifyAssignment(ctx, in.UserID.String(), wo.ID.String(), wo.SKUCode); err != nil {
+			slog.Warn("production: AssignWorkOrder notification failed", "wo_id", wo.ID, "err", err)
+		}
+	}
+
 	return wo, nil
 }
 

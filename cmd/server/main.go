@@ -24,6 +24,7 @@ import (
 	"github.com/vmarble/warehouse-management-service/internal/module/production"
 	"github.com/vmarble/warehouse-management-service/internal/platform/auth"
 	"github.com/vmarble/warehouse-management-service/internal/platform/config"
+	"github.com/vmarble/warehouse-management-service/internal/platform/events"
 	"github.com/vmarble/warehouse-management-service/internal/platform/httpkit"
 	"github.com/vmarble/warehouse-management-service/internal/platform/postgres"
 
@@ -63,6 +64,11 @@ func main() {
 	}
 	defer pool.Close()
 
+	// ── Events infrastructure (SSE + PostgreSQL LISTEN/NOTIFY) ──────────────
+	eventBroker := events.NewBroker()
+	eventPublisher := events.NewPublisher(pool)
+	go events.NewListener(cfg.DatabaseURL, eventBroker).Start(ctx)
+
 	// ── Module stores ───────────────────────────────────────
 	authnStore   := authn.NewPGStore(pool)
 	catalogStore := catalog.NewPGStore(pool)
@@ -85,6 +91,7 @@ func main() {
 		&planAdapter{svc: planningSvc},
 		&skuAdapter{svc: catalogSvc},
 		&userAdapter{svc: authnSvc},
+		eventPublisher,
 	)
 
 	costingSvc := costing.NewService(
@@ -117,6 +124,7 @@ func main() {
 	production.NewHandler(productionSvc).Register(api)
 	costing.NewHandler(costingSvc).Register(api)
 	barcode.NewHandler(barcodeSvc).Register(api)
+	events.NewHandler(eventBroker).Register(api)
 
 	srv := &http.Server{
 		Addr:         ":" + cfg.Port,
