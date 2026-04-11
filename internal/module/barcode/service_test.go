@@ -25,6 +25,10 @@ type mockStore struct {
 	insertScanEventResult ScanEvent
 	insertScanEventErr    error
 
+	// selectBarcodesByWorkOrder
+	selectBarcodesByWorkOrderResult []Barcode
+	selectBarcodesByWorkOrderErr    error
+
 	// selectScanEventsByBarcode
 	selectScanEventsResult []ScanEvent
 	selectScanEventsErr    error
@@ -36,6 +40,10 @@ func (m *mockStore) insertBarcode(_ context.Context, _ Barcode) error {
 
 func (m *mockStore) selectBarcodeByID(_ context.Context, _ uuid.UUID) (Barcode, error) {
 	return m.selectBarcodeByIDResult, m.selectBarcodeByIDErr
+}
+
+func (m *mockStore) selectBarcodesByWorkOrder(_ context.Context, _ uuid.UUID) ([]Barcode, error) {
+	return m.selectBarcodesByWorkOrderResult, m.selectBarcodesByWorkOrderErr
 }
 
 func (m *mockStore) insertScanEvent(_ context.Context, e ScanEvent) error {
