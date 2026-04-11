@@ -133,14 +133,25 @@ func (m *mockUserChecker) GetUser(_ context.Context, _ uuid.UUID) (UserInfo, err
 	return m.result, m.err
 }
 
+// mockWorkOrderNotifier satisfies WorkOrderNotifier.
+type mockWorkOrderNotifier struct {
+	called bool
+	err    error
+}
+
+func (m *mockWorkOrderNotifier) NotifyAssignment(_ context.Context, _, _, _ string) error {
+	m.called = true
+	return m.err
+}
+
 // ── helpers ───────────────────────────────────────────────────────────────────
 
 func newSvc(st *mockStore, pc *mockPlanChecker, sc *mockSKUChecker) Service {
-	return NewService(st, pc, sc, &mockUserChecker{})
+	return NewService(st, pc, sc, &mockUserChecker{}, nil)
 }
 
 func newSvcWithUser(st *mockStore, pc *mockPlanChecker, sc *mockSKUChecker, uc *mockUserChecker) Service {
-	return NewService(st, pc, sc, uc)
+	return NewService(st, pc, sc, uc, nil)
 }
 
 // approvedPlan returns a PlanChecker that returns an APPROVED plan.
@@ -1251,5 +1262,73 @@ func TestSuggestAssignment_StoreLoadError_Propagates(t *testing.T) {
 	_, err := svc.SuggestAssignment(context.Background(), woID)
 	if !errors.Is(err, dbErr) {
 		t.Errorf("expected store error to propagate, got %v", err)
+	}
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// AssignWorkOrder — notifier behaviour
+// ═════════════════════════════════════════════════════════════════════════════
+
+func TestAssignWorkOrder_HappyPath_NotifierCalled(t *testing.T) {
+	woID := uuid.New()
+	userID := uuid.New()
+	st := &mockStore{
+		selectWorkOrderByIDResult: plannedWO(woID, uuid.New(), uuid.New()),
+	}
+	uc := &mockUserChecker{result: UserInfo{ID: userID, Role: "cnc"}}
+	notifier := &mockWorkOrderNotifier{}
+
+	svc := NewService(st, approvedPlan(uuid.New()), skuNoMetal(uuid.New()), uc, notifier)
+
+	_, err := svc.AssignWorkOrder(context.Background(), AssignWorkOrderInput{
+		WorkOrderID: woID,
+		UserID:      userID,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !notifier.called {
+		t.Error("NotifyAssignment must be called on successful assignment")
+	}
+}
+
+func TestAssignWorkOrder_NotifierError_DoesNotFailRequest(t *testing.T) {
+	woID := uuid.New()
+	userID := uuid.New()
+	st := &mockStore{
+		selectWorkOrderByIDResult: plannedWO(woID, uuid.New(), uuid.New()),
+	}
+	uc := &mockUserChecker{result: UserInfo{ID: userID, Role: "cnc"}}
+	notifier := &mockWorkOrderNotifier{err: errors.New("notify failed")}
+
+	svc := NewService(st, approvedPlan(uuid.New()), skuNoMetal(uuid.New()), uc, notifier)
+
+	_, err := svc.AssignWorkOrder(context.Background(), AssignWorkOrderInput{
+		WorkOrderID: woID,
+		UserID:      userID,
+	})
+	if err != nil {
+		t.Errorf("notification failure must not fail the request, got: %v", err)
+	}
+}
+
+func TestAssignWorkOrder_ValidationFails_NotifierNotCalled(t *testing.T) {
+	woID := uuid.New()
+	st := &mockStore{
+		selectWorkOrderByIDResult: woWithStatus(woID, domain.WOInCutting), // wrong status
+	}
+	notifier := &mockWorkOrderNotifier{}
+
+	svc := NewService(st, approvedPlan(uuid.New()), skuNoMetal(uuid.New()), &mockUserChecker{}, notifier)
+
+	_, err := svc.AssignWorkOrder(context.Background(), AssignWorkOrderInput{
+		WorkOrderID: woID,
+		UserID:      uuid.New(),
+	})
+	if err == nil {
+		t.Fatal("expected error for wrong WO status")
+	}
+	if notifier.called {
+		t.Error("NotifyAssignment must NOT be called when assignment fails")
 	}
 }

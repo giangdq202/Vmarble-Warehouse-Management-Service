@@ -35,3 +35,9 @@ type UserInfo struct {
 	ID   uuid.UUID
 	Role string
 }
+
+// WorkOrderNotifier fires a notification after a work order is assigned.
+// Implementation lives in internal/platform/events; wired in main.go.
+type WorkOrderNotifier interface {
+	NotifyAssignment(ctx context.Context, userID, woID, sku string) error
+}
