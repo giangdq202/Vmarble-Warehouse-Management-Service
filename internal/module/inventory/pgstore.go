@@ -236,6 +236,19 @@ func (s *pgStore) updateSheetStatus(ctx context.Context, id uuid.UUID, status st
 	return nil
 }
 
+func (s *pgStore) preassignSheet(ctx context.Context, sheetID uuid.UUID, workOrderID uuid.UUID) error {
+	tag, err := s.pool.Exec(ctx,
+		`UPDATE board_sheets SET issued_to_wo_id = $1 WHERE id = $2 AND status = 'AVAILABLE'`,
+		workOrderID, sheetID)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return domain.NewBizError(domain.ErrInvalidInput, "sheet not found or not AVAILABLE")
+	}
+	return nil
+}
+
 func (s *pgStore) insertCuttingRecord(ctx context.Context, cr CuttingRecord) error {
 	_, err := s.pool.Exec(ctx,
 		`INSERT INTO cutting_records (id, sheet_id, remnant_source_id, work_order_id, sku_id, used_length_mm, used_width_mm, created_at)

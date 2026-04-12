@@ -41,3 +41,10 @@ type UserInfo struct {
 type WorkOrderNotifier interface {
 	NotifyAssignment(ctx context.Context, userID, woID, sku string) error
 }
+
+// SheetIssuer pre-assigns a board sheet to a work order when the manager
+// advances PLANNED → IN_CUTTING. It only updates issued_to_work_order_id;
+// the sheet stays AVAILABLE so RecordCut validation continues to pass.
+type SheetIssuer interface {
+	PreassignSheet(ctx context.Context, sheetID uuid.UUID, workOrderID uuid.UUID) error
+}

@@ -284,3 +284,15 @@ func (s *service) GetRemnantLineageByRemnant(ctx context.Context, remnantID uuid
 func (s *service) ListStorageLocations(ctx context.Context) ([]StorageLocation, error) {
 	return s.st.selectActiveStorageLocations(ctx)
 }
+
+func (s *service) PreassignSheet(ctx context.Context, sheetID uuid.UUID, workOrderID uuid.UUID) error {
+	sheet, err := s.st.selectSheetByID(ctx, sheetID)
+	if err != nil {
+		return err
+	}
+	if sheet.Status != "AVAILABLE" {
+		return domain.NewBizError(domain.ErrInvalidInput,
+			"sheet must be AVAILABLE to be pre-assigned, got "+sheet.Status)
+	}
+	return s.st.preassignSheet(ctx, sheetID, workOrderID)
+}

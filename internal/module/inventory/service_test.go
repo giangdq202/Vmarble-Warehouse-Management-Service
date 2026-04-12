@@ -115,6 +115,9 @@ func (m *mockStore) selectAvailableSheetsPaged(_ context.Context, _ httpkit.Page
 func (m *mockStore) updateSheetStatus(_ context.Context, _ uuid.UUID, _ string, _ *uuid.UUID) error {
 	return m.updateSheetStatusErr
 }
+func (m *mockStore) preassignSheet(_ context.Context, _ uuid.UUID, _ uuid.UUID) error {
+	return nil
+}
 func (m *mockStore) insertCuttingRecord(_ context.Context, _ CuttingRecord) error {
 	return m.insertCuttingRecordErr
 }

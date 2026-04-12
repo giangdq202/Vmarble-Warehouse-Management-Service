@@ -121,7 +121,7 @@ func main() {
 	order.NewHandler(orderSvc).Register(api)
 	planning.NewHandler(planningSvc).Register(api)
 	inventory.NewHandler(inventorySvc).Register(api)
-	production.NewHandler(productionSvc).Register(api)
+	production.NewHandler(productionSvc, &sheetAdapter{svc: inventorySvc}).Register(api)
 	costing.NewHandler(costingSvc).Register(api)
 	barcode.NewHandler(barcodeSvc).Register(api)
 	events.NewHandler(eventBroker).Register(api)
@@ -187,6 +187,14 @@ func (a *userAdapter) GetUser(ctx context.Context, userID uuid.UUID) (production
 		return production.UserInfo{}, err
 	}
 	return production.UserInfo{ID: u.ID, Role: u.Role}, nil
+}
+
+type sheetAdapter struct {
+	svc inventory.Service
+}
+
+func (a *sheetAdapter) PreassignSheet(ctx context.Context, sheetID uuid.UUID, workOrderID uuid.UUID) error {
+	return a.svc.PreassignSheet(ctx, sheetID, workOrderID)
 }
 
 type woAdapter struct {

@@ -109,6 +109,10 @@ type Service interface {
 
 	GetSheet(ctx context.Context, sheetID uuid.UUID) (BoardSheet, error)
 	ListAvailableSheets(ctx context.Context, p httpkit.PageParams) (httpkit.PagedResult[BoardSheet], error)
+	// PreassignSheet links a board sheet to a work order (sets issued_to_work_order_id)
+	// without changing its status. Called when a manager advances PLANNED → IN_CUTTING
+	// so the worker already has a sheet allocated before they reach the kiosk.
+	PreassignSheet(ctx context.Context, sheetID uuid.UUID, workOrderID uuid.UUID) error
 
 	RecordCut(ctx context.Context, in RecordCutInput) (CutResult, error)
 

@@ -11,11 +11,12 @@ import (
 )
 
 type Handler struct {
-	svc Service
+	svc         Service
+	sheetIssuer SheetIssuer
 }
 
-func NewHandler(s Service) *Handler {
-	return &Handler{svc: s}
+func NewHandler(s Service, si SheetIssuer) *Handler {
+	return &Handler{svc: s, sheetIssuer: si}
 }
 
 func (h *Handler) Register(rg *gin.RouterGroup) {
@@ -147,11 +148,23 @@ func (h *Handler) advance(c *gin.Context) {
 		return
 	}
 	var body struct {
-		Status domain.WorkOrderStatus `json:"status"`
+		Status  domain.WorkOrderStatus `json:"status"`
+		SheetID *uuid.UUID             `json:"sheet_id,omitempty"`
 	}
 	if !httpkit.Bind(c, &body) {
 		return
 	}
+
+	// When advancing PLANNED → IN_CUTTING with an optional sheet selection,
+	// pre-assign the sheet before the status transition so the inventory record
+	// is updated atomically with the work-order advance from the caller's POV.
+	if body.Status == domain.WOInCutting && body.SheetID != nil && h.sheetIssuer != nil {
+		if err := h.sheetIssuer.PreassignSheet(c.Request.Context(), *body.SheetID, id); err != nil {
+			httpkit.Error(c, err)
+			return
+		}
+	}
+
 	if err := h.svc.AdvanceStatus(c.Request.Context(), id, body.Status); err != nil {
 		httpkit.Error(c, err)
 		return

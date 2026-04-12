@@ -19,6 +19,8 @@ type store interface {
 	selectAvailableSheets(ctx context.Context) ([]BoardSheet, error)
 	selectAvailableSheetsPaged(ctx context.Context, p httpkit.PageParams) ([]BoardSheet, int, error)
 	updateSheetStatus(ctx context.Context, id uuid.UUID, status string, issuedToWO *uuid.UUID) error
+	// preassignSheet sets issued_to_work_order_id on the sheet without touching its status.
+	preassignSheet(ctx context.Context, sheetID uuid.UUID, workOrderID uuid.UUID) error
 
 	insertCuttingRecord(ctx context.Context, cr CuttingRecord) error
 

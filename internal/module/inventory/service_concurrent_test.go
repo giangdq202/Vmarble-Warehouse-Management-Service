@@ -92,6 +92,9 @@ func (s *concurrentMockStore) selectAvailableSheetsPaged(_ context.Context, _ ht
 func (s *concurrentMockStore) updateSheetStatus(_ context.Context, _ uuid.UUID, _ string, _ *uuid.UUID) error {
 	return nil
 }
+func (s *concurrentMockStore) preassignSheet(_ context.Context, _ uuid.UUID, _ uuid.UUID) error {
+	return nil
+}
 func (s *concurrentMockStore) insertCuttingRecord(_ context.Context, _ CuttingRecord) error {
 	return nil
 }
