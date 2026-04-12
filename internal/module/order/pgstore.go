@@ -22,9 +22,9 @@ func NewPGStore(pool *pgxpool.Pool) store {
 
 func (s *pgStore) insertPO(ctx context.Context, p PO) error {
 	_, err := s.pool.Exec(ctx,
-		`INSERT INTO purchase_orders (id, code, expected_delivery, created_at)
-		 VALUES ($1, $2, $3, $4)`,
-		p.ID, p.Code, p.ExpectedDelivery, p.CreatedAt,
+		`INSERT INTO purchase_orders (id, code, expected_delivery, is_active, created_at)
+		 VALUES ($1, $2, $3, $4, $5)`,
+		p.ID, p.Code, p.ExpectedDelivery, p.IsActive, p.CreatedAt,
 	)
 	return err
 }
@@ -44,16 +44,16 @@ func (s *pgStore) selectPOsPaged(ctx context.Context, p httpkit.PageParams) ([]P
 
 	var total int
 	if err := s.pool.QueryRow(ctx,
-		`SELECT COUNT(*) FROM purchase_orders WHERE code ILIKE $1`,
+		`SELECT COUNT(*) FROM purchase_orders WHERE is_active = true AND code ILIKE $1`,
 		search,
 	).Scan(&total); err != nil {
 		return nil, 0, err
 	}
 
 	query := fmt.Sprintf(
-		`SELECT id, code, expected_delivery, created_at
+		`SELECT id, code, expected_delivery, is_active, created_at
 		 FROM purchase_orders
-		 WHERE code ILIKE $1
+		 WHERE is_active = true AND code ILIKE $1
 		 ORDER BY %s %s
 		 LIMIT $2 OFFSET $3`,
 		sortCol, orderDir,
@@ -67,7 +67,7 @@ func (s *pgStore) selectPOsPaged(ctx context.Context, p httpkit.PageParams) ([]P
 	var pos []PO
 	for rows.Next() {
 		var po PO
-		if err := rows.Scan(&po.ID, &po.Code, &po.ExpectedDelivery, &po.CreatedAt); err != nil {
+		if err := rows.Scan(&po.ID, &po.Code, &po.ExpectedDelivery, &po.IsActive, &po.CreatedAt); err != nil {
 			return nil, 0, err
 		}
 		pos = append(pos, po)
@@ -78,9 +78,9 @@ func (s *pgStore) selectPOsPaged(ctx context.Context, p httpkit.PageParams) ([]P
 func (s *pgStore) selectPOByID(ctx context.Context, id uuid.UUID) (PO, error) {
 	var p PO
 	err := s.pool.QueryRow(ctx,
-		`SELECT id, code, expected_delivery, created_at FROM purchase_orders WHERE id = $1`,
+		`SELECT id, code, expected_delivery, is_active, created_at FROM purchase_orders WHERE id = $1`,
 		id,
-	).Scan(&p.ID, &p.Code, &p.ExpectedDelivery, &p.CreatedAt)
+	).Scan(&p.ID, &p.Code, &p.ExpectedDelivery, &p.IsActive, &p.CreatedAt)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return PO{}, domain.ErrNotFound
@@ -88,6 +88,20 @@ func (s *pgStore) selectPOByID(ctx context.Context, id uuid.UUID) (PO, error) {
 		return PO{}, err
 	}
 	return p, nil
+}
+
+func (s *pgStore) deactivatePO(ctx context.Context, id uuid.UUID) error {
+	tag, err := s.pool.Exec(ctx,
+		`UPDATE purchase_orders SET is_active = false WHERE id = $1`,
+		id,
+	)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return domain.ErrNotFound
+	}
+	return nil
 }
 
 func (s *pgStore) insertLineItems(ctx context.Context, items []LineItem) error {

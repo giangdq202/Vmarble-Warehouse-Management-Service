@@ -22,16 +22,16 @@ func NewPGStore(pool *pgxpool.Pool) store {
 
 func (s *pgStore) insertMaterial(ctx context.Context, m Material) error {
 	_, err := s.pool.Exec(ctx,
-		`INSERT INTO materials (id, type, name, unit, created_at)
-		 VALUES ($1, $2, $3, $4, $5)`,
-		m.ID, m.Type, m.Name, m.Unit, m.CreatedAt,
+		`INSERT INTO materials (id, type, name, unit, is_active, created_at)
+		 VALUES ($1, $2, $3, $4, $5, $6)`,
+		m.ID, m.Type, m.Name, m.Unit, m.IsActive, m.CreatedAt,
 	)
 	return err
 }
 
 func (s *pgStore) selectMaterials(ctx context.Context) ([]Material, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT id, type, name, unit, created_at FROM materials ORDER BY created_at`,
+		`SELECT id, type, name, unit, is_active, created_at FROM materials WHERE is_active = true ORDER BY created_at`,
 	)
 	if err != nil {
 		return nil, err
@@ -41,7 +41,7 @@ func (s *pgStore) selectMaterials(ctx context.Context) ([]Material, error) {
 	var out []Material
 	for rows.Next() {
 		var m Material
-		if err := rows.Scan(&m.ID, &m.Type, &m.Name, &m.Unit, &m.CreatedAt); err != nil {
+		if err := rows.Scan(&m.ID, &m.Type, &m.Name, &m.Unit, &m.IsActive, &m.CreatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, m)
@@ -49,7 +49,7 @@ func (s *pgStore) selectMaterials(ctx context.Context) ([]Material, error) {
 	return out, rows.Err()
 }
 
-// selectMaterialsPaged returns a page of materials optionally filtered by a
+// selectMaterialsPaged returns a page of active materials optionally filtered by a
 // case-insensitive keyword match on the name column.
 // It returns (items, totalMatchingItems, error).
 func (s *pgStore) selectMaterialsPaged(ctx context.Context, p httpkit.PageParams) ([]Material, int, error) {
@@ -68,7 +68,7 @@ func (s *pgStore) selectMaterialsPaged(ctx context.Context, p httpkit.PageParams
 
 	var total int
 	err := s.pool.QueryRow(ctx,
-		`SELECT COUNT(*) FROM materials WHERE name ILIKE $1`,
+		`SELECT COUNT(*) FROM materials WHERE is_active = true AND name ILIKE $1`,
 		search,
 	).Scan(&total)
 	if err != nil {
@@ -76,9 +76,9 @@ func (s *pgStore) selectMaterialsPaged(ctx context.Context, p httpkit.PageParams
 	}
 
 	query := fmt.Sprintf(
-		`SELECT id, type, name, unit, created_at
+		`SELECT id, type, name, unit, is_active, created_at
 		 FROM materials
-		 WHERE name ILIKE $1
+		 WHERE is_active = true AND name ILIKE $1
 		 ORDER BY %s %s
 		 LIMIT $2 OFFSET $3`,
 		sortCol, orderDir,
@@ -92,7 +92,7 @@ func (s *pgStore) selectMaterialsPaged(ctx context.Context, p httpkit.PageParams
 	var out []Material
 	for rows.Next() {
 		var m Material
-		if err := rows.Scan(&m.ID, &m.Type, &m.Name, &m.Unit, &m.CreatedAt); err != nil {
+		if err := rows.Scan(&m.ID, &m.Type, &m.Name, &m.Unit, &m.IsActive, &m.CreatedAt); err != nil {
 			return nil, 0, err
 		}
 		out = append(out, m)
@@ -103,9 +103,9 @@ func (s *pgStore) selectMaterialsPaged(ctx context.Context, p httpkit.PageParams
 func (s *pgStore) selectMaterialByID(ctx context.Context, id uuid.UUID) (Material, error) {
 	var m Material
 	err := s.pool.QueryRow(ctx,
-		`SELECT id, type, name, unit, created_at FROM materials WHERE id = $1`,
+		`SELECT id, type, name, unit, is_active, created_at FROM materials WHERE id = $1`,
 		id,
-	).Scan(&m.ID, &m.Type, &m.Name, &m.Unit, &m.CreatedAt)
+	).Scan(&m.ID, &m.Type, &m.Name, &m.Unit, &m.IsActive, &m.CreatedAt)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return Material{}, domain.ErrNotFound
@@ -115,20 +115,34 @@ func (s *pgStore) selectMaterialByID(ctx context.Context, id uuid.UUID) (Materia
 	return m, nil
 }
 
+func (s *pgStore) deactivateMaterial(ctx context.Context, id uuid.UUID) error {
+	tag, err := s.pool.Exec(ctx,
+		`UPDATE materials SET is_active = false WHERE id = $1`,
+		id,
+	)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return domain.ErrNotFound
+	}
+	return nil
+}
+
 func (s *pgStore) insertSKU(ctx context.Context, sku SKU) error {
 	_, err := s.pool.Exec(ctx,
-		`INSERT INTO skus (id, code, name, length_mm, width_mm, requires_metal, created_at)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+		`INSERT INTO skus (id, code, name, length_mm, width_mm, requires_metal, is_active, created_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
 		sku.ID, sku.Code, sku.Name, sku.Dimensions.LengthMM, sku.Dimensions.WidthMM,
-		sku.RequiresMetal, sku.CreatedAt,
+		sku.RequiresMetal, sku.IsActive, sku.CreatedAt,
 	)
 	return err
 }
 
 func (s *pgStore) selectSKUs(ctx context.Context) ([]SKU, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT id, code, name, length_mm, width_mm, requires_metal, created_at
-		 FROM skus ORDER BY created_at`,
+		`SELECT id, code, name, length_mm, width_mm, requires_metal, is_active, created_at
+		 FROM skus WHERE is_active = true ORDER BY created_at`,
 	)
 	if err != nil {
 		return nil, err
@@ -137,17 +151,17 @@ func (s *pgStore) selectSKUs(ctx context.Context) ([]SKU, error) {
 
 	var out []SKU
 	for rows.Next() {
-		var s SKU
-		if err := rows.Scan(&s.ID, &s.Code, &s.Name, &s.Dimensions.LengthMM, &s.Dimensions.WidthMM,
-			&s.RequiresMetal, &s.CreatedAt); err != nil {
+		var sk SKU
+		if err := rows.Scan(&sk.ID, &sk.Code, &sk.Name, &sk.Dimensions.LengthMM, &sk.Dimensions.WidthMM,
+			&sk.RequiresMetal, &sk.IsActive, &sk.CreatedAt); err != nil {
 			return nil, err
 		}
-		out = append(out, s)
+		out = append(out, sk)
 	}
 	return out, rows.Err()
 }
 
-// selectSKUsPaged returns a page of SKUs optionally filtered by a
+// selectSKUsPaged returns a page of active SKUs optionally filtered by a
 // case-insensitive keyword match on the name or code columns.
 // It returns (items, totalMatchingItems, error).
 func (s *pgStore) selectSKUsPaged(ctx context.Context, p httpkit.PageParams) ([]SKU, int, error) {
@@ -166,7 +180,7 @@ func (s *pgStore) selectSKUsPaged(ctx context.Context, p httpkit.PageParams) ([]
 
 	var total int
 	err := s.pool.QueryRow(ctx,
-		`SELECT COUNT(*) FROM skus WHERE name ILIKE $1 OR code ILIKE $1`,
+		`SELECT COUNT(*) FROM skus WHERE is_active = true AND (name ILIKE $1 OR code ILIKE $1)`,
 		search,
 	).Scan(&total)
 	if err != nil {
@@ -174,9 +188,9 @@ func (s *pgStore) selectSKUsPaged(ctx context.Context, p httpkit.PageParams) ([]
 	}
 
 	query := fmt.Sprintf(
-		`SELECT id, code, name, length_mm, width_mm, requires_metal, created_at
+		`SELECT id, code, name, length_mm, width_mm, requires_metal, is_active, created_at
 		 FROM skus
-		 WHERE name ILIKE $1 OR code ILIKE $1
+		 WHERE is_active = true AND (name ILIKE $1 OR code ILIKE $1)
 		 ORDER BY %s %s
 		 LIMIT $2 OFFSET $3`,
 		sortCol, orderDir,
@@ -192,7 +206,7 @@ func (s *pgStore) selectSKUsPaged(ctx context.Context, p httpkit.PageParams) ([]
 		var sku SKU
 		if err := rows.Scan(&sku.ID, &sku.Code, &sku.Name,
 			&sku.Dimensions.LengthMM, &sku.Dimensions.WidthMM,
-			&sku.RequiresMetal, &sku.CreatedAt); err != nil {
+			&sku.RequiresMetal, &sku.IsActive, &sku.CreatedAt); err != nil {
 			return nil, 0, err
 		}
 		out = append(out, sku)
@@ -203,11 +217,11 @@ func (s *pgStore) selectSKUsPaged(ctx context.Context, p httpkit.PageParams) ([]
 func (s *pgStore) selectSKUByID(ctx context.Context, id uuid.UUID) (SKU, error) {
 	var sku SKU
 	err := s.pool.QueryRow(ctx,
-		`SELECT id, code, name, length_mm, width_mm, requires_metal, created_at
+		`SELECT id, code, name, length_mm, width_mm, requires_metal, is_active, created_at
 		 FROM skus WHERE id = $1`,
 		id,
 	).Scan(&sku.ID, &sku.Code, &sku.Name, &sku.Dimensions.LengthMM, &sku.Dimensions.WidthMM,
-		&sku.RequiresMetal, &sku.CreatedAt)
+		&sku.RequiresMetal, &sku.IsActive, &sku.CreatedAt)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return SKU{}, domain.ErrNotFound
@@ -215,6 +229,20 @@ func (s *pgStore) selectSKUByID(ctx context.Context, id uuid.UUID) (SKU, error) 
 		return SKU{}, err
 	}
 	return sku, nil
+}
+
+func (s *pgStore) deactivateSKU(ctx context.Context, id uuid.UUID) error {
+	tag, err := s.pool.Exec(ctx,
+		`UPDATE skus SET is_active = false WHERE id = $1`,
+		id,
+	)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return domain.ErrNotFound
+	}
+	return nil
 }
 
 func (s *pgStore) upsertBOM(ctx context.Context, skuID uuid.UUID, components []BOMComponent) error {

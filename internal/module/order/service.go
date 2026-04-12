@@ -32,10 +32,11 @@ func (svc *service) CreatePO(ctx context.Context, in CreatePOInput) (PO, error) 
 
 	now := time.Now()
 	po := PO{
-		ID:                 uuid.New(),
-		Code:               in.Code,
-		ExpectedDelivery:   in.ExpectedDelivery,
-		CreatedAt:          now,
+		ID:               uuid.New(),
+		Code:             in.Code,
+		ExpectedDelivery: in.ExpectedDelivery,
+		IsActive:         true,
+		CreatedAt:        now,
 	}
 
 	if err := svc.s.insertPO(ctx, po); err != nil {
@@ -79,6 +80,10 @@ func (svc *service) ListPOs(ctx context.Context, p httpkit.PageParams) (httpkit.
 		return httpkit.PagedResult[PO]{}, err
 	}
 	return httpkit.NewPagedResult(pos, total, p), nil
+}
+
+func (svc *service) DeactivatePO(ctx context.Context, poID uuid.UUID) error {
+	return svc.s.deactivatePO(ctx, poID)
 }
 
 func (svc *service) GetLineItemsByPO(ctx context.Context, poID uuid.UUID) ([]LineItem, error) {

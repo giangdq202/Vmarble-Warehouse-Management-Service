@@ -5,6 +5,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/vmarble/warehouse-management-service/internal/domain"
 	"github.com/vmarble/warehouse-management-service/internal/platform/httpkit"
 )
 
@@ -20,10 +21,12 @@ func (h *Handler) Register(rg *gin.RouterGroup) {
 	rg.POST("/materials", h.createMaterial)
 	rg.GET("/materials", h.listMaterials)
 	rg.GET("/materials/:id", h.getMaterial)
+	rg.DELETE("/materials/:id", h.deleteMaterial)
 
 	rg.POST("/skus", h.createSKU)
 	rg.GET("/skus", h.listSKUs)
 	rg.GET("/skus/:id", h.getSKU)
+	rg.DELETE("/skus/:id", h.deleteSKU)
 
 	rg.PUT("/skus/:id/bom", h.setBOM)
 	rg.GET("/skus/:id/bom", h.getBOM)
@@ -102,7 +105,36 @@ func (h *Handler) getMaterial(c *gin.Context) {
 		httpkit.Error(c, err)
 		return
 	}
+	if !m.IsActive {
+		httpkit.Error(c, domain.NewBizError(domain.ErrNotFound, "material not found"))
+		return
+	}
 	c.JSON(http.StatusOK, m)
+}
+
+// deleteMaterial godoc
+//
+// @Summary      Deactivate material (soft delete)
+// @Tags         catalog
+// @Produce      json
+// @Param        id   path      string  true  "material id (uuid)"
+// @Success      204
+// @Failure      400  {object}  map[string]string
+// @Failure      404  {object}  map[string]string
+// @Security     BearerAuth
+// @Failure      401  {object}  map[string]string
+// @Router       /api/v1/materials/{id} [delete]
+func (h *Handler) deleteMaterial(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+	if err := h.svc.DeactivateMaterial(c.Request.Context(), id); err != nil {
+		httpkit.Error(c, err)
+		return
+	}
+	c.Status(http.StatusNoContent)
 }
 
 // createSKU godoc
@@ -178,7 +210,36 @@ func (h *Handler) getSKU(c *gin.Context) {
 		httpkit.Error(c, err)
 		return
 	}
+	if !s.IsActive {
+		httpkit.Error(c, domain.NewBizError(domain.ErrNotFound, "SKU not found"))
+		return
+	}
 	c.JSON(http.StatusOK, s)
+}
+
+// deleteSKU godoc
+//
+// @Summary      Deactivate SKU (soft delete)
+// @Tags         catalog
+// @Produce      json
+// @Param        id   path      string  true  "sku id (uuid)"
+// @Success      204
+// @Failure      400  {object}  map[string]string
+// @Failure      404  {object}  map[string]string
+// @Security     BearerAuth
+// @Failure      401  {object}  map[string]string
+// @Router       /api/v1/skus/{id} [delete]
+func (h *Handler) deleteSKU(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+	if err := h.svc.DeactivateSKU(c.Request.Context(), id); err != nil {
+		httpkit.Error(c, err)
+		return
+	}
+	c.Status(http.StatusNoContent)
 }
 
 // setBOM godoc

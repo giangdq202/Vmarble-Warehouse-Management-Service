@@ -5,6 +5,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/vmarble/warehouse-management-service/internal/domain"
 	"github.com/vmarble/warehouse-management-service/internal/platform/httpkit"
 )
 
@@ -20,6 +21,7 @@ func (h *Handler) Register(rg *gin.RouterGroup) {
 	rg.POST("/pos", h.create)
 	rg.GET("/pos", h.list)
 	rg.GET("/pos/:id", h.get)
+	rg.DELETE("/pos/:id", h.delete)
 	rg.GET("/pos/:id/line-items", h.lineItems)
 }
 
@@ -96,7 +98,36 @@ func (h *Handler) get(c *gin.Context) {
 		httpkit.Error(c, err)
 		return
 	}
+	if !po.IsActive {
+		httpkit.Error(c, domain.NewBizError(domain.ErrNotFound, "purchase order not found"))
+		return
+	}
 	c.JSON(http.StatusOK, po)
+}
+
+// deletePO godoc
+//
+// @Summary      Void PO (soft delete)
+// @Tags         order
+// @Produce      json
+// @Param        id   path      string  true  "po id (uuid)"
+// @Success      204
+// @Failure      400  {object}  map[string]string
+// @Failure      404  {object}  map[string]string
+// @Security     BearerAuth
+// @Failure      401  {object}  map[string]string
+// @Router       /api/v1/pos/{id} [delete]
+func (h *Handler) delete(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+	if err := h.svc.DeactivatePO(c.Request.Context(), id); err != nil {
+		httpkit.Error(c, err)
+		return
+	}
+	c.Status(http.StatusNoContent)
 }
 
 // listPOLineItems godoc

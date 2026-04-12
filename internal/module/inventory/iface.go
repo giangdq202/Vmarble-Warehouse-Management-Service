@@ -23,6 +23,7 @@ type InventoryLot struct {
 	Quantity     int          `json:"quantity"`
 	CostPerSheet domain.Money `json:"cost_per_sheet"`
 	SupplierRef  string       `json:"supplier_ref"`
+	IsActive     bool         `json:"is_active"`
 	ReceivedAt   time.Time    `json:"received_at"`
 }
 
@@ -106,6 +107,7 @@ type Remnant struct {
 type Service interface {
 	ReceiveStock(ctx context.Context, in ReceiveStockInput) (InventoryLot, error)
 	ListLots(ctx context.Context, p httpkit.PageParams) (httpkit.PagedResult[InventoryLot], error)
+	DeactivateLot(ctx context.Context, lotID uuid.UUID) error
 
 	GetSheet(ctx context.Context, sheetID uuid.UUID) (BoardSheet, error)
 	ListAvailableSheets(ctx context.Context, p httpkit.PageParams) (httpkit.PagedResult[BoardSheet], error)
