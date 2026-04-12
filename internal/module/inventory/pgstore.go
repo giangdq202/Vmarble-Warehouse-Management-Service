@@ -23,19 +23,19 @@ func NewPGStore(pool *pgxpool.Pool) store {
 
 func (s *pgStore) insertLot(ctx context.Context, lot InventoryLot) error {
 	_, err := s.pool.Exec(ctx,
-		`INSERT INTO inventory_lots (id, material_id, quantity, cost_per_sheet_amount, cost_per_sheet_currency, supplier_ref, received_at)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+		`INSERT INTO inventory_lots (id, material_id, quantity, cost_per_sheet_amount, cost_per_sheet_currency, supplier_ref, is_active, received_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
 		lot.ID, lot.MaterialID, lot.Quantity,
 		lot.CostPerSheet.Amount, lot.CostPerSheet.Currency,
-		lot.SupplierRef, lot.ReceivedAt,
+		lot.SupplierRef, lot.IsActive, lot.ReceivedAt,
 	)
 	return err
 }
 
 func (s *pgStore) selectLots(ctx context.Context) ([]InventoryLot, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT id, material_id, quantity, cost_per_sheet_amount, cost_per_sheet_currency, supplier_ref, received_at
-		 FROM inventory_lots ORDER BY received_at DESC`)
+		`SELECT id, material_id, quantity, cost_per_sheet_amount, cost_per_sheet_currency, supplier_ref, is_active, received_at
+		 FROM inventory_lots WHERE is_active = true ORDER BY received_at DESC`)
 	if err != nil {
 		return nil, err
 	}
@@ -46,7 +46,7 @@ func (s *pgStore) selectLots(ctx context.Context) ([]InventoryLot, error) {
 		var l InventoryLot
 		if err := rows.Scan(&l.ID, &l.MaterialID, &l.Quantity,
 			&l.CostPerSheet.Amount, &l.CostPerSheet.Currency,
-			&l.SupplierRef, &l.ReceivedAt); err != nil {
+			&l.SupplierRef, &l.IsActive, &l.ReceivedAt); err != nil {
 			return nil, err
 		}
 		lots = append(lots, l)
@@ -71,16 +71,16 @@ func (s *pgStore) selectLotsPaged(ctx context.Context, p httpkit.PageParams) ([]
 
 	var total int
 	if err := s.pool.QueryRow(ctx,
-		`SELECT COUNT(*) FROM inventory_lots WHERE supplier_ref ILIKE $1`,
+		`SELECT COUNT(*) FROM inventory_lots WHERE is_active = true AND supplier_ref ILIKE $1`,
 		search,
 	).Scan(&total); err != nil {
 		return nil, 0, fmt.Errorf("count inventory_lots: %w", err)
 	}
 
 	query := fmt.Sprintf(
-		`SELECT id, material_id, quantity, cost_per_sheet_amount, cost_per_sheet_currency, supplier_ref, received_at
+		`SELECT id, material_id, quantity, cost_per_sheet_amount, cost_per_sheet_currency, supplier_ref, is_active, received_at
 		 FROM inventory_lots
-		 WHERE supplier_ref ILIKE $1
+		 WHERE is_active = true AND supplier_ref ILIKE $1
 		 ORDER BY %s %s
 		 LIMIT $2 OFFSET $3`,
 		sortCol, orderDir,
@@ -96,12 +96,26 @@ func (s *pgStore) selectLotsPaged(ctx context.Context, p httpkit.PageParams) ([]
 		var l InventoryLot
 		if err := rows.Scan(&l.ID, &l.MaterialID, &l.Quantity,
 			&l.CostPerSheet.Amount, &l.CostPerSheet.Currency,
-			&l.SupplierRef, &l.ReceivedAt); err != nil {
+			&l.SupplierRef, &l.IsActive, &l.ReceivedAt); err != nil {
 			return nil, 0, err
 		}
 		lots = append(lots, l)
 	}
 	return lots, total, rows.Err()
+}
+
+func (s *pgStore) deactivateLot(ctx context.Context, id uuid.UUID) error {
+	tag, err := s.pool.Exec(ctx,
+		`UPDATE inventory_lots SET is_active = false WHERE id = $1`,
+		id,
+	)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return domain.ErrNotFound
+	}
+	return nil
 }
 
 func (s *pgStore) insertSheets(ctx context.Context, sheets []BoardSheet) error {

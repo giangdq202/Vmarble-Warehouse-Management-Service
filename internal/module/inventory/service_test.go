@@ -89,6 +89,9 @@ type mockStore struct {
 	// selectActiveStorageLocations
 	selectActiveStorageLocationsResult []StorageLocation
 	selectActiveStorageLocationsErr    error
+
+	// deactivateLot
+	deactivateLotErr error
 }
 
 func (m *mockStore) insertLot(_ context.Context, _ InventoryLot) error {
@@ -99,6 +102,9 @@ func (m *mockStore) selectLots(_ context.Context) ([]InventoryLot, error) {
 }
 func (m *mockStore) selectLotsPaged(_ context.Context, _ httpkit.PageParams) ([]InventoryLot, int, error) {
 	return m.selectLotsPagedResult, m.selectLotsPagedTotal, m.selectLotsPagedErr
+}
+func (m *mockStore) deactivateLot(_ context.Context, _ uuid.UUID) error {
+	return m.deactivateLotErr
 }
 func (m *mockStore) insertSheets(_ context.Context, _ []BoardSheet) error {
 	return m.insertSheetsErr

@@ -43,6 +43,7 @@ func (s *service) CreateMaterial(ctx context.Context, in CreateMaterialInput) (M
 		Type:      in.Type,
 		Name:      in.Name,
 		Unit:      in.Unit,
+		IsActive:  true,
 		CreatedAt: time.Now().UTC(),
 	}
 	if err := s.st.insertMaterial(ctx, m); err != nil {
@@ -63,6 +64,10 @@ func (s *service) GetMaterial(ctx context.Context, materialID uuid.UUID) (Materi
 	return s.st.selectMaterialByID(ctx, materialID)
 }
 
+func (s *service) DeactivateMaterial(ctx context.Context, materialID uuid.UUID) error {
+	return s.st.deactivateMaterial(ctx, materialID)
+}
+
 func (s *service) CreateSKU(ctx context.Context, in CreateSKUInput) (SKU, error) {
 	if in.Code == "" {
 		return SKU{}, domain.NewBizError(domain.ErrInvalidInput, "SKU code is required")
@@ -77,6 +82,7 @@ func (s *service) CreateSKU(ctx context.Context, in CreateSKUInput) (SKU, error)
 		Name:          in.Name,
 		Dimensions:    in.Dimensions,
 		RequiresMetal: in.RequiresMetal,
+		IsActive:      true,
 		CreatedAt:     time.Now().UTC(),
 	}
 	if err := s.st.insertSKU(ctx, sku); err != nil {
@@ -95,6 +101,10 @@ func (s *service) ListSKUs(ctx context.Context, p httpkit.PageParams) (httpkit.P
 
 func (s *service) GetSKU(ctx context.Context, skuID uuid.UUID) (SKU, error) {
 	return s.st.selectSKUByID(ctx, skuID)
+}
+
+func (s *service) DeactivateSKU(ctx context.Context, skuID uuid.UUID) error {
+	return s.st.deactivateSKU(ctx, skuID)
 }
 
 func (s *service) SetBOM(ctx context.Context, in SetBOMInput) (BOM, error) {

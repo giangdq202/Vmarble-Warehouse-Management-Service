@@ -22,6 +22,7 @@ func (h *Handler) Register(rg *gin.RouterGroup) {
 	inv := rg.Group("/inventory")
 	inv.POST("/lots", h.receiveStock)
 	inv.GET("/lots", h.listLots)
+	inv.DELETE("/lots/:id", h.deleteLot)
 	inv.GET("/sheets", h.listSheets)
 	inv.GET("/sheets/:id", h.getSheet)
 	inv.GET("/sheets/:id/lineage", h.lineage)
@@ -80,6 +81,30 @@ func (h *Handler) listLots(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, result)
+}
+
+// deleteLot godoc
+//
+// @Summary      Deactivate inventory lot (soft delete)
+// @Tags         inventory
+// @Produce      json
+// @Param        id   path      string  true  "lot id (uuid)"
+// @Success      204
+// @Failure      400  {object}  map[string]string
+// @Failure      404  {object}  map[string]string
+// @Security     BearerAuth
+// @Router       /api/v1/inventory/lots/{id} [delete]
+func (h *Handler) deleteLot(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+	if err := h.svc.DeactivateLot(c.Request.Context(), id); err != nil {
+		httpkit.Error(c, err)
+		return
+	}
+	c.Status(http.StatusNoContent)
 }
 
 // listSheets godoc

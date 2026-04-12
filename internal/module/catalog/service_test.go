@@ -31,6 +31,9 @@ type mockStore struct {
 	selectMaterialByIDResult Material
 	selectMaterialByIDErr    error
 
+	// deactivateMaterial
+	deactivateMaterialErr error
+
 	// insertSKU
 	insertSKUErr error
 
@@ -46,6 +49,9 @@ type mockStore struct {
 	// selectSKUByID
 	selectSKUByIDResult SKU
 	selectSKUByIDErr    error
+
+	// deactivateSKU
+	deactivateSKUErr error
 
 	// upsertBOM
 	upsertBOMErr error
@@ -67,6 +73,9 @@ func (m *mockStore) selectMaterialsPaged(_ context.Context, _ httpkit.PageParams
 func (m *mockStore) selectMaterialByID(_ context.Context, _ uuid.UUID) (Material, error) {
 	return m.selectMaterialByIDResult, m.selectMaterialByIDErr
 }
+func (m *mockStore) deactivateMaterial(_ context.Context, _ uuid.UUID) error {
+	return m.deactivateMaterialErr
+}
 func (m *mockStore) insertSKU(_ context.Context, _ SKU) error {
 	return m.insertSKUErr
 }
@@ -78,6 +87,9 @@ func (m *mockStore) selectSKUsPaged(_ context.Context, _ httpkit.PageParams) ([]
 }
 func (m *mockStore) selectSKUByID(_ context.Context, _ uuid.UUID) (SKU, error) {
 	return m.selectSKUByIDResult, m.selectSKUByIDErr
+}
+func (m *mockStore) deactivateSKU(_ context.Context, _ uuid.UUID) error {
+	return m.deactivateSKUErr
 }
 func (m *mockStore) upsertBOM(_ context.Context, _ uuid.UUID, _ []BOMComponent) error {
 	return m.upsertBOMErr

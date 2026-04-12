@@ -23,13 +23,14 @@ type Material struct {
 	Type      MaterialType `json:"type"`
 	Name      string       `json:"name"`
 	Unit      string       `json:"unit"`
+	IsActive  bool         `json:"is_active"`
 	CreatedAt time.Time    `json:"created_at"`
 }
 
 type CreateMaterialInput struct {
 	Type MaterialType `json:"type"`
-	Name string      `json:"name"`
-	Unit string      `json:"unit"`
+	Name string       `json:"name"`
+	Unit string       `json:"unit"`
 }
 
 type SKU struct {
@@ -38,14 +39,15 @@ type SKU struct {
 	Name          string           `json:"name"`
 	Dimensions    domain.Dimension `json:"dimensions"`
 	RequiresMetal bool             `json:"requires_metal"`
+	IsActive      bool             `json:"is_active"`
 	CreatedAt     time.Time        `json:"created_at"`
 }
 
 type CreateSKUInput struct {
-	Code          string            `json:"code"`
-	Name          string            `json:"name"`
-	Dimensions    domain.Dimension   `json:"dimensions"`
-	RequiresMetal bool              `json:"requires_metal"`
+	Code          string           `json:"code"`
+	Name          string           `json:"name"`
+	Dimensions    domain.Dimension `json:"dimensions"`
+	RequiresMetal bool             `json:"requires_metal"`
 }
 
 type BOMComponent struct {
@@ -69,10 +71,12 @@ type Service interface {
 	CreateMaterial(ctx context.Context, in CreateMaterialInput) (Material, error)
 	ListMaterials(ctx context.Context, p httpkit.PageParams) (httpkit.PagedResult[Material], error)
 	GetMaterial(ctx context.Context, materialID uuid.UUID) (Material, error)
+	DeactivateMaterial(ctx context.Context, materialID uuid.UUID) error
 
 	CreateSKU(ctx context.Context, in CreateSKUInput) (SKU, error)
 	ListSKUs(ctx context.Context, p httpkit.PageParams) (httpkit.PagedResult[SKU], error)
 	GetSKU(ctx context.Context, skuID uuid.UUID) (SKU, error)
+	DeactivateSKU(ctx context.Context, skuID uuid.UUID) error
 
 	SetBOM(ctx context.Context, in SetBOMInput) (BOM, error)
 	GetBOM(ctx context.Context, skuID uuid.UUID) (BOM, error)

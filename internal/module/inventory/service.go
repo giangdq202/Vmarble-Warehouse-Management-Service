@@ -31,6 +31,7 @@ func (s *service) ReceiveStock(ctx context.Context, in ReceiveStockInput) (Inven
 		Quantity:     in.Quantity,
 		CostPerSheet: in.CostPerSheet,
 		SupplierRef:  in.SupplierRef,
+		IsActive:     true,
 		ReceivedAt:   time.Now().UTC(),
 	}
 	if err := s.st.insertLot(ctx, lot); err != nil {
@@ -60,6 +61,10 @@ func (s *service) ListLots(ctx context.Context, p httpkit.PageParams) (httpkit.P
 		return httpkit.PagedResult[InventoryLot]{}, err
 	}
 	return httpkit.NewPagedResult(items, total, p), nil
+}
+
+func (s *service) DeactivateLot(ctx context.Context, lotID uuid.UUID) error {
+	return s.st.deactivateLot(ctx, lotID)
 }
 
 func (s *service) GetSheet(ctx context.Context, sheetID uuid.UUID) (BoardSheet, error) {

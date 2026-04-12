@@ -26,6 +26,9 @@ type mockStore struct {
 	selectPOByIDResult PO
 	selectPOByIDErr    error
 
+	// deactivatePO
+	deactivatePOErr error
+
 	// insertLineItems
 	insertLineItemsErr error
 
@@ -48,6 +51,10 @@ func (m *mockStore) selectPOsPaged(_ context.Context, _ httpkit.PageParams) ([]P
 
 func (m *mockStore) selectPOByID(_ context.Context, _ uuid.UUID) (PO, error) {
 	return m.selectPOByIDResult, m.selectPOByIDErr
+}
+
+func (m *mockStore) deactivatePO(_ context.Context, _ uuid.UUID) error {
+	return m.deactivatePOErr
 }
 
 func (m *mockStore) insertLineItems(_ context.Context, _ []LineItem) error {
