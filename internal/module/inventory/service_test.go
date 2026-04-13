@@ -95,6 +95,10 @@ type mockStore struct {
 
 	// preAssignSheet
 	preAssignSheetErr error
+
+	// releaseExpiredAllocations
+	releaseExpiredAllocationsResult int64
+	releaseExpiredAllocationsErr    error
 }
 
 func (m *mockStore) insertLot(_ context.Context, _ InventoryLot) error {
@@ -126,6 +130,9 @@ func (m *mockStore) updateSheetStatus(_ context.Context, _ uuid.UUID, _ string, 
 }
 func (m *mockStore) preAssignSheet(_ context.Context, _ uuid.UUID, _ uuid.UUID) error {
 	return m.preAssignSheetErr
+}
+func (m *mockStore) releaseExpiredAllocations(_ context.Context, _ time.Time) (int64, error) {
+	return m.releaseExpiredAllocationsResult, m.releaseExpiredAllocationsErr
 }
 func (m *mockStore) insertCuttingRecord(_ context.Context, _ CuttingRecord) error {
 	return m.insertCuttingRecordErr
@@ -2614,5 +2621,47 @@ func TestRecordCut_NoAdvancer_DoesNotPanic(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// ReleaseExpiredAllocations — background auto-release (Issue 3.3)
+// ═════════════════════════════════════════════════════════════════════════════
+
+func TestReleaseExpiredAllocations_HappyPath_ReturnCount(t *testing.T) {
+	before := time.Now().Add(-24 * time.Hour)
+	st := &mockStore{releaseExpiredAllocationsResult: 3}
+	svc := NewService(st, nil)
+
+	n, err := svc.ReleaseExpiredAllocations(context.Background(), before)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if n != 3 {
+		t.Errorf("released count = %d, want 3", n)
+	}
+}
+
+func TestReleaseExpiredAllocations_ZeroReleased(t *testing.T) {
+	st := &mockStore{releaseExpiredAllocationsResult: 0}
+	svc := NewService(st, nil)
+
+	n, err := svc.ReleaseExpiredAllocations(context.Background(), time.Now())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if n != 0 {
+		t.Errorf("released count = %d, want 0", n)
+	}
+}
+
+func TestReleaseExpiredAllocations_StoreError_Propagates(t *testing.T) {
+	storeErr := errors.New("db unavailable")
+	st := &mockStore{releaseExpiredAllocationsErr: storeErr}
+	svc := NewService(st, nil)
+
+	_, err := svc.ReleaseExpiredAllocations(context.Background(), time.Now())
+	if !errors.Is(err, storeErr) {
+		t.Errorf("expected store error to propagate, got %v", err)
 	}
 }

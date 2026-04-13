@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -314,7 +315,7 @@ func (s *pgStore) insertRemnant(ctx context.Context, r Remnant) error {
 
 func (s *pgStore) selectAvailableRemnantsByMinDimension(ctx context.Context, minDim domain.Dimension) ([]Remnant, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT id, parent_board_id, parent_remnant_id, length_mm, width_mm, status, allocated_to_wo_id,
+		`SELECT id, parent_board_id, parent_remnant_id, length_mm, width_mm, status, allocated_to_wo_id, allocated_at,
 		        supplier_code, lot_batch, grain_pattern, quality_grade,
 		        bounding_box_length_mm, bounding_box_width_mm, bin_location_id, created_at
 		 FROM remnants
@@ -355,7 +356,7 @@ func (s *pgStore) selectRemnantsByFilter(ctx context.Context, f RemnantFilter, p
 	}
 
 	rows, err := s.pool.Query(ctx,
-		`SELECT id, parent_board_id, parent_remnant_id, length_mm, width_mm, status, allocated_to_wo_id,
+		`SELECT id, parent_board_id, parent_remnant_id, length_mm, width_mm, status, allocated_to_wo_id, allocated_at,
 		        supplier_code, lot_batch, grain_pattern, quality_grade,
 		        bounding_box_length_mm, bounding_box_width_mm, bin_location_id, created_at
 		 FROM remnants`+baseWhere+`
@@ -377,7 +378,7 @@ func (s *pgStore) selectRemnantsByFilter(ctx context.Context, f RemnantFilter, p
 
 func (s *pgStore) selectRemnantsByBoardSheet(ctx context.Context, boardSheetID uuid.UUID) ([]Remnant, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT id, parent_board_id, parent_remnant_id, length_mm, width_mm, status, allocated_to_wo_id,
+		`SELECT id, parent_board_id, parent_remnant_id, length_mm, width_mm, status, allocated_to_wo_id, allocated_at,
 		        supplier_code, lot_batch, grain_pattern, quality_grade,
 		        bounding_box_length_mm, bounding_box_width_mm, bin_location_id, created_at
 		 FROM remnants WHERE parent_board_id = $1 ORDER BY created_at`, boardSheetID)
@@ -391,7 +392,7 @@ func (s *pgStore) selectRemnantsByBoardSheet(ctx context.Context, boardSheetID u
 func (s *pgStore) selectRemnantByID(ctx context.Context, id uuid.UUID) (Remnant, error) {
 	var r Remnant
 	row := s.pool.QueryRow(ctx,
-		`SELECT id, parent_board_id, parent_remnant_id, length_mm, width_mm, status, allocated_to_wo_id,
+		`SELECT id, parent_board_id, parent_remnant_id, length_mm, width_mm, status, allocated_to_wo_id, allocated_at,
 		        supplier_code, lot_batch, grain_pattern, quality_grade,
 		        bounding_box_length_mm, bounding_box_width_mm, bin_location_id, created_at
 		 FROM remnants WHERE id = $1`, id)
@@ -562,7 +563,7 @@ func (s *pgStore) allocateRemnantAtomically(ctx context.Context, remnantID uuid.
 	}
 
 	tag, execErr := tx.Exec(ctx,
-		`UPDATE remnants SET status = $1, allocated_to_wo_id = $2 WHERE id = $3`,
+		`UPDATE remnants SET status = $1, allocated_to_wo_id = $2, allocated_at = NOW() WHERE id = $3`,
 		string(domain.RemnantAllocated), workOrderID, remnantID)
 	if execErr != nil {
 		err = fmt.Errorf("update remnant status: %w", execErr)
@@ -631,6 +632,26 @@ func (s *pgStore) markRemnantWasteAtomically(ctx context.Context, remnantID uuid
 	return nil
 }
 
+// releaseExpiredAllocations resets ALLOCATED remnants whose allocated_at is
+// older than `before` back to AVAILABLE. This is the backing operation for the
+// background auto-release task. A plain UPDATE (no transaction, no FOR UPDATE)
+// is intentional: each row is updated atomically by PostgreSQL, and concurrent
+// executions on multiple server instances are safe because only one UPDATE can
+// match a given row's predicate at a time. allocated_to_wo_id and allocated_at
+// are both cleared on release.
+func (s *pgStore) releaseExpiredAllocations(ctx context.Context, before time.Time) (int64, error) {
+	tag, err := s.pool.Exec(ctx,
+		`UPDATE remnants
+		 SET status = $1, allocated_to_wo_id = NULL, allocated_at = NULL
+		 WHERE status = $2 AND allocated_at IS NOT NULL AND allocated_at < $3`,
+		string(domain.RemnantAvailable), string(domain.RemnantAllocated), before,
+	)
+	if err != nil {
+		return 0, fmt.Errorf("release expired allocations: %w", err)
+	}
+	return tag.RowsAffected(), nil
+}
+
 func (s *pgStore) selectActiveStorageLocations(ctx context.Context) ([]StorageLocation, error) {
 	rows, err := s.pool.Query(ctx,
 		`SELECT id, zone, rack, shelf, label, barcode, is_active, created_at
@@ -678,10 +699,11 @@ func scanRemnantRecord(scanner remnantScanner, r *Remnant) error {
 	var boundingBoxLengthMM sql.NullInt32
 	var boundingBoxWidthMM sql.NullInt32
 	var binLocationID uuid.NullUUID
+	var allocatedAt sql.NullTime
 	if err := scanner.Scan(
 		&r.ID, &r.ParentBoardID, &r.ParentRemnantID,
 		&r.Dimensions.LengthMM, &r.Dimensions.WidthMM,
-		&r.Status, &r.AllocatedToWO,
+		&r.Status, &r.AllocatedToWO, &allocatedAt,
 		&supplierCode, &lotBatch, &grainPattern, &qualityGrade,
 		&boundingBoxLengthMM, &boundingBoxWidthMM, &binLocationID,
 		&r.CreatedAt,
@@ -699,6 +721,12 @@ func scanRemnantRecord(scanner remnantScanner, r *Remnant) error {
 		r.BinLocationID = &v
 	} else {
 		r.BinLocationID = nil
+	}
+	if allocatedAt.Valid {
+		t := allocatedAt.Time
+		r.AllocatedAt = &t
+	} else {
+		r.AllocatedAt = nil
 	}
 	return nil
 }
