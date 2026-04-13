@@ -250,6 +250,40 @@ func (s *pgStore) updateSheetStatus(ctx context.Context, id uuid.UUID, status st
 	return nil
 }
 
+func (s *pgStore) preAssignSheet(ctx context.Context, sheetID uuid.UUID, workOrderID uuid.UUID) error {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+
+	var status string
+	err = tx.QueryRow(ctx,
+		`SELECT status FROM board_sheets WHERE id = $1 FOR UPDATE`,
+		sheetID,
+	).Scan(&status)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return domain.NewBizError(domain.ErrNotFound, "board sheet not found")
+		}
+		return err
+	}
+	if status != "AVAILABLE" {
+		return domain.NewBizError(domain.ErrPreconditionFailed,
+			"sheet must be AVAILABLE to pre-assign, got "+status)
+	}
+
+	_, err = tx.Exec(ctx,
+		`UPDATE board_sheets SET issued_to_wo_id = $1 WHERE id = $2`,
+		workOrderID, sheetID,
+	)
+	if err != nil {
+		return err
+	}
+
+	return tx.Commit(ctx)
+}
+
 func (s *pgStore) insertCuttingRecord(ctx context.Context, cr CuttingRecord) error {
 	_, err := s.pool.Exec(ctx,
 		`INSERT INTO cutting_records (id, sheet_id, remnant_source_id, work_order_id, sku_id, used_length_mm, used_width_mm, created_at)

@@ -92,6 +92,9 @@ type mockStore struct {
 
 	// deactivateLot
 	deactivateLotErr error
+
+	// preAssignSheet
+	preAssignSheetErr error
 }
 
 func (m *mockStore) insertLot(_ context.Context, _ InventoryLot) error {
@@ -120,6 +123,9 @@ func (m *mockStore) selectAvailableSheetsPaged(_ context.Context, _ httpkit.Page
 }
 func (m *mockStore) updateSheetStatus(_ context.Context, _ uuid.UUID, _ string, _ *uuid.UUID) error {
 	return m.updateSheetStatusErr
+}
+func (m *mockStore) preAssignSheet(_ context.Context, _ uuid.UUID, _ uuid.UUID) error {
+	return m.preAssignSheetErr
 }
 func (m *mockStore) insertCuttingRecord(_ context.Context, _ CuttingRecord) error {
 	return m.insertCuttingRecordErr
@@ -243,6 +249,21 @@ func strPtrVal(p *string) string {
 	return *p
 }
 
+// mockWorkOrderAdvancer satisfies WorkOrderAdvancer.
+type mockWorkOrderAdvancer struct {
+	called   bool
+	calledWO uuid.UUID
+	calledTo domain.WorkOrderStatus
+	err      error
+}
+
+func (m *mockWorkOrderAdvancer) AdvanceStatus(_ context.Context, woID uuid.UUID, in AdvanceWOInput) error {
+	m.called = true
+	m.calledWO = woID
+	m.calledTo = in.To
+	return m.err
+}
+
 // ── TestRecordCut ─────────────────────────────────────────────────────────────
 
 func TestRecordCut_FromSheet_NoRemnant(t *testing.T) {
@@ -253,7 +274,7 @@ func TestRecordCut_FromSheet_NoRemnant(t *testing.T) {
 	st := &mockStore{
 		selectSheetByIDResult: availableSheet(sheetID),
 	}
-	svc := NewService(st)
+	svc := NewService(st, nil)
 
 	in := RecordCutInput{
 		SheetID:       ptr(sheetID),
@@ -306,7 +327,7 @@ func TestRecordCut_FromSheet_WithRemnant(t *testing.T) {
 	st := &mockStore{
 		selectSheetByIDResult: availableSheet(sheetID),
 	}
-	svc := NewService(st)
+	svc := NewService(st, nil)
 
 	remnantDim := dim800x400
 
@@ -357,7 +378,7 @@ func TestRecordCut_FromRemnant_NoRemnant(t *testing.T) {
 	st := &mockStore{
 		selectRemnantByIDResult: availableRemnant(remnantID, boardID),
 	}
-	svc := NewService(st)
+	svc := NewService(st, nil)
 
 	in := RecordCutInput{
 		RemnantID:     ptr(remnantID),
@@ -398,7 +419,7 @@ func TestRecordCut_FromRemnant_WithNestedRemnant(t *testing.T) {
 	st := &mockStore{
 		selectRemnantByIDResult: availableRemnant(remnantID, boardID),
 	}
-	svc := NewService(st)
+	svc := NewService(st, nil)
 
 	nestedDim := dim100x100
 
@@ -437,7 +458,7 @@ func TestRecordCut_BothSourcesProvided_IsInvalidInput(t *testing.T) {
 	sheetID := uuid.New()
 	remID := uuid.New()
 
-	svc := NewService(&mockStore{})
+	svc := NewService(&mockStore{}, nil)
 	_, err := svc.RecordCut(context.Background(), RecordCutInput{
 		SheetID:       ptr(sheetID),
 		RemnantID:     ptr(remID),
@@ -451,7 +472,7 @@ func TestRecordCut_BothSourcesProvided_IsInvalidInput(t *testing.T) {
 }
 
 func TestRecordCut_NoSourceProvided_IsInvalidInput(t *testing.T) {
-	svc := NewService(&mockStore{})
+	svc := NewService(&mockStore{}, nil)
 	_, err := svc.RecordCut(context.Background(), RecordCutInput{
 		WorkOrderID:   uuid.New(),
 		SKUID:         uuid.New(),
@@ -463,7 +484,7 @@ func TestRecordCut_NoSourceProvided_IsInvalidInput(t *testing.T) {
 }
 
 func TestRecordCut_ZeroUsedDimension_IsInvalidInput(t *testing.T) {
-	svc := NewService(&mockStore{})
+	svc := NewService(&mockStore{}, nil)
 	_, err := svc.RecordCut(context.Background(), RecordCutInput{
 		SheetID:       ptr(uuid.New()),
 		WorkOrderID:   uuid.New(),
@@ -476,7 +497,7 @@ func TestRecordCut_ZeroUsedDimension_IsInvalidInput(t *testing.T) {
 }
 
 func TestRecordCut_NegativeUsedDimension_IsInvalidInput(t *testing.T) {
-	svc := NewService(&mockStore{})
+	svc := NewService(&mockStore{}, nil)
 	_, err := svc.RecordCut(context.Background(), RecordCutInput{
 		SheetID:       ptr(uuid.New()),
 		WorkOrderID:   uuid.New(),
@@ -491,7 +512,7 @@ func TestRecordCut_NegativeUsedDimension_IsInvalidInput(t *testing.T) {
 func TestRecordCut_InvalidRemnantDimension_IsInvalidInput(t *testing.T) {
 	sheetID := uuid.New()
 	st := &mockStore{selectSheetByIDResult: availableSheet(sheetID)}
-	svc := NewService(st)
+	svc := NewService(st, nil)
 	badDim := dimZero
 	_, err := svc.RecordCut(context.Background(), RecordCutInput{
 		SheetID:          ptr(sheetID),
@@ -514,7 +535,7 @@ func TestRecordCut_AreaConservation_UsedExceedsSource(t *testing.T) {
 	overDim := domain.Dimension{LengthMM: 2001, WidthMM: 1000}
 
 	st := &mockStore{selectSheetByIDResult: availableSheet(sheetID)}
-	svc := NewService(st)
+	svc := NewService(st, nil)
 
 	_, err := svc.RecordCut(context.Background(), RecordCutInput{
 		SheetID:       ptr(sheetID),
@@ -539,7 +560,7 @@ func TestRecordCut_AreaConservation_UsedPlusRemnantExceedsSource(t *testing.T) {
 	remDim := domain.Dimension{LengthMM: 1000, WidthMM: 1000}
 
 	st := &mockStore{selectSheetByIDResult: availableSheet(sheetID)}
-	svc := NewService(st)
+	svc := NewService(st, nil)
 
 	_, err := svc.RecordCut(context.Background(), RecordCutInput{
 		SheetID:          ptr(sheetID),
@@ -564,7 +585,7 @@ func TestRecordCut_AreaConservation_ExactlyEqualSource_IsAllowed(t *testing.T) {
 	remDim := domain.Dimension{LengthMM: 1000, WidthMM: 1000}  // 1_000_000
 
 	st := &mockStore{selectSheetByIDResult: availableSheet(sheetID)}
-	svc := NewService(st)
+	svc := NewService(st, nil)
 
 	_, err := svc.RecordCut(context.Background(), RecordCutInput{
 		SheetID:          ptr(sheetID),
@@ -586,7 +607,7 @@ func TestRecordCut_SheetNotAvailable_IsInvalidInput(t *testing.T) {
 	issuedSheet.Status = "ISSUED"
 
 	st := &mockStore{selectSheetByIDResult: issuedSheet}
-	svc := NewService(st)
+	svc := NewService(st, nil)
 
 	_, err := svc.RecordCut(context.Background(), RecordCutInput{
 		SheetID:       ptr(sheetID),
@@ -609,7 +630,7 @@ func TestRecordCut_RemnantNotAvailable_IsInvalidInput(t *testing.T) {
 	consumedRemnant.Status = domain.RemnantConsumed
 
 	st := &mockStore{selectRemnantByIDResult: consumedRemnant}
-	svc := NewService(st)
+	svc := NewService(st, nil)
 
 	_, err := svc.RecordCut(context.Background(), RecordCutInput{
 		RemnantID:     ptr(remID),
@@ -629,7 +650,7 @@ func TestRecordCut_SheetNotFound_PropagatesError(t *testing.T) {
 	st := &mockStore{
 		selectSheetByIDErr: domain.NewBizError(domain.ErrNotFound, "board sheet not found"),
 	}
-	svc := NewService(st)
+	svc := NewService(st, nil)
 
 	_, err := svc.RecordCut(context.Background(), RecordCutInput{
 		SheetID:       ptr(uuid.New()),
@@ -652,7 +673,7 @@ func TestRecordCut_AtomicStoreError_PropagatesAndDoesNotReturnResult(t *testing.
 		selectSheetByIDResult: availableSheet(sheetID),
 		recordCutAtomicallyErr: storeErr,
 	}
-	svc := NewService(st)
+	svc := NewService(st, nil)
 
 	result, err := svc.RecordCut(context.Background(), RecordCutInput{
 		SheetID:       ptr(sheetID),
@@ -683,7 +704,7 @@ func TestRecordCut_RemnantDimDoesNotFitInSource_IsInvalidInput(t *testing.T) {
 	oversizedRemnant := domain.Dimension{LengthMM: 2001, WidthMM: 100}
 
 	st := &mockStore{selectSheetByIDResult: availableSheet(sheetID)}
-	svc := NewService(st)
+	svc := NewService(st, nil)
 
 	_, err := svc.RecordCut(context.Background(), RecordCutInput{
 		SheetID:          ptr(sheetID),
@@ -704,7 +725,7 @@ func TestRecordCut_RemnantDimDoesNotFitInSource_IsInvalidInput(t *testing.T) {
 
 func TestReceiveStock_HappyPath(t *testing.T) {
 	st := &mockStore{}
-	svc := NewService(st)
+	svc := NewService(st, nil)
 
 	lot, err := svc.ReceiveStock(context.Background(), ReceiveStockInput{
 		MaterialID:   uuid.New(),
@@ -725,7 +746,7 @@ func TestReceiveStock_HappyPath(t *testing.T) {
 }
 
 func TestReceiveStock_ZeroQuantity_IsInvalidInput(t *testing.T) {
-	svc := NewService(&mockStore{})
+	svc := NewService(&mockStore{}, nil)
 	_, err := svc.ReceiveStock(context.Background(), ReceiveStockInput{
 		MaterialID:   uuid.New(),
 		Dimensions:   dim2000x1000,
@@ -738,7 +759,7 @@ func TestReceiveStock_ZeroQuantity_IsInvalidInput(t *testing.T) {
 }
 
 func TestReceiveStock_NegativeQuantity_IsInvalidInput(t *testing.T) {
-	svc := NewService(&mockStore{})
+	svc := NewService(&mockStore{}, nil)
 	_, err := svc.ReceiveStock(context.Background(), ReceiveStockInput{
 		MaterialID:   uuid.New(),
 		Dimensions:   dim2000x1000,
@@ -751,7 +772,7 @@ func TestReceiveStock_NegativeQuantity_IsInvalidInput(t *testing.T) {
 }
 
 func TestReceiveStock_InvalidDimensions_IsInvalidInput(t *testing.T) {
-	svc := NewService(&mockStore{})
+	svc := NewService(&mockStore{}, nil)
 	_, err := svc.ReceiveStock(context.Background(), ReceiveStockInput{
 		MaterialID:   uuid.New(),
 		Dimensions:   dimZero,
@@ -766,7 +787,7 @@ func TestReceiveStock_InvalidDimensions_IsInvalidInput(t *testing.T) {
 func TestReceiveStock_StoreInsertLotError_Propagates(t *testing.T) {
 	dbErr := errors.New("insert failed")
 	st := &mockStore{insertLotErr: dbErr}
-	svc := NewService(st)
+	svc := NewService(st, nil)
 
 	_, err := svc.ReceiveStock(context.Background(), ReceiveStockInput{
 		MaterialID:   uuid.New(),
@@ -782,7 +803,7 @@ func TestReceiveStock_StoreInsertLotError_Propagates(t *testing.T) {
 func TestReceiveStock_StoreInsertSheetsError_Propagates(t *testing.T) {
 	dbErr := errors.New("batch insert failed")
 	st := &mockStore{insertSheetsErr: dbErr}
-	svc := NewService(st)
+	svc := NewService(st, nil)
 
 	_, err := svc.ReceiveStock(context.Background(), ReceiveStockInput{
 		MaterialID:   uuid.New(),
@@ -803,7 +824,7 @@ func TestAllocateRemnant_HappyPath(t *testing.T) {
 	woID := uuid.New()
 
 	st := &mockStore{selectRemnantByIDResult: availableRemnant(remID, boardID)}
-	svc := NewService(st)
+	svc := NewService(st, nil)
 
 	if err := svc.AllocateRemnant(context.Background(), remID, woID); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -817,7 +838,7 @@ func TestAllocateRemnant_AlreadyAllocated_IsInvalidInput(t *testing.T) {
 	r.Status = domain.RemnantAllocated
 
 	st := &mockStore{selectRemnantByIDResult: r}
-	svc := NewService(st)
+	svc := NewService(st, nil)
 
 	err := svc.AllocateRemnant(context.Background(), remID, uuid.New())
 	if !errors.Is(err, domain.ErrInvalidInput) {
@@ -827,7 +848,7 @@ func TestAllocateRemnant_AlreadyAllocated_IsInvalidInput(t *testing.T) {
 
 func TestAllocateRemnant_NotFound_PropagatesError(t *testing.T) {
 	st := &mockStore{selectRemnantByIDErr: domain.NewBizError(domain.ErrNotFound, "remnant not found")}
-	svc := NewService(st)
+	svc := NewService(st, nil)
 
 	err := svc.AllocateRemnant(context.Background(), uuid.New(), uuid.New())
 	if !errors.Is(err, domain.ErrNotFound) {
@@ -841,7 +862,7 @@ func TestMarkRemnantWaste_FromAvailable_Succeeds(t *testing.T) {
 	boardID := uuid.New()
 	remID := uuid.New()
 	st := &mockStore{selectRemnantByIDResult: availableRemnant(remID, boardID)}
-	svc := NewService(st)
+	svc := NewService(st, nil)
 
 	if err := svc.MarkRemnantWaste(context.Background(), remID); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -855,7 +876,7 @@ func TestMarkRemnantWaste_FromAllocated_Succeeds(t *testing.T) {
 	r.Status = domain.RemnantAllocated
 
 	st := &mockStore{selectRemnantByIDResult: r}
-	svc := NewService(st)
+	svc := NewService(st, nil)
 
 	if err := svc.MarkRemnantWaste(context.Background(), remID); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -869,7 +890,7 @@ func TestMarkRemnantWaste_FromConsumed_IsInvalidInput(t *testing.T) {
 	r.Status = domain.RemnantConsumed
 
 	st := &mockStore{selectRemnantByIDResult: r}
-	svc := NewService(st)
+	svc := NewService(st, nil)
 
 	err := svc.MarkRemnantWaste(context.Background(), remID)
 	if !errors.Is(err, domain.ErrInvalidInput) {
@@ -884,7 +905,7 @@ func TestMarkRemnantWaste_FromWaste_IsInvalidInput(t *testing.T) {
 	r.Status = domain.RemnantWaste
 
 	st := &mockStore{selectRemnantByIDResult: r}
-	svc := NewService(st)
+	svc := NewService(st, nil)
 
 	err := svc.MarkRemnantWaste(context.Background(), remID)
 	if !errors.Is(err, domain.ErrInvalidInput) {
@@ -896,7 +917,7 @@ func TestMarkRemnantWaste_FromWaste_IsInvalidInput(t *testing.T) {
 
 func TestMarkRemnantWaste_NotFound_PropagatesError(t *testing.T) {
 	st := &mockStore{selectRemnantByIDErr: domain.NewBizError(domain.ErrNotFound, "remnant not found")}
-	svc := NewService(st)
+	svc := NewService(st, nil)
 
 	err := svc.MarkRemnantWaste(context.Background(), uuid.New())
 	if !errors.Is(err, domain.ErrNotFound) {
@@ -912,7 +933,7 @@ func TestMarkRemnantWaste_AtomicStoreError_Propagates(t *testing.T) {
 		selectRemnantByIDResult:       availableRemnant(remID, boardID),
 		markRemnantWasteAtomicallyErr: dbErr,
 	}
-	svc := NewService(st)
+	svc := NewService(st, nil)
 
 	err := svc.MarkRemnantWaste(context.Background(), remID)
 	if !errors.Is(err, dbErr) {
@@ -929,7 +950,7 @@ func TestAllocateRemnant_ConsumedRemnant_IsInvalidInput(t *testing.T) {
 	r.Status = domain.RemnantConsumed
 
 	st := &mockStore{selectRemnantByIDResult: r}
-	svc := NewService(st)
+	svc := NewService(st, nil)
 
 	err := svc.AllocateRemnant(context.Background(), remID, uuid.New())
 	if !errors.Is(err, domain.ErrInvalidInput) {
@@ -944,7 +965,7 @@ func TestAllocateRemnant_WastedRemnant_IsInvalidInput(t *testing.T) {
 	r.Status = domain.RemnantWaste
 
 	st := &mockStore{selectRemnantByIDResult: r}
-	svc := NewService(st)
+	svc := NewService(st, nil)
 
 	err := svc.AllocateRemnant(context.Background(), remID, uuid.New())
 	if !errors.Is(err, domain.ErrInvalidInput) {
@@ -960,7 +981,7 @@ func TestAllocateRemnant_AtomicStoreError_Propagates(t *testing.T) {
 		selectRemnantByIDResult:      availableRemnant(remID, boardID),
 		allocateRemnantAtomicallyErr: dbErr,
 	}
-	svc := NewService(st)
+	svc := NewService(st, nil)
 
 	err := svc.AllocateRemnant(context.Background(), remID, uuid.New())
 	if !errors.Is(err, dbErr) {
@@ -974,7 +995,7 @@ func TestRecordCut_RemnantNotFound_PropagatesError(t *testing.T) {
 	st := &mockStore{
 		selectRemnantByIDErr: domain.NewBizError(domain.ErrNotFound, "remnant not found"),
 	}
-	svc := NewService(st)
+	svc := NewService(st, nil)
 
 	_, err := svc.RecordCut(context.Background(), RecordCutInput{
 		RemnantID:     ptr(uuid.New()),
@@ -996,7 +1017,7 @@ func TestListLots_ReturnsPersisted(t *testing.T) {
 		selectLotsPagedResult: []InventoryLot{lot1, lot2},
 		selectLotsPagedTotal:  2,
 	}
-	svc := NewService(st)
+	svc := NewService(st, nil)
 
 	result, err := svc.ListLots(context.Background(), httpkit.PageParams{Page: 1, Limit: 10})
 	if err != nil {
@@ -1012,7 +1033,7 @@ func TestListLots_Empty_ReturnsNil(t *testing.T) {
 		selectLotsPagedResult: nil,
 		selectLotsPagedTotal:  0,
 	}
-	svc := NewService(st)
+	svc := NewService(st, nil)
 
 	result, err := svc.ListLots(context.Background(), httpkit.PageParams{Page: 1, Limit: 10})
 	if err != nil {
@@ -1026,7 +1047,7 @@ func TestListLots_Empty_ReturnsNil(t *testing.T) {
 func TestListLots_StoreError_Propagates(t *testing.T) {
 	dbErr := errors.New("query failed")
 	st := &mockStore{selectLotsPagedErr: dbErr}
-	svc := NewService(st)
+	svc := NewService(st, nil)
 
 	_, err := svc.ListLots(context.Background(), httpkit.PageParams{Page: 1, Limit: 10})
 	if !errors.Is(err, dbErr) {
@@ -1040,7 +1061,7 @@ func TestGetSheet_HappyPath(t *testing.T) {
 	sheetID := uuid.New()
 	want := availableSheet(sheetID)
 	st := &mockStore{selectSheetByIDResult: want}
-	svc := NewService(st)
+	svc := NewService(st, nil)
 
 	got, err := svc.GetSheet(context.Background(), sheetID)
 	if err != nil {
@@ -1056,7 +1077,7 @@ func TestGetSheet_HappyPath(t *testing.T) {
 
 func TestGetSheet_NotFound_PropagatesError(t *testing.T) {
 	st := &mockStore{selectSheetByIDErr: domain.NewBizError(domain.ErrNotFound, "board sheet not found")}
-	svc := NewService(st)
+	svc := NewService(st, nil)
 
 	_, err := svc.GetSheet(context.Background(), uuid.New())
 	if !errors.Is(err, domain.ErrNotFound) {
@@ -1067,7 +1088,7 @@ func TestGetSheet_NotFound_PropagatesError(t *testing.T) {
 func TestGetSheet_StoreError_Propagates(t *testing.T) {
 	dbErr := errors.New("connection reset")
 	st := &mockStore{selectSheetByIDErr: dbErr}
-	svc := NewService(st)
+	svc := NewService(st, nil)
 
 	_, err := svc.GetSheet(context.Background(), uuid.New())
 	if !errors.Is(err, dbErr) {
@@ -1084,7 +1105,7 @@ func TestListAvailableSheets_ReturnsOnlyAvailable(t *testing.T) {
 		selectAvailableSheetsPagedResult: []BoardSheet{sh1, sh2},
 		selectAvailableSheetsPagedTotal:  2,
 	}
-	svc := NewService(st)
+	svc := NewService(st, nil)
 
 	result, err := svc.ListAvailableSheets(context.Background(), httpkit.PageParams{Page: 1, Limit: 10})
 	if err != nil {
@@ -1105,7 +1126,7 @@ func TestListAvailableSheets_Empty_ReturnsNil(t *testing.T) {
 		selectAvailableSheetsPagedResult: nil,
 		selectAvailableSheetsPagedTotal:  0,
 	}
-	svc := NewService(st)
+	svc := NewService(st, nil)
 
 	result, err := svc.ListAvailableSheets(context.Background(), httpkit.PageParams{Page: 1, Limit: 10})
 	if err != nil {
@@ -1119,7 +1140,7 @@ func TestListAvailableSheets_Empty_ReturnsNil(t *testing.T) {
 func TestListAvailableSheets_StoreError_Propagates(t *testing.T) {
 	dbErr := errors.New("timeout")
 	st := &mockStore{selectAvailableSheetsPagedErr: dbErr}
-	svc := NewService(st)
+	svc := NewService(st, nil)
 
 	_, err := svc.ListAvailableSheets(context.Background(), httpkit.PageParams{Page: 1, Limit: 10})
 	if !errors.Is(err, dbErr) {
@@ -1134,7 +1155,7 @@ func TestFindAvailableRemnants_HappyPath(t *testing.T) {
 	r1 := availableRemnant(uuid.New(), boardID)
 	r2 := availableRemnant(uuid.New(), boardID)
 	st := &mockStore{selectAvailableRemnantsResult: []Remnant{r1, r2}}
-	svc := NewService(st)
+	svc := NewService(st, nil)
 
 	remnants, err := svc.FindAvailableRemnants(context.Background(), dim100x100)
 	if err != nil {
@@ -1153,7 +1174,7 @@ func TestFindAvailableRemnants_HappyPath(t *testing.T) {
 func TestFindAvailableRemnants_NoneMatch_ReturnsEmpty(t *testing.T) {
 	// Store returns empty when no remnants meet the min dimension.
 	st := &mockStore{selectAvailableRemnantsResult: nil}
-	svc := NewService(st)
+	svc := NewService(st, nil)
 
 	remnants, err := svc.FindAvailableRemnants(context.Background(), dim2000x1000)
 	if err != nil {
@@ -1167,7 +1188,7 @@ func TestFindAvailableRemnants_NoneMatch_ReturnsEmpty(t *testing.T) {
 func TestFindAvailableRemnants_StoreError_Propagates(t *testing.T) {
 	dbErr := errors.New("index scan failed")
 	st := &mockStore{selectAvailableRemnantsErr: dbErr}
-	svc := NewService(st)
+	svc := NewService(st, nil)
 
 	_, err := svc.FindAvailableRemnants(context.Background(), dim100x100)
 	if !errors.Is(err, dbErr) {
@@ -1190,7 +1211,7 @@ func TestGetRemnantLineage_HappyPath(t *testing.T) {
 		Status:          domain.RemnantAvailable,
 	}
 	st := &mockStore{selectRemnantsByBoardSheetResult: []Remnant{r1, r2}}
-	svc := NewService(st)
+	svc := NewService(st, nil)
 
 	lineage, err := svc.GetRemnantLineage(context.Background(), boardID)
 	if err != nil {
@@ -1214,7 +1235,7 @@ func TestGetRemnantLineage_HappyPath(t *testing.T) {
 
 func TestGetRemnantLineage_NoRemnants_ReturnsEmpty(t *testing.T) {
 	st := &mockStore{selectRemnantsByBoardSheetResult: nil}
-	svc := NewService(st)
+	svc := NewService(st, nil)
 
 	lineage, err := svc.GetRemnantLineage(context.Background(), uuid.New())
 	if err != nil {
@@ -1228,7 +1249,7 @@ func TestGetRemnantLineage_NoRemnants_ReturnsEmpty(t *testing.T) {
 func TestGetRemnantLineage_StoreError_Propagates(t *testing.T) {
 	dbErr := errors.New("query failed")
 	st := &mockStore{selectRemnantsByBoardSheetErr: dbErr}
-	svc := NewService(st)
+	svc := NewService(st, nil)
 
 	_, err := svc.GetRemnantLineage(context.Background(), uuid.New())
 	if !errors.Is(err, dbErr) {
@@ -1245,7 +1266,7 @@ func TestReceiveStock_SheetsAreAvailableAndLinkedToLot(t *testing.T) {
 	capturingSt := &capturingMockStore{
 		onInsertSheets: func(sheets []BoardSheet) { capturedSheets = sheets },
 	}
-	svc := NewService(capturingSt)
+	svc := NewService(capturingSt, nil)
 
 	lot, err := svc.ReceiveStock(context.Background(), ReceiveStockInput{
 		MaterialID:   uuid.New(),
@@ -1297,7 +1318,7 @@ func TestRecordCut_AreaConservation_UsedExceedsByOneMM2(t *testing.T) {
 	// Used is 2_000_001 mm² (exactly 1 mm² over) — must fail.
 	sheetID := uuid.New()
 	st := &mockStore{selectSheetByIDResult: availableSheet(sheetID)}
-	svc := NewService(st)
+	svc := NewService(st, nil)
 
 	// 2001 × 1000 = 2_001_000 mm² > 2_000_000.
 	over := domain.Dimension{LengthMM: 2001, WidthMM: 1000}
@@ -1321,7 +1342,7 @@ func TestRecordCut_AreaConservation_FromRemnant_ExactFit(t *testing.T) {
 	st := &mockStore{
 		selectRemnantByIDResult: availableRemnant(remID, boardID), // 1000×500
 	}
-	svc := NewService(st)
+	svc := NewService(st, nil)
 
 	half := domain.Dimension{LengthMM: 500, WidthMM: 500}
 	_, err := svc.RecordCut(context.Background(), RecordCutInput{
@@ -1344,7 +1365,7 @@ func TestRecordCut_AreaConservation_FromRemnant_Exceeded(t *testing.T) {
 	st := &mockStore{
 		selectRemnantByIDResult: availableRemnant(remID, boardID),
 	}
-	svc := NewService(st)
+	svc := NewService(st, nil)
 
 	big := domain.Dimension{LengthMM: 600, WidthMM: 500}
 	_, err := svc.RecordCut(context.Background(), RecordCutInput{
@@ -1387,7 +1408,7 @@ func TestRemnantStatusLifecycle_AllTransitionsTable(t *testing.T) {
 
 			// ── AllocateRemnant pre-check ──────────────────────────────
 			st := &mockStore{selectRemnantByIDResult: r}
-			svc := NewService(st)
+			svc := NewService(st, nil)
 			allocErr := svc.AllocateRemnant(context.Background(), remID, uuid.New())
 			if tc.allocateOK {
 				if allocErr != nil {
@@ -1401,7 +1422,7 @@ func TestRemnantStatusLifecycle_AllTransitionsTable(t *testing.T) {
 
 			// ── MarkRemnantWaste pre-check ─────────────────────────────
 			st2 := &mockStore{selectRemnantByIDResult: r}
-			svc2 := NewService(st2)
+			svc2 := NewService(st2, nil)
 			wasteErr := svc2.MarkRemnantWaste(context.Background(), remID)
 			if tc.markWasteOK {
 				if wasteErr != nil {
@@ -1427,7 +1448,7 @@ func TestListLots_ReturnsPagedResult(t *testing.T) {
 		selectLotsPagedResult: lots,
 		selectLotsPagedTotal:  2,
 	}
-	svc := NewService(st)
+	svc := NewService(st, nil)
 
 	p := httpkit.PageParams{Page: 1, Limit: 10}
 	result, err := svc.ListLots(context.Background(), p)
@@ -1453,7 +1474,7 @@ func TestListLots_SearchNoResults_ReturnsEmptyItems(t *testing.T) {
 		selectLotsPagedResult: nil,
 		selectLotsPagedTotal:  0,
 	}
-	svc := NewService(st)
+	svc := NewService(st, nil)
 
 	p := httpkit.PageParams{Page: 1, Limit: 10, Search: "SUP-DOES-NOT-EXIST"}
 	result, err := svc.ListLots(context.Background(), p)
@@ -1481,7 +1502,7 @@ func TestListLots_LastPage_CorrectMetadata(t *testing.T) {
 		selectLotsPagedResult: lastPageLots,
 		selectLotsPagedTotal:  12,
 	}
-	svc := NewService(st)
+	svc := NewService(st, nil)
 
 	p := httpkit.PageParams{Page: 3, Limit: 5}
 	result, err := svc.ListLots(context.Background(), p)
@@ -1505,7 +1526,7 @@ func TestListLots_LastPage_CorrectMetadata(t *testing.T) {
 func TestListLots_StoreError_Propagated(t *testing.T) {
 	storeErr := errors.New("db down")
 	st := &mockStore{selectLotsPagedErr: storeErr}
-	svc := NewService(st)
+	svc := NewService(st, nil)
 
 	_, err := svc.ListLots(context.Background(), httpkit.PageParams{Page: 1, Limit: 10})
 	if err == nil {
@@ -1528,7 +1549,7 @@ func TestListAvailableSheets_ReturnsPagedResult(t *testing.T) {
 		selectAvailableSheetsPagedResult: sheets,
 		selectAvailableSheetsPagedTotal:  3,
 	}
-	svc := NewService(st)
+	svc := NewService(st, nil)
 
 	p := httpkit.PageParams{Page: 1, Limit: 10}
 	result, err := svc.ListAvailableSheets(context.Background(), p)
@@ -1551,7 +1572,7 @@ func TestListAvailableSheets_Empty_ReturnsEmptyItems(t *testing.T) {
 		selectAvailableSheetsPagedResult: nil,
 		selectAvailableSheetsPagedTotal:  0,
 	}
-	svc := NewService(st)
+	svc := NewService(st, nil)
 
 	p := httpkit.PageParams{Page: 1, Limit: 10}
 	result, err := svc.ListAvailableSheets(context.Background(), p)
@@ -1576,7 +1597,7 @@ func TestListAvailableSheets_LastPage_CorrectMetadata(t *testing.T) {
 		selectAvailableSheetsPagedResult: lastPage,
 		selectAvailableSheetsPagedTotal:  21,
 	}
-	svc := NewService(st)
+	svc := NewService(st, nil)
 
 	p := httpkit.PageParams{Page: 3, Limit: 10}
 	result, err := svc.ListAvailableSheets(context.Background(), p)
@@ -1600,7 +1621,7 @@ func TestListAvailableSheets_LastPage_CorrectMetadata(t *testing.T) {
 func TestListAvailableSheets_StoreError_Propagated(t *testing.T) {
 	storeErr := errors.New("timeout")
 	st := &mockStore{selectAvailableSheetsPagedErr: storeErr}
-	svc := NewService(st)
+	svc := NewService(st, nil)
 
 	_, err := svc.ListAvailableSheets(context.Background(), httpkit.PageParams{Page: 1, Limit: 10})
 	if err == nil {
@@ -1619,7 +1640,7 @@ func TestRecordCut_FromSheet_NewRemnant_InheritsSheetAttributes(t *testing.T) {
 	remnantDim := dim800x400
 
 	st := &mockStore{selectSheetByIDResult: sheet}
-	svc := NewService(st)
+	svc := NewService(st, nil)
 
 	_, err := svc.RecordCut(context.Background(), RecordCutInput{
 		SheetID:          ptr(sheetID),
@@ -1647,7 +1668,7 @@ func TestRecordCut_FromRemnant_NewRemnant_InheritsParentRemnantAttributes(t *tes
 	nestedDim := dim100x100
 
 	st := &mockStore{selectRemnantByIDResult: parentRemnant}
-	svc := NewService(st)
+	svc := NewService(st, nil)
 
 	_, err := svc.RecordCut(context.Background(), RecordCutInput{
 		RemnantID:        ptr(parentRemID),
@@ -1673,7 +1694,7 @@ func TestRecordCut_NoNewRemnant_NoInheritanceAttempted(t *testing.T) {
 	sheet := availableSheetWithAttrs(sheetID)
 
 	st := &mockStore{selectSheetByIDResult: sheet}
-	svc := NewService(st)
+	svc := NewService(st, nil)
 
 	result, err := svc.RecordCut(context.Background(), RecordCutInput{
 		SheetID:       ptr(sheetID),
@@ -1700,7 +1721,7 @@ func TestRecordCut_SourceWithNilAttributes_NewRemnantHasNilAttributes(t *testing
 	remnantDim := dim800x400
 
 	st := &mockStore{selectSheetByIDResult: sheet}
-	svc := NewService(st)
+	svc := NewService(st, nil)
 
 	_, err := svc.RecordCut(context.Background(), RecordCutInput{
 		SheetID:          ptr(sheetID),
@@ -1728,7 +1749,7 @@ func TestRecordCut_SourceWithNilAttributes_NewRemnantHasNilAttributes(t *testing
 func TestRemnant_BoundingBoxExceedsActual_ReturnsErrInvalidInput(t *testing.T) {
 	sheetID := uuid.New()
 	st := &mockStore{selectSheetByIDResult: availableSheet(sheetID)}
-	svc := NewService(st)
+	svc := NewService(st, nil)
 
 	remnantDim := dim800x400 // actual: 800×400
 	bbLen := 801             // exceeds actual length by 1 mm
@@ -1758,7 +1779,7 @@ func TestRemnant_BoundingBoxExceedsActual_ReturnsErrInvalidInput(t *testing.T) {
 func TestRemnant_NoBoundingBoxProvided_DefaultsToActualDimension(t *testing.T) {
 	sheetID := uuid.New()
 	st := &mockStore{selectSheetByIDResult: availableSheet(sheetID)}
-	svc := NewService(st)
+	svc := NewService(st, nil)
 
 	remnantDim := dim800x400 // actual: 800×400; no bounding_box provided
 
@@ -1811,7 +1832,7 @@ func TestFindAvailableRemnants_UsesBoundingBoxForSearch(t *testing.T) {
 	rem.BoundingBoxWidthMM = &bbWid
 
 	st := &mockStore{selectAvailableRemnantsResult: []Remnant{rem}}
-	svc := NewService(st)
+	svc := NewService(st, nil)
 
 	// Request a piece that fits the bounding_box (700×350 >= 600×300).
 	minDim := domain.Dimension{LengthMM: 600, WidthMM: 300}
@@ -1834,7 +1855,7 @@ func TestFindAvailableRemnants_UsesBoundingBoxForSearch(t *testing.T) {
 func TestFindAvailableRemnants_BoundingBoxSmallerThanRequired_NotReturned(t *testing.T) {
 	// bounding_box is 400×200 — store would filter this out for minDim 600×300.
 	st := &mockStore{selectAvailableRemnantsResult: []Remnant{}} // store returns empty
-	svc := NewService(st)
+	svc := NewService(st, nil)
 
 	minDim := domain.Dimension{LengthMM: 600, WidthMM: 300}
 	results, err := svc.FindAvailableRemnants(context.Background(), minDim)
@@ -1867,7 +1888,7 @@ func TestNestedRemnantCutting_ThreeLevels(t *testing.T) {
 	// Source: board sheet (2000×1000). Used 900×400, remnant 1000×500.
 	sheetID := uuid.New()
 	stL1 := &mockStore{selectSheetByIDResult: availableSheet(sheetID)}
-	svc := NewService(stL1)
+	svc := NewService(stL1, nil)
 
 	dimL1 := domain.Dimension{LengthMM: 1000, WidthMM: 500}
 
@@ -1909,7 +1930,7 @@ func TestNestedRemnantCutting_ThreeLevels(t *testing.T) {
 	}
 	dimL2 := domain.Dimension{LengthMM: 500, WidthMM: 250}
 	stL2 := &mockStore{selectRemnantByIDResult: remL1InStore}
-	svc = NewService(stL2)
+	svc = NewService(stL2, nil)
 
 	resL2, err := svc.RecordCut(context.Background(), RecordCutInput{
 		RemnantID:        remnantL1ID,
@@ -1951,7 +1972,7 @@ func TestNestedRemnantCutting_ThreeLevels(t *testing.T) {
 	}
 	dimL3 := domain.Dimension{LengthMM: 200, WidthMM: 200}
 	stL3 := &mockStore{selectRemnantByIDResult: remL2InStore}
-	svc = NewService(stL3)
+	svc = NewService(stL3, nil)
 
 	resL3, err := svc.RecordCut(context.Background(), RecordCutInput{
 		RemnantID:        remnantL2ID,
@@ -1997,7 +2018,7 @@ func TestNestedCut_AreaConservation_L2ExceedsL1_Rejected(t *testing.T) {
 		CreatedAt:     time.Now().UTC(),
 	}
 	st := &mockStore{selectRemnantByIDResult: remL1}
-	svc := NewService(st)
+	svc := NewService(st, nil)
 
 	// used 800×400 = 320_000, remnant 600×400 = 240_000.
 	// Total 560_000 > 500_000 (L1 area) — must be rejected.
@@ -2058,7 +2079,7 @@ func TestNestedCut_GetRemnantLineage_ReturnsAllLevels(t *testing.T) {
 	st := &mockStore{
 		selectRemnantsByBoardSheetResult: []Remnant{remL1, remL2, remL3},
 	}
-	svc := NewService(st)
+	svc := NewService(st, nil)
 
 	lineage, err := svc.GetRemnantLineage(context.Background(), boardID)
 	if err != nil {
@@ -2166,7 +2187,7 @@ func TestNestedCut_ParentBoardID_ConsistentAcrossAllLevels(t *testing.T) {
 				CreatedAt:       time.Now().UTC(),
 			}
 			st := &mockStore{selectRemnantByIDResult: source}
-			svc := NewService(st)
+			svc := NewService(st, nil)
 
 			_, err := svc.RecordCut(context.Background(), RecordCutInput{
 				RemnantID:        ptr(sourceID),
@@ -2204,7 +2225,7 @@ func TestListRemnants_DefaultsToAvailableStatus(t *testing.T) {
 		selectRemnantsByFilterResult: []Remnant{rem},
 		selectRemnantsByFilterTotal:  1,
 	}
-	svc := NewService(st)
+	svc := NewService(st, nil)
 
 	result, err := svc.ListRemnants(context.Background(), RemnantFilter{}, httpkit.PageParams{
 		Page: 1, Limit: 10,
@@ -2230,7 +2251,7 @@ func TestListRemnants_ExplicitStatusForwarded(t *testing.T) {
 		selectRemnantsByFilterResult: []Remnant{},
 		selectRemnantsByFilterTotal:  0,
 	}
-	svc := NewService(st)
+	svc := NewService(st, nil)
 
 	_, err := svc.ListRemnants(context.Background(), RemnantFilter{
 		Status: domain.RemnantWaste,
@@ -2252,7 +2273,7 @@ func TestListRemnants_Pagination(t *testing.T) {
 		selectRemnantsByFilterResult: items,
 		selectRemnantsByFilterTotal:  25,
 	}
-	svc := NewService(st)
+	svc := NewService(st, nil)
 
 	result, err := svc.ListRemnants(context.Background(), RemnantFilter{}, httpkit.PageParams{
 		Page: 2, Limit: 10,
@@ -2281,7 +2302,7 @@ func TestListRemnants_Pagination(t *testing.T) {
 // returned unwrapped so the handler can map it correctly.
 func TestListRemnants_StoreError_Propagates(t *testing.T) {
 	st := &mockStore{selectRemnantsByFilterErr: domain.NewBizError(domain.ErrNotFound, "db error")}
-	svc := NewService(st)
+	svc := NewService(st, nil)
 
 	_, err := svc.ListRemnants(context.Background(), RemnantFilter{}, httpkit.PageParams{Page: 1, Limit: 10})
 	if err == nil {
@@ -2301,7 +2322,7 @@ func TestGetRemnantLineageByRemnant_HappyPath(t *testing.T) {
 		selectRemnantByIDResult:          Remnant{ID: remID, ParentBoardID: boardID, Status: domain.RemnantAvailable},
 		selectRemnantsByBoardSheetResult: []Remnant{child1, child2},
 	}
-	svc := NewService(st)
+	svc := NewService(st, nil)
 
 	lineage, err := svc.GetRemnantLineageByRemnant(context.Background(), remID)
 	if err != nil {
@@ -2318,7 +2339,7 @@ func TestGetRemnantLineageByRemnant_NotFound(t *testing.T) {
 	st := &mockStore{
 		selectRemnantByIDErr: domain.NewBizError(domain.ErrNotFound, "remnant not found"),
 	}
-	svc := NewService(st)
+	svc := NewService(st, nil)
 
 	_, err := svc.GetRemnantLineageByRemnant(context.Background(), uuid.New())
 	if !errors.Is(err, domain.ErrNotFound) {
@@ -2333,7 +2354,7 @@ func TestListStorageLocations_HappyPath(t *testing.T) {
 	loc2 := StorageLocation{ID: uuid.New(), Zone: "A", Rack: "01", Shelf: "02", Label: "A-01-02", Barcode: "BC002", IsActive: true}
 
 	st := &mockStore{selectActiveStorageLocationsResult: []StorageLocation{loc1, loc2}}
-	svc := NewService(st)
+	svc := NewService(st, nil)
 
 	locs, err := svc.ListStorageLocations(context.Background())
 	if err != nil {
@@ -2351,7 +2372,7 @@ func TestListStorageLocations_HappyPath(t *testing.T) {
 // returned when there are no active locations.
 func TestListStorageLocations_Empty_ReturnsEmptySlice(t *testing.T) {
 	st := &mockStore{selectActiveStorageLocationsResult: []StorageLocation{}}
-	svc := NewService(st)
+	svc := NewService(st, nil)
 
 	locs, err := svc.ListStorageLocations(context.Background())
 	if err != nil {
@@ -2368,7 +2389,7 @@ func TestListStorageLocations_Empty_ReturnsEmptySlice(t *testing.T) {
 // TestListStorageLocations_StoreError_Propagates verifies error propagation.
 func TestListStorageLocations_StoreError_Propagates(t *testing.T) {
 	st := &mockStore{selectActiveStorageLocationsErr: domain.NewBizError(domain.ErrNotFound, "db error")}
-	svc := NewService(st)
+	svc := NewService(st, nil)
 
 	_, err := svc.ListStorageLocations(context.Background())
 	if err == nil {
@@ -2404,7 +2425,7 @@ func TestListRemnants_FilterByMinDimension(t *testing.T) {
 			selectRemnantsByFilterTotal:  1,
 		},
 	}
-	svc := NewService(st)
+	svc := NewService(st, nil)
 
 	f := RemnantFilter{
 		MinLengthMM: 800,
@@ -2435,7 +2456,7 @@ func TestListRemnants_FilterByStatus(t *testing.T) {
 			selectRemnantsByFilterTotal:  0,
 		},
 	}
-	svc := NewService(st)
+	svc := NewService(st, nil)
 
 	f := RemnantFilter{Status: domain.RemnantWaste}
 	_, err := svc.ListRemnants(context.Background(), f, httpkit.PageParams{Page: 1, Limit: 10})
@@ -2464,7 +2485,7 @@ func TestListRemnants_NoFilter_ReturnsAll(t *testing.T) {
 			selectRemnantsByFilterTotal:  3,
 		},
 	}
-	svc := NewService(st)
+	svc := NewService(st, nil)
 
 	result, err := svc.ListRemnants(context.Background(), RemnantFilter{}, httpkit.PageParams{Page: 1, Limit: 10})
 	if err != nil {
@@ -2483,5 +2504,115 @@ func TestListRemnants_NoFilter_ReturnsAll(t *testing.T) {
 	}
 	if st.capturedFilter.MinWidthMM != 0 {
 		t.Errorf("capturedFilter.MinWidthMM = %d, want 0 (no filter)", st.capturedFilter.MinWidthMM)
+	}
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// RecordCut — auto-advance work order (Issue 3)
+// ═════════════════════════════════════════════════════════════════════════════
+
+func baseSheetForAutoAdvance() BoardSheet {
+	return BoardSheet{
+		ID:     uuid.New(),
+		Status: "AVAILABLE",
+		Dimensions: domain.Dimension{
+			LengthMM: 1000,
+			WidthMM:  800,
+		},
+		CostPerSheet: domain.Money{Amount: 10000, Currency: "VND"},
+	}
+}
+
+func TestRecordCut_AutoAdvances_WorkOrderToInProcessing(t *testing.T) {
+	woID := uuid.New()
+	skuID := uuid.New()
+	sheet := baseSheetForAutoAdvance()
+	sheetID := sheet.ID
+
+	st := &mockStore{selectSheetByIDResult: sheet}
+	advancer := &mockWorkOrderAdvancer{}
+	svc := NewService(st, advancer)
+
+	_, err := svc.RecordCut(context.Background(), RecordCutInput{
+		SheetID:       &sheetID,
+		WorkOrderID:   woID,
+		SKUID:         skuID,
+		UsedDimension: domain.Dimension{LengthMM: 500, WidthMM: 400},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !advancer.called {
+		t.Error("WorkOrderAdvancer must be called after a successful cut")
+	}
+	if advancer.calledWO != woID {
+		t.Errorf("advance called with WO %v, want %v", advancer.calledWO, woID)
+	}
+	if advancer.calledTo != domain.WOInProcessing {
+		t.Errorf("advance target = %v, want IN_PROCESSING", advancer.calledTo)
+	}
+}
+
+func TestRecordCut_AutoAdvance_InvalidTransition_IsSilentlyIgnored(t *testing.T) {
+	woID := uuid.New()
+	skuID := uuid.New()
+	sheet := baseSheetForAutoAdvance()
+	sheetID := sheet.ID
+
+	st := &mockStore{selectSheetByIDResult: sheet}
+	advancer := &mockWorkOrderAdvancer{
+		err: domain.NewBizError(domain.ErrInvalidTransition, "already past IN_CUTTING"),
+	}
+	svc := NewService(st, advancer)
+
+	_, err := svc.RecordCut(context.Background(), RecordCutInput{
+		SheetID:       &sheetID,
+		WorkOrderID:   woID,
+		SKUID:         skuID,
+		UsedDimension: domain.Dimension{LengthMM: 500, WidthMM: 400},
+	})
+	if err != nil {
+		t.Errorf("ErrInvalidTransition from auto-advance must be ignored, got: %v", err)
+	}
+}
+
+func TestRecordCut_AutoAdvance_OtherError_IsSilentlyLogged(t *testing.T) {
+	woID := uuid.New()
+	skuID := uuid.New()
+	sheet := baseSheetForAutoAdvance()
+	sheetID := sheet.ID
+
+	st := &mockStore{selectSheetByIDResult: sheet}
+	advancer := &mockWorkOrderAdvancer{err: errors.New("production db down")}
+	svc := NewService(st, advancer)
+
+	_, err := svc.RecordCut(context.Background(), RecordCutInput{
+		SheetID:       &sheetID,
+		WorkOrderID:   woID,
+		SKUID:         skuID,
+		UsedDimension: domain.Dimension{LengthMM: 500, WidthMM: 400},
+	})
+	if err != nil {
+		t.Errorf("advancer errors must not fail RecordCut, got: %v", err)
+	}
+}
+
+func TestRecordCut_NoAdvancer_DoesNotPanic(t *testing.T) {
+	woID := uuid.New()
+	skuID := uuid.New()
+	sheet := baseSheetForAutoAdvance()
+	sheetID := sheet.ID
+
+	st := &mockStore{selectSheetByIDResult: sheet}
+	svc := NewService(st, nil)
+
+	_, err := svc.RecordCut(context.Background(), RecordCutInput{
+		SheetID:       &sheetID,
+		WorkOrderID:   woID,
+		SKUID:         skuID,
+		UsedDimension: domain.Dimension{LengthMM: 500, WidthMM: 400},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }

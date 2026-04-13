@@ -41,3 +41,11 @@ type UserInfo struct {
 type WorkOrderNotifier interface {
 	NotifyAssignment(ctx context.Context, userID, woID, sku string) error
 }
+
+// SheetAssigner pre-assigns a board sheet to a work order when the work order
+// transitions to IN_CUTTING. The sheet must be AVAILABLE; if it is not,
+// ErrPreconditionFailed is returned and the advance is aborted.
+// Implementation lives in the inventory module; wired in main.go.
+type SheetAssigner interface {
+	PreAssignSheet(ctx context.Context, sheetID uuid.UUID, workOrderID uuid.UUID) error
+}

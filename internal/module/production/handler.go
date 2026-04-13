@@ -5,7 +5,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"github.com/vmarble/warehouse-management-service/internal/domain"
 	"github.com/vmarble/warehouse-management-service/internal/platform/auth"
 	"github.com/vmarble/warehouse-management-service/internal/platform/httpkit"
 )
@@ -132,8 +131,8 @@ func (h *Handler) get(c *gin.Context) {
 // @Tags         production
 // @Accept       json
 // @Produce      json
-// @Param        id    path      string  true  "work order id (uuid)"
-// @Param        body  body      object  true  "payload"  SchemaExample({"status":"IN_CUTTING"})
+// @Param        id    path      string             true  "work order id (uuid)"
+// @Param        body  body      AdvanceStatusInput true  "payload"
 // @Success      200   {object}  map[string]string
 // @Failure      400   {object}  map[string]string
 // @Failure      409   {object}  map[string]string
@@ -146,17 +145,15 @@ func (h *Handler) advance(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
 		return
 	}
-	var body struct {
-		Status domain.WorkOrderStatus `json:"status"`
-	}
-	if !httpkit.Bind(c, &body) {
+	var in AdvanceStatusInput
+	if !httpkit.Bind(c, &in) {
 		return
 	}
-	if err := h.svc.AdvanceStatus(c.Request.Context(), id, body.Status); err != nil {
+	if err := h.svc.AdvanceStatus(c.Request.Context(), id, in); err != nil {
 		httpkit.Error(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"status": string(body.Status)})
+	c.JSON(http.StatusOK, gin.H{"status": string(in.To)})
 }
 
 // recordConsumption godoc

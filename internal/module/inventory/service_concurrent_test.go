@@ -74,6 +74,10 @@ func (s *concurrentMockStore) selectLotsPaged(_ context.Context, _ httpkit.PageP
 func (s *concurrentMockStore) deactivateLot(_ context.Context, _ uuid.UUID) error { return nil }
 func (s *concurrentMockStore) insertSheets(_ context.Context, _ []BoardSheet) error { return nil }
 
+func (s *concurrentMockStore) preAssignSheet(_ context.Context, _ uuid.UUID, _ uuid.UUID) error {
+	return nil
+}
+
 func (s *concurrentMockStore) selectSheetByID(_ context.Context, id uuid.UUID) (BoardSheet, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -219,7 +223,7 @@ func TestConcurrentRecordCut_SameSheet(t *testing.T) {
 		Status:       "AVAILABLE",
 	})
 
-	svc := NewService(st)
+	svc := NewService(st, nil)
 
 	var (
 		wg      sync.WaitGroup
@@ -273,7 +277,7 @@ func TestConcurrentRecordCut_SameRemnant(t *testing.T) {
 		Status:        domain.RemnantAvailable,
 	})
 
-	svc := NewService(st)
+	svc := NewService(st, nil)
 
 	var (
 		wg        sync.WaitGroup
@@ -324,7 +328,7 @@ func TestConcurrentAllocateRemnant_SameRemnant(t *testing.T) {
 		Status:        domain.RemnantAvailable,
 	})
 
-	svc := NewService(st)
+	svc := NewService(st, nil)
 
 	var (
 		wg        sync.WaitGroup
@@ -370,7 +374,7 @@ func TestConcurrentMarkRemnantWaste_SameRemnant(t *testing.T) {
 		Status:        domain.RemnantAvailable,
 	})
 
-	svc := NewService(st)
+	svc := NewService(st, nil)
 
 	var (
 		wg        sync.WaitGroup
@@ -433,7 +437,7 @@ func TestConcurrentAllocateAndWaste_SameRemnant(t *testing.T) {
 			Status:        domain.RemnantAvailable,
 		})
 
-		svc := NewService(st)
+		svc := NewService(st, nil)
 
 		var wg sync.WaitGroup
 		wg.Add(2)

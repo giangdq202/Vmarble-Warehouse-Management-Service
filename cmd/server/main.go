@@ -84,15 +84,21 @@ func main() {
 	catalogSvc := catalog.NewService(catalogStore)
 	orderSvc := order.NewService(orderStore)
 	planningSvc := planning.NewService(planningStore)
-	inventorySvc := inventory.NewService(inventoryStore)
+	// woAdvanceAdapter is wired after productionSvc is constructed to avoid a
+	// construction-time cycle (inventory → production → inventory).
+	woAdvance := &woAdvanceAdapter{}
+	inventorySvc := inventory.NewService(inventoryStore, woAdvance)
 
 	productionSvc := production.NewService(
 		productionStore,
 		&planAdapter{svc: planningSvc},
 		&skuAdapter{svc: catalogSvc},
 		&userAdapter{svc: authnSvc},
+		&sheetAssignAdapter{svc: inventorySvc},
 		eventPublisher,
 	)
+	// Wire production into the advance adapter now that it exists.
+	woAdvance.svc = productionSvc
 
 	costingSvc := costing.NewService(
 		costingStore,
@@ -199,6 +205,25 @@ func (a *woAdapter) GetWorkOrder(ctx context.Context, woID uuid.UUID) (costing.W
 		return costing.WOInfo{}, err
 	}
 	return costing.WOInfo{ID: wo.ID, SKUID: wo.SKUID, Status: wo.Status}, nil
+}
+
+type sheetAssignAdapter struct {
+	svc inventory.Service
+}
+
+func (a *sheetAssignAdapter) PreAssignSheet(ctx context.Context, sheetID uuid.UUID, workOrderID uuid.UUID) error {
+	return a.svc.PreAssignSheet(ctx, sheetID, workOrderID)
+}
+
+// woAdvanceAdapter implements inventory.WorkOrderAdvancer.
+// The svc field is set after productionSvc is constructed to break the
+// inventory → production → inventory construction cycle.
+type woAdvanceAdapter struct {
+	svc production.Service
+}
+
+func (a *woAdvanceAdapter) AdvanceStatus(ctx context.Context, woID uuid.UUID, in inventory.AdvanceWOInput) error {
+	return a.svc.AdvanceStatus(ctx, woID, production.AdvanceStatusInput{To: in.To})
 }
 
 type cuttingAdapter struct {

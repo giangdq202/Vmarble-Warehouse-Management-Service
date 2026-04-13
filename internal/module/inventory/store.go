@@ -20,6 +20,10 @@ type store interface {
 	selectAvailableSheets(ctx context.Context) ([]BoardSheet, error)
 	selectAvailableSheetsPaged(ctx context.Context, p httpkit.PageParams) ([]BoardSheet, int, error)
 	updateSheetStatus(ctx context.Context, id uuid.UUID, status string, issuedToWO *uuid.UUID) error
+	// preAssignSheet sets issued_to_work_order_id on an AVAILABLE sheet inside a
+	// transaction with FOR UPDATE. Returns ErrPreconditionFailed if the sheet
+	// is no longer AVAILABLE when the lock is acquired.
+	preAssignSheet(ctx context.Context, sheetID uuid.UUID, workOrderID uuid.UUID) error
 
 	insertCuttingRecord(ctx context.Context, cr CuttingRecord) error
 
