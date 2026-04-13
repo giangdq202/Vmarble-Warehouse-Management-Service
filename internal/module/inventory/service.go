@@ -2,6 +2,8 @@ package inventory
 
 import (
 	"context"
+	"errors"
+	"log/slog"
 	"time"
 
 	"github.com/google/uuid"
@@ -10,11 +12,12 @@ import (
 )
 
 type service struct {
-	st store
+	st  store
+	woa WorkOrderAdvancer
 }
 
-func NewService(st store) Service {
-	return &service{st: st}
+func NewService(st store, woa WorkOrderAdvancer) Service {
+	return &service{st: st, woa: woa}
 }
 
 func (s *service) ReceiveStock(ctx context.Context, in ReceiveStockInput) (InventoryLot, error) {
@@ -69,6 +72,10 @@ func (s *service) DeactivateLot(ctx context.Context, lotID uuid.UUID) error {
 
 func (s *service) GetSheet(ctx context.Context, sheetID uuid.UUID) (BoardSheet, error) {
 	return s.st.selectSheetByID(ctx, sheetID)
+}
+
+func (s *service) PreAssignSheet(ctx context.Context, sheetID uuid.UUID, workOrderID uuid.UUID) error {
+	return s.st.preAssignSheet(ctx, sheetID, workOrderID)
 }
 
 func (s *service) ListAvailableSheets(ctx context.Context, p httpkit.PageParams) (httpkit.PagedResult[BoardSheet], error) {
@@ -221,6 +228,18 @@ func (s *service) RecordCut(ctx context.Context, in RecordCutInput) (CutResult, 
 
 	if err := s.st.recordCutAtomically(ctx, op); err != nil {
 		return CutResult{}, err
+	}
+
+	// After a successful cut, auto-advance the work order from IN_CUTTING to
+	// IN_PROCESSING. If the transition is not valid (e.g. the work order has
+	// already been advanced by another path), silently log and continue.
+	if s.woa != nil {
+		if err := s.woa.AdvanceStatus(ctx, in.WorkOrderID, AdvanceWOInput{To: domain.WOInProcessing}); err != nil {
+			if !errors.Is(err, domain.ErrInvalidTransition) {
+				slog.Warn("inventory: RecordCut auto-advance failed",
+					"work_order_id", in.WorkOrderID, "err", err)
+			}
+		}
 	}
 
 	result := CutResult{CuttingRecordID: cr.ID}

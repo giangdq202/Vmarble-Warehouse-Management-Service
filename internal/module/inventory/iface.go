@@ -111,6 +111,10 @@ type Service interface {
 
 	GetSheet(ctx context.Context, sheetID uuid.UUID) (BoardSheet, error)
 	ListAvailableSheets(ctx context.Context, p httpkit.PageParams) (httpkit.PagedResult[BoardSheet], error)
+	// PreAssignSheet stamps issued_to_work_order_id on a board sheet that is still
+	// AVAILABLE, reserving it for a work order before cutting begins.
+	// Returns ErrPreconditionFailed if the sheet is not AVAILABLE.
+	PreAssignSheet(ctx context.Context, sheetID uuid.UUID, workOrderID uuid.UUID) error
 
 	RecordCut(ctx context.Context, in RecordCutInput) (CutResult, error)
 

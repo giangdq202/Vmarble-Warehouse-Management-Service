@@ -144,14 +144,29 @@ func (m *mockWorkOrderNotifier) NotifyAssignment(_ context.Context, _, _, _ stri
 	return m.err
 }
 
+// mockSheetAssigner satisfies SheetAssigner.
+type mockSheetAssigner struct {
+	called      bool
+	calledSheet uuid.UUID
+	calledWO    uuid.UUID
+	err         error
+}
+
+func (m *mockSheetAssigner) PreAssignSheet(_ context.Context, sheetID uuid.UUID, woID uuid.UUID) error {
+	m.called = true
+	m.calledSheet = sheetID
+	m.calledWO = woID
+	return m.err
+}
+
 // ── helpers ───────────────────────────────────────────────────────────────────
 
 func newSvc(st *mockStore, pc *mockPlanChecker, sc *mockSKUChecker) Service {
-	return NewService(st, pc, sc, &mockUserChecker{}, nil)
+	return NewService(st, pc, sc, &mockUserChecker{}, nil, nil)
 }
 
 func newSvcWithUser(st *mockStore, pc *mockPlanChecker, sc *mockSKUChecker, uc *mockUserChecker) Service {
-	return NewService(st, pc, sc, uc, nil)
+	return NewService(st, pc, sc, uc, nil, nil)
 }
 
 // approvedPlan returns a PlanChecker that returns an APPROVED plan.
@@ -449,7 +464,7 @@ func TestAdvanceStatus_ValidTransitions(t *testing.T) {
 			// is bypassed (SKU doesn't require it).
 			svc := newSvc(st, approvedPlan(uuid.New()), skuNoMetal(skuID))
 
-			err := svc.AdvanceStatus(context.Background(), woID, tc.to)
+			err := svc.AdvanceStatus(context.Background(), woID, AdvanceStatusInput{To: tc.to})
 			if err != nil {
 				t.Errorf("unexpected error for %s -> %s: %v", tc.from, tc.to, err)
 			}
@@ -494,7 +509,7 @@ func TestAdvanceStatus_InvalidTransitions(t *testing.T) {
 			st := &mockStore{selectWorkOrderByIDResult: woWithStatus(woID, tc.from)}
 			svc := newSvc(st, approvedPlan(uuid.New()), skuNoMetal(uuid.New()))
 
-			err := svc.AdvanceStatus(context.Background(), woID, tc.to)
+			err := svc.AdvanceStatus(context.Background(), woID, AdvanceStatusInput{To: tc.to})
 			if !errors.Is(err, domain.ErrInvalidTransition) {
 				t.Errorf("expected ErrInvalidTransition for %s -> %s, got %v",
 					tc.from, tc.to, err)
@@ -510,7 +525,7 @@ func TestAdvanceStatus_WorkOrderNotFound_PropagatesError(t *testing.T) {
 	st := &mockStore{selectWorkOrderByIDErr: domain.NewBizError(domain.ErrNotFound, "not found")}
 	svc := newSvc(st, approvedPlan(uuid.New()), skuNoMetal(uuid.New()))
 
-	err := svc.AdvanceStatus(context.Background(), uuid.New(), domain.WOInCutting)
+	err := svc.AdvanceStatus(context.Background(), uuid.New(), AdvanceStatusInput{To: domain.WOInCutting})
 	if !errors.Is(err, domain.ErrNotFound) {
 		t.Errorf("expected ErrNotFound, got %v", err)
 	}
@@ -525,7 +540,7 @@ func TestAdvanceStatus_StoreUpdateError_Propagates(t *testing.T) {
 	}
 	svc := newSvc(st, approvedPlan(uuid.New()), skuNoMetal(uuid.New()))
 
-	err := svc.AdvanceStatus(context.Background(), woID, domain.WOInCutting)
+	err := svc.AdvanceStatus(context.Background(), woID, AdvanceStatusInput{To: domain.WOInCutting})
 	if !errors.Is(err, dbErr) {
 		t.Errorf("expected store update error to propagate, got %v", err)
 	}
@@ -549,7 +564,7 @@ func TestAdvanceStatus_ToCompleted_SKURequiresMetal_HasMetal_Succeeds(t *testing
 	}
 	svc := newSvc(st, approvedPlan(uuid.New()), skuRequiresMetal(skuID))
 
-	err := svc.AdvanceStatus(context.Background(), woID, domain.WOCompleted)
+	err := svc.AdvanceStatus(context.Background(), woID, AdvanceStatusInput{To: domain.WOCompleted})
 	if err != nil {
 		t.Fatalf("expected success, got: %v", err)
 	}
@@ -572,7 +587,7 @@ func TestAdvanceStatus_ToCompleted_SKURequiresMetal_NoMetal_IsPreconditionFailed
 	}
 	svc := newSvc(st, approvedPlan(uuid.New()), skuRequiresMetal(skuID))
 
-	err := svc.AdvanceStatus(context.Background(), woID, domain.WOCompleted)
+	err := svc.AdvanceStatus(context.Background(), woID, AdvanceStatusInput{To: domain.WOCompleted})
 	if !errors.Is(err, domain.ErrPreconditionFailed) {
 		t.Errorf("expected ErrPreconditionFailed, got %v", err)
 	}
@@ -598,7 +613,7 @@ func TestAdvanceStatus_ToCompleted_SKUNoMetal_DoesNotCheckMetal(t *testing.T) {
 	}
 	svc := newSvc(st, approvedPlan(uuid.New()), skuNoMetal(skuID))
 
-	err := svc.AdvanceStatus(context.Background(), woID, domain.WOCompleted)
+	err := svc.AdvanceStatus(context.Background(), woID, AdvanceStatusInput{To: domain.WOCompleted})
 	if err != nil {
 		t.Fatalf("SKU without metal requirement must not trigger metal check, got: %v", err)
 	}
@@ -619,7 +634,7 @@ func TestAdvanceStatus_ToCompleted_SKUCheckerError_Propagates(t *testing.T) {
 	sc := &mockSKUChecker{err: skuErr}
 	svc := newSvc(st, approvedPlan(uuid.New()), sc)
 
-	err := svc.AdvanceStatus(context.Background(), woID, domain.WOCompleted)
+	err := svc.AdvanceStatus(context.Background(), woID, AdvanceStatusInput{To: domain.WOCompleted})
 	if !errors.Is(err, skuErr) {
 		t.Errorf("expected SKUChecker error to propagate, got %v", err)
 	}
@@ -640,7 +655,7 @@ func TestAdvanceStatus_ToCompleted_MetalStoreError_Propagates(t *testing.T) {
 	}
 	svc := newSvc(st, approvedPlan(uuid.New()), skuRequiresMetal(skuID))
 
-	err := svc.AdvanceStatus(context.Background(), woID, domain.WOCompleted)
+	err := svc.AdvanceStatus(context.Background(), woID, AdvanceStatusInput{To: domain.WOCompleted})
 	if !errors.Is(err, metalErr) {
 		t.Errorf("expected metal store error to propagate, got %v", err)
 	}
@@ -669,11 +684,108 @@ func TestAdvanceStatus_NonCompletedTransitions_DoNotTriggerMetalCheck(t *testing
 			}
 			svc := newSvc(st, approvedPlan(uuid.New()), skuRequiresMetal(skuID))
 
-			err := svc.AdvanceStatus(context.Background(), woID, tc.to)
+			err := svc.AdvanceStatus(context.Background(), woID, AdvanceStatusInput{To: tc.to})
 			if err != nil {
 				t.Errorf("unexpected error for %s -> %s: %v", tc.from, tc.to, err)
 			}
 		})
+	}
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// AdvanceStatus — sheet pre-assignment (Issue 2)
+// ═════════════════════════════════════════════════════════════════════════════
+
+func TestAdvanceStatus_ToInCutting_WithSheetID_CallsPreAssign(t *testing.T) {
+	woID := uuid.New()
+	sheetID := uuid.New()
+	st := &mockStore{selectWorkOrderByIDResult: woWithStatus(woID, domain.WOPlanned)}
+	sa := &mockSheetAssigner{}
+	svc := NewService(st, approvedPlan(uuid.New()), skuNoMetal(uuid.New()), &mockUserChecker{}, sa, nil)
+
+	err := svc.AdvanceStatus(context.Background(), woID, AdvanceStatusInput{
+		To:      domain.WOInCutting,
+		SheetID: &sheetID,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !sa.called {
+		t.Error("PreAssignSheet must be called when sheet_id is provided")
+	}
+	if sa.calledSheet != sheetID {
+		t.Errorf("sheet_id passed to PreAssignSheet = %v, want %v", sa.calledSheet, sheetID)
+	}
+	if sa.calledWO != woID {
+		t.Errorf("wo_id passed to PreAssignSheet = %v, want %v", sa.calledWO, woID)
+	}
+	if !st.updateWorkOrderStatusCalled {
+		t.Error("updateWorkOrderStatus must be called after pre-assign succeeds")
+	}
+}
+
+func TestAdvanceStatus_ToInCutting_NoSheetID_SkipsPreAssign(t *testing.T) {
+	woID := uuid.New()
+	st := &mockStore{selectWorkOrderByIDResult: woWithStatus(woID, domain.WOPlanned)}
+	sa := &mockSheetAssigner{}
+	svc := NewService(st, approvedPlan(uuid.New()), skuNoMetal(uuid.New()), &mockUserChecker{}, sa, nil)
+
+	err := svc.AdvanceStatus(context.Background(), woID, AdvanceStatusInput{To: domain.WOInCutting})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if sa.called {
+		t.Error("PreAssignSheet must NOT be called when sheet_id is absent")
+	}
+}
+
+func TestAdvanceStatus_ToInCutting_PreAssignFails_AbortsAdvance(t *testing.T) {
+	woID := uuid.New()
+	sheetID := uuid.New()
+	assignErr := domain.NewBizError(domain.ErrPreconditionFailed, "sheet not available")
+	st := &mockStore{selectWorkOrderByIDResult: woWithStatus(woID, domain.WOPlanned)}
+	sa := &mockSheetAssigner{err: assignErr}
+	svc := NewService(st, approvedPlan(uuid.New()), skuNoMetal(uuid.New()), &mockUserChecker{}, sa, nil)
+
+	err := svc.AdvanceStatus(context.Background(), woID, AdvanceStatusInput{
+		To:      domain.WOInCutting,
+		SheetID: &sheetID,
+	})
+	if !errors.Is(err, domain.ErrPreconditionFailed) {
+		t.Errorf("expected ErrPreconditionFailed, got %v", err)
+	}
+	if st.updateWorkOrderStatusCalled {
+		t.Error("updateWorkOrderStatus must NOT be called when pre-assign fails")
+	}
+}
+
+func TestAdvanceStatus_SheetID_OnNonCuttingTransition_IsIgnored(t *testing.T) {
+	// sheet_id should only be acted upon for PLANNED → IN_CUTTING.
+	// For other transitions (e.g. IN_PROCESSING → COMPLETED), it must be ignored.
+	woID := uuid.New()
+	skuID := uuid.New()
+	sheetID := uuid.New()
+	st := &mockStore{
+		selectWorkOrderByIDResult: WorkOrder{
+			ID:       woID,
+			SKUID:    skuID,
+			Status:   domain.WOInProcessing,
+			Quantity: 1,
+		},
+		hasMetalConsumptionResult: true,
+	}
+	sa := &mockSheetAssigner{}
+	svc := NewService(st, approvedPlan(uuid.New()), skuRequiresMetal(skuID), &mockUserChecker{}, sa, nil)
+
+	err := svc.AdvanceStatus(context.Background(), woID, AdvanceStatusInput{
+		To:      domain.WOCompleted,
+		SheetID: &sheetID,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if sa.called {
+		t.Error("PreAssignSheet must NOT be called for non-IN_CUTTING transitions")
 	}
 }
 
@@ -1278,7 +1390,7 @@ func TestAssignWorkOrder_HappyPath_NotifierCalled(t *testing.T) {
 	uc := &mockUserChecker{result: UserInfo{ID: userID, Role: "cnc"}}
 	notifier := &mockWorkOrderNotifier{}
 
-	svc := NewService(st, approvedPlan(uuid.New()), skuNoMetal(uuid.New()), uc, notifier)
+	svc := NewService(st, approvedPlan(uuid.New()), skuNoMetal(uuid.New()), uc, nil, notifier)
 
 	_, err := svc.AssignWorkOrder(context.Background(), AssignWorkOrderInput{
 		WorkOrderID: woID,
@@ -1301,7 +1413,7 @@ func TestAssignWorkOrder_NotifierError_DoesNotFailRequest(t *testing.T) {
 	uc := &mockUserChecker{result: UserInfo{ID: userID, Role: "cnc"}}
 	notifier := &mockWorkOrderNotifier{err: errors.New("notify failed")}
 
-	svc := NewService(st, approvedPlan(uuid.New()), skuNoMetal(uuid.New()), uc, notifier)
+	svc := NewService(st, approvedPlan(uuid.New()), skuNoMetal(uuid.New()), uc, nil, notifier)
 
 	_, err := svc.AssignWorkOrder(context.Background(), AssignWorkOrderInput{
 		WorkOrderID: woID,
@@ -1319,7 +1431,7 @@ func TestAssignWorkOrder_ValidationFails_NotifierNotCalled(t *testing.T) {
 	}
 	notifier := &mockWorkOrderNotifier{}
 
-	svc := NewService(st, approvedPlan(uuid.New()), skuNoMetal(uuid.New()), &mockUserChecker{}, notifier)
+	svc := NewService(st, approvedPlan(uuid.New()), skuNoMetal(uuid.New()), &mockUserChecker{}, nil, notifier)
 
 	_, err := svc.AssignWorkOrder(context.Background(), AssignWorkOrderInput{
 		WorkOrderID: woID,

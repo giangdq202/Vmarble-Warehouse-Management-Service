@@ -16,11 +16,12 @@ type service struct {
 	pc       PlanChecker
 	sc       SKUChecker
 	uc       UserChecker
+	sa       SheetAssigner
 	notifier WorkOrderNotifier
 }
 
-func NewService(s store, pc PlanChecker, sc SKUChecker, uc UserChecker, notifier WorkOrderNotifier) Service {
-	return &service{s: s, pc: pc, sc: sc, uc: uc, notifier: notifier}
+func NewService(s store, pc PlanChecker, sc SKUChecker, uc UserChecker, sa SheetAssigner, notifier WorkOrderNotifier) Service {
+	return &service{s: s, pc: pc, sc: sc, uc: uc, sa: sa, notifier: notifier}
 }
 
 func (svc *service) CreateWorkOrder(ctx context.Context, in CreateWOInput) (WorkOrder, error) {
@@ -71,17 +72,17 @@ func (svc *service) ListWorkOrdersByAssignee(ctx context.Context, userID uuid.UU
 	return svc.s.selectWorkOrdersByAssignee(ctx, userID)
 }
 
-func (svc *service) AdvanceStatus(ctx context.Context, woID uuid.UUID, to domain.WorkOrderStatus) error {
+func (svc *service) AdvanceStatus(ctx context.Context, woID uuid.UUID, in AdvanceStatusInput) error {
 	wo, err := svc.s.selectWorkOrderByID(ctx, woID)
 	if err != nil {
 		return err
 	}
 
-	if err := wo.Status.CanTransitionTo(to); err != nil {
+	if err := wo.Status.CanTransitionTo(in.To); err != nil {
 		return domain.NewBizError(domain.ErrInvalidTransition, err.Error())
 	}
 
-	if to == domain.WOCompleted {
+	if in.To == domain.WOCompleted {
 		sku, err := svc.sc.GetSKU(ctx, wo.SKUID)
 		if err != nil {
 			return err
@@ -97,7 +98,16 @@ func (svc *service) AdvanceStatus(ctx context.Context, woID uuid.UUID, to domain
 		}
 	}
 
-	return svc.s.updateWorkOrderStatus(ctx, woID, string(to))
+	// Pre-assign the board sheet to the work order when advancing to IN_CUTTING.
+	// The SheetAssigner validates the sheet is AVAILABLE and stamps
+	// issued_to_work_order_id on the board_sheets row before the status changes.
+	if in.To == domain.WOInCutting && in.SheetID != nil && svc.sa != nil {
+		if err := svc.sa.PreAssignSheet(ctx, *in.SheetID, woID); err != nil {
+			return err
+		}
+	}
+
+	return svc.s.updateWorkOrderStatus(ctx, woID, string(in.To))
 }
 
 func (svc *service) RecordConsumption(ctx context.Context, in RecordConsumptionInput) (ConsumptionRecord, error) {

@@ -51,6 +51,14 @@ type AssignWorkOrderInput struct {
 	UserID      uuid.UUID
 }
 
+// AdvanceStatusInput is the request to advance a work order's status.
+// SheetID is optional — when provided and the target status is IN_CUTTING,
+// the sheet will be pre-assigned to the work order before the transition.
+type AdvanceStatusInput struct {
+	To      domain.WorkOrderStatus `json:"status"`
+	SheetID *uuid.UUID             `json:"sheet_id,omitempty"`
+}
+
 type SuggestAssignmentResult struct {
 	UserID         uuid.UUID `json:"user_id"`
 	InCuttingCount int       `json:"in_cutting_count"`
@@ -62,7 +70,7 @@ type Service interface {
 	ListWorkOrders(ctx context.Context, p httpkit.PageParams, status string) (httpkit.PagedResult[WorkOrder], error)
 	ListWorkOrdersByPlan(ctx context.Context, planID uuid.UUID) ([]WorkOrder, error)
 	ListWorkOrdersByAssignee(ctx context.Context, userID uuid.UUID) ([]WorkOrder, error)
-	AdvanceStatus(ctx context.Context, woID uuid.UUID, to domain.WorkOrderStatus) error
+	AdvanceStatus(ctx context.Context, woID uuid.UUID, in AdvanceStatusInput) error
 	RecordConsumption(ctx context.Context, in RecordConsumptionInput) (ConsumptionRecord, error)
 	ListConsumptions(ctx context.Context, woID uuid.UUID) ([]ConsumptionRecord, error)
 	AssignWorkOrder(ctx context.Context, in AssignWorkOrderInput) (WorkOrder, error)
