@@ -308,3 +308,11 @@ func (s *service) GetRemnantLineageByRemnant(ctx context.Context, remnantID uuid
 func (s *service) ListStorageLocations(ctx context.Context) ([]StorageLocation, error) {
 	return s.st.selectActiveStorageLocations(ctx)
 }
+
+func (s *service) ReleaseExpiredAllocations(ctx context.Context, before time.Time) (int, error) {
+	n, err := s.st.releaseExpiredAllocations(ctx, before)
+	if err != nil {
+		return 0, err
+	}
+	return int(n), nil
+}

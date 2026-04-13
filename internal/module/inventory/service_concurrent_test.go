@@ -20,6 +20,7 @@ import (
 	"errors"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/vmarble/warehouse-management-service/internal/domain"
@@ -194,6 +195,10 @@ func (s *concurrentMockStore) markRemnantWasteAtomically(_ context.Context, remn
 	r.Status = domain.RemnantWaste
 	r.AllocatedToWO = nil
 	return nil
+}
+
+func (s *concurrentMockStore) releaseExpiredAllocations(_ context.Context, _ time.Time) (int64, error) {
+	return 0, nil
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────────

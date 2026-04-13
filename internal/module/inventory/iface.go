@@ -94,6 +94,7 @@ type Remnant struct {
 	Dimensions          domain.Dimension     `json:"dimensions"`
 	Status              domain.RemnantStatus `json:"status"`
 	AllocatedToWO       *uuid.UUID           `json:"allocated_to_wo,omitempty"`
+	AllocatedAt         *time.Time           `json:"allocated_at,omitempty"`
 	SupplierCode        *string              `json:"supplier_code,omitempty"`
 	LotBatch            *string              `json:"lot_batch,omitempty"`
 	GrainPattern        *string              `json:"grain_pattern,omitempty"`
@@ -130,6 +131,11 @@ type Service interface {
 	// GetRemnantLineageByRemnant resolves the parent_board_id from the given
 	// remnant, then returns all remnants in the same lineage tree.
 	GetRemnantLineageByRemnant(ctx context.Context, remnantID uuid.UUID) ([]Remnant, error)
+
+	// ReleaseExpiredAllocations resets ALLOCATED remnants whose allocated_at
+	// timestamp is older than `before` back to AVAILABLE. Returns the number
+	// of remnants released. Used by the background auto-release task.
+	ReleaseExpiredAllocations(ctx context.Context, before time.Time) (int, error)
 
 	// ListStorageLocations returns all active storage locations.
 	ListStorageLocations(ctx context.Context) ([]StorageLocation, error)

@@ -109,6 +109,32 @@ func main() {
 
 	barcodeSvc := barcode.NewService(barcodeStore)
 
+	// ── Background: auto-release expired remnant allocations ─────────────────
+	// Ticks every cfg.RemnantAllocCheckInterval. Remnants that have been
+	// ALLOCATED for longer than cfg.RemnantAllocTimeout without being consumed
+	// are reset to AVAILABLE so they can be reassigned to other work orders.
+	go func() {
+		ticker := time.NewTicker(cfg.RemnantAllocCheckInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				threshold := time.Now().UTC().Add(-cfg.RemnantAllocTimeout)
+				released, err := inventorySvc.ReleaseExpiredAllocations(ctx, threshold)
+				if err != nil {
+					slog.Warn("remnant auto-release failed", "err", err)
+					continue
+				}
+				if released > 0 {
+					slog.Info("remnant auto-release: returned allocations to AVAILABLE",
+						"count", released, "older_than", cfg.RemnantAllocTimeout)
+				}
+			}
+		}
+	}()
+
 	// ── Gin router ──────────────────────────────────────────
 	r := httpkit.NewRouter()
 

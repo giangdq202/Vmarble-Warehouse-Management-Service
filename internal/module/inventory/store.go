@@ -58,6 +58,11 @@ type store interface {
 	// it to WASTE — all in one transaction. Returns ErrPreconditionFailed if the
 	// remnant is in a non-wasteable status when the lock is acquired.
 	markRemnantWasteAtomically(ctx context.Context, remnantID uuid.UUID) error
+
+	// releaseExpiredAllocations resets ALLOCATED remnants whose allocated_at is
+	// older than `before` back to AVAILABLE (allocated_to_wo_id and allocated_at
+	// are cleared). Returns the number of rows updated.
+	releaseExpiredAllocations(ctx context.Context, before time.Time) (int64, error)
 }
 
 // cutWriteOp carries the pre-validated, ready-to-persist data for a single cut
