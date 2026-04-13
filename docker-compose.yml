@@ -20,11 +20,8 @@ services:
     build: .
     ports:
       - "127.0.0.1:8080:8080"
-    depends_on:
-      postgres:
-        condition: service_healthy
     environment:
-      DATABASE_URL: postgres://vmarble:vmarble@postgres:5432/vmarble?sslmode=disable
+      DATABASE_URL: ${DATABASE_URL}
       PORT: "8080"
       LOG_LEVEL: ${LOG_LEVEL:-info}
       AUTH_SECRET: ${AUTH_SECRET}
