@@ -687,6 +687,32 @@ func scanRemnants(rows pgx.Rows) ([]Remnant, error) {
 	return remnants, rows.Err()
 }
 
+func (s *pgStore) updateRemnantBinLocation(ctx context.Context, remnantID uuid.UUID, locationID uuid.UUID) error {
+	tag, err := s.pool.Exec(ctx,
+		`UPDATE remnants SET bin_location_id = $1 WHERE id = $2`,
+		locationID, remnantID)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return domain.NewBizError(domain.ErrNotFound, "remnant not found")
+	}
+	return nil
+}
+
+func (s *pgStore) selectStorageLocationByBarcode(ctx context.Context, barcode string) (StorageLocation, error) {
+	var l StorageLocation
+	err := s.pool.QueryRow(ctx,
+		`SELECT id, zone, rack, shelf, label, barcode, is_active, created_at
+		 FROM storage_locations
+		 WHERE barcode = $1 AND is_active = TRUE`, barcode).
+		Scan(&l.ID, &l.Zone, &l.Rack, &l.Shelf, &l.Label, &l.Barcode, &l.IsActive, &l.CreatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return StorageLocation{}, domain.NewBizError(domain.ErrNotFound, "storage location not found")
+	}
+	return l, err
+}
+
 type remnantScanner interface {
 	Scan(dest ...any) error
 }
