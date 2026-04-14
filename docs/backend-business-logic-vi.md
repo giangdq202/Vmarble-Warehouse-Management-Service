@@ -244,23 +244,25 @@ Mỗi barcode đính kèm một carcass thành phẩm chứa các trường tố
 
 ## 4.3 Điểm quét barcode trong quy trình
 
-- Điểm 1 - Khi hoàn thành cắt CNC: scan để xác nhận carcass thô đã ra lò.
-- Điểm 2 - Khi hoàn thành gia công: scan để chuyển trạng thái sang `finished_goods`.
-- Điểm 3 - Khi xuất kho đi đóng gói / giao hàng: scan để trừ tồn và gắn với PO.
+Enum `ScanCheckpoint` có 3 giá trị: `CNC_COMPLETE`, `FINISHED_GOODS`, `SHIPPED`.
+
+- **Điểm 1 — `CNC_COMPLETE`**: Khi hoàn thành cắt CNC — scan để xác nhận carcass thô đã ra lò.
+- **Điểm 2 — `FINISHED_GOODS`**: Khi hoàn thành gia công — scan để chuyển trạng thái thành phẩm.
+- **Điểm 3 — `SHIPPED`**: Khi xuất kho đi đóng gói / giao hàng — scan để trừ tồn và gắn với PO.
 
 ---
 
 # 5. ACTORS & PHÂN QUYỀN NGHIỆP VỤ
 
-| Actor | Vai trò | Quyền hạn chính trong hệ thống |
-|---|---|---|
-| Kế toán | Nhập PO, costing, dòng tiền | CRUD PO, xem toàn bộ costing, export báo cáo tài chính |
-| Bộ phận Kế hoạch | Lập Production Plan | Tạo / duyệt Production Plan từ PO, xem tồn kho |
-| Quản lý Kho | Nhập xuất nguyên liệu, vật tư | CRUD giao dịch kho, nhập remnant, nhập tiêu hao vật tư phụ |
-| Quản lý CNC (CNC Manager) | Điều phối sản xuất CNC | Giao Work Order cho CNC, xem tiến độ toàn xưởng, ưu tiên lệnh cắt |
-| Vận hành CNC | Chạy máy, báo kết quả cắt | Xem danh sách Work Order được giao, cập nhật trạng thái cắt, scan barcode |
-| Tổ trưởng SX | Quản lý gia công | Báo cáo tiêu hao vật tư phụ, cập nhật trạng thái Work Order |
-| Admin / Sếp | Xem toàn bộ hệ thống | Read-only trên tất cả module, xem dashboard tổng hợp |
+| Actor | Role (system) | Vai trò | Quyền hạn chính trong hệ thống |
+|---|---|---|---|
+| Kế toán | `accountant` | Nhập PO, costing, dòng tiền | CRUD PO, xem toàn bộ costing, export báo cáo tài chính |
+| Bộ phận Kế hoạch | `planner` | Lập Production Plan | Tạo / duyệt Production Plan từ PO, xem tồn kho |
+| Quản lý Kho | `warehouse` | Nhập xuất nguyên liệu, vật tư | CRUD giao dịch kho, nhập remnant, nhập tiêu hao vật tư phụ |
+| Quản lý CNC (CNC Manager) | `cnc_manager` | Điều phối sản xuất CNC | Giao Work Order cho CNC, xem tiến độ toàn xưởng, ưu tiên lệnh cắt |
+| Vận hành CNC | `cnc` | Chạy máy, báo kết quả cắt | Xem danh sách Work Order được giao, cập nhật trạng thái cắt, scan barcode (Kiosk) |
+| Tổ trưởng SX | `foreman` | Quản lý gia công | Báo cáo tiêu hao vật tư phụ, cập nhật trạng thái Work Order (Dashboard) |
+| Admin / Sếp | `admin` | Xem toàn bộ hệ thống | Read-only trên tất cả module, xem dashboard tổng hợp |
 
 ## 5.1 Quy tắc Giao việc (Assignment)
 
@@ -290,7 +292,7 @@ Mỗi barcode đính kèm một carcass thành phẩm chứa các trường tố
 | Remnant | Phần tấm còn lại sau cắt | N:1 BoardSheet (parent), N:1 CuttingRecord |
 | ConsumptionRecord | Bản ghi tiêu hao vật tư phụ | N:1 WorkOrder, N:1 Material |
 | CostingRecord | Chi phí giá thành từng SKU theo đợt | N:1 WorkOrder, đọc từ Cutting + Consumption |
-| Barcode | Mã barcode gắn với carcass thành phẩm | 1:1 WorkOrder output unit |
+| Barcode | Mã barcode gắn với carcass thành phẩm | N:1 WorkOrder (1 WO có thể có nhiều barcode) |
 
 ## 6.2 Quan hệ đặc biệt cần lưu ý
 
