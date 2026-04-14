@@ -35,9 +35,14 @@ type store interface {
 	selectRemnantsByBoardSheet(ctx context.Context, boardSheetID uuid.UUID) ([]Remnant, error)
 	selectRemnantByID(ctx context.Context, id uuid.UUID) (Remnant, error)
 	updateRemnantStatus(ctx context.Context, id uuid.UUID, status domain.RemnantStatus, allocatedToWO *uuid.UUID) error
+	// updateRemnantBinLocation sets bin_location_id on the remnant row.
+	updateRemnantBinLocation(ctx context.Context, remnantID uuid.UUID, locationID uuid.UUID) error
 
 	// selectActiveStorageLocations returns all storage locations where is_active = true.
 	selectActiveStorageLocations(ctx context.Context) ([]StorageLocation, error)
+	// selectStorageLocationByBarcode returns the storage location whose barcode
+	// field matches exactly (case-sensitive). Returns ErrNotFound if no match.
+	selectStorageLocationByBarcode(ctx context.Context, barcode string) (StorageLocation, error)
 
 	// recordCutAtomically executes all cut-related writes inside a single DB
 	// transaction. It acquires a row-level lock (SELECT … FOR UPDATE) on the

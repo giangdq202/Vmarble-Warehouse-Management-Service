@@ -4,7 +4,7 @@
 > **Duration**: 12 tuần (24/03/2026 — 16/06/2026)
 > **Methodology**: Kanban, review cadence 2 tuần
 > **WIP Limit**: Mỗi người tối đa 2 task In Progress
-> **Last updated**: 2026-03-25
+> **Last updated**: 2026-04-12
 
 ---
 
@@ -36,7 +36,7 @@
 
 | Component | Technology |
 |-----------|-----------|
-| Framework | Next.js 15 (App Router) |
+| Framework | Next.js **16.2.1** (App Router) |
 | Language | TypeScript 5 |
 | Styling | Tailwind CSS 4 |
 | State | TanStack Query (server state) + Zustand (client state) |
@@ -142,13 +142,13 @@ MONTH 3: COSTING + DASHBOARD + POLISH
 
 | # | Task | Owner | Est | Priority | DoD |
 |---|------|-------|-----|----------|-----|
-| 4.1 | **QR code generation API** — `GET /barcode/:id/qr` trả QR image (PNG). Content: JSON `{type, id, sku, dimensions, lot, location}`. Dùng Go lib `skip2/go-qrcode` | DatVT | 2d | P0 | QR scan bằng phone → decode đúng JSON |
-| 4.2 | **Label template engine** — `GET /barcode/:id/label` trả PDF label. Template: QR code + text info (SKU, kích thước, lot, vị trí). Support 2 sizes: 50x30mm (remnant), 100x70mm (WIP) | DatVT | 3d | P0 | PDF render đúng, in ra giấy đọc được |
-| 4.3 | **Auto-generate barcode on RecordCut** — khi RecordCut thành công, auto-create barcode records cho: WIP items + remnant. Trả barcode IDs trong response | DatVT | 2d | P0 | RecordCut response chứa barcode_ids |
-| 4.4 | **Batch print API** — `POST /barcode/batch-print` body: `{barcode_ids[]}` → trả multi-page PDF. Cho phép in nhiều tem một lúc | GiangDQ | 2d | P0 | 10 labels trong 1 PDF |
-| 4.5 | **Scan event tracking** — `POST /barcode/scan` body: `{barcode_id, checkpoint, scanned_by}`. 3 checkpoints: CNC_COMPLETE, FINISHING_COMPLETE, WAREHOUSE_SHIP | GiangDQ | 2d | P0 | Scan events stored, queryable |
+| 4.1 | **QR code generation API** — `GET /barcodes/:id/qr` trả QR image (PNG). Content: JSON `{type, id, sku, dimensions, lot, location}`. Dùng Go lib `skip2/go-qrcode`. **[Scoped]** — MVP dùng `react-qr-code` in-browser, API QR endpoint defer → Phase 2 | DatVT | 2d | P1 *(scoped)* | QR scan bằng phone → decode đúng UUID |
+| 4.2 | **Label template engine** — `GET /barcodes/:id/label` trả PDF label. Template: QR code + text info (SKU, kích thước, lot, vị trí). **[Deferred → Phase 2]** — MVP không có PDF label endpoint | DatVT | 3d | P2 *(deferred)* | ~~PDF render đúng, in ra giấy đọc được~~ → Phase 2 |
+| 4.3 | **Auto-generate barcode on RecordCut** — khi RecordCut thành công, auto-create barcode records cho: WIP items + remnant. Trả barcode IDs trong response. **[DEFERRED → Phase 2]** — MVP dùng tạo thủ công: manager nhấn "Tạo barcode" trên trang WO detail, điền kích thước + ngày SX → hệ thống sinh UUID + QR hiển thị trong modal | DatVT | 2d | P1 *(deferred)* | ~~RecordCut response chứa barcode_ids~~ → Barcode tạo thủ công từ `/work-orders/:id` |
+| 4.4 | **Batch print API** — `POST /barcodes/batch-print` body: `{barcode_ids[]}` → trả multi-page PDF. **[Deferred → Phase 2]** — MVP không có batch print | GiangDQ | 2d | P2 *(deferred)* | ~~10 labels trong 1 PDF~~ → Phase 2 |
+| 4.5 | **Scan event tracking** — `POST /api/proxy/barcodes/:id/scans` body: `{checkpoint, scanned_by}`. 3 checkpoints: `CNC_COMPLETE`, `FINISHED_GOODS`, `SHIPPED`. `GET /api/proxy/barcodes/:id/scans` trả danh sách events. Dashboard `/barcodes/:id/scans` timeline checkpoint | GiangDQ | 2d | P0 | Scan events stored, queryable; dashboard page timeline hiển thị đúng 3 bước |
 | 4.6 | **Unit tests cho barcode module** | GiangDQ | 2d | P0 | >= 80% coverage |
-| 4.7 | **Kiosk: "In tem" flow** — sau báo cáo cắt → hiện nút "In tem". Preview label → confirm → trigger print (browser print dialog hoặc network printer API) | QuyND | 3d | P0 | Print dialog opens với đúng label |
+| 4.7 | **Kiosk: "In tem" flow** — sau báo cáo cắt → hiện nút "In tem". Preview label → confirm → trigger print (browser print dialog hoặc network printer API). **[R5 Fallback applied]** — MVP dùng QR modal trong browser (`react-qr-code`), không tích hợp printer. Manager in bằng browser print / screenshot | QuyND | 3d | P1 *(scoped)* | QR code hiển thị trong modal; browser print hoạt động |
 | 4.8 | **Kiosk: QR camera scan** — dùng `html5-qrcode`. Camera permission handling, flash toggle, scan history. Works offline (queue scans) | QuyND | 3d | P0 | Scan 10 mã liên tiếp, 0 lỗi |
 | 4.9 | **Kiosk: "Quét điểm kiểm tra"** — 3 checkpoint screens. Scan QR → hiện product info → confirm checkpoint → update status | QuyND | 3d | P1 | 3 checkpoints track đúng |
 | 4.10 | **Mobile UX audit & polish** — test trên 3 devices thực (Android phone, Android tablet, iPad). Fix responsive issues, touch targets >= 48px, font >= 16px | QuyND | 2d | P0 | Không có lỗi UX trên 3 devices |
@@ -186,7 +186,7 @@ MONTH 3: COSTING + DASHBOARD + POLISH
 |---|------|-------|-----|----------|-----|
 | 6.1 | **E2E test suite** — full flow automated: tạo PO → Plan → WorkOrder → gợi ý remnant → cắt → sinh remnant → nhập kho → re-cut → cost. Cover happy path + 5 error scenarios | GiangDQ | 4d | P0 | E2E chạy xanh trong CI |
 | 6.2 | **Performance testing** — load test: 10,000 remnants trong DB, 100 concurrent suggestion requests. Target p95 < 500ms. Optimize indexes nếu cần | GiangDQ | 2d | P1 | p95 < 500ms |
-| 6.3 | **Auth integration** — JWT login. Kiosk mode: simplified PIN login (4 số). Dashboard: full login. Role-based: OPERATOR, WAREHOUSE, PLANNING, ACCOUNTING, ADMIN | DatVT | 3d | P1 | Login flow hoạt động, roles enforced |
+| 6.3 | **Auth integration** — JWT login. Dashboard roles: `admin`, `accountant`, `planner`, `warehouse`, `foreman`, `cnc_manager`. Kiosk role: `cnc`. Middleware bảo vệ routes theo role group. **PIN login deferred → Phase 2** | DatVT | 3d | P1 | Login flow hoạt động, middleware enforce đúng role per route group |
 | 6.4 | **Remnant Inventory UI (desktop)** — full table: search, sort by age/size/material, multi-filter. Click row → detail panel (lineage tree visualization, location, all attributes) | QuyND | 4d | P0 | Desktop Chrome + Safari render đúng |
 | 6.5 | **Lineage tree visualization** — visual tree: tấm nguyên → remnant 1 → remnant 1.1. Hiện dimensions + cost at each node | QuyND | 3d | P1 | Tree render tới 4 levels |
 | 6.6 | **Bug fixing & UX polish** — từ internal testing + stakeholder preview | All | 3d | P0 | 0 P0 bugs, < 3 P1 bugs |
@@ -298,15 +298,17 @@ Mỗi task phải thỏa mãn **tất cả** điều kiện:
 
 ## 9. Open Decisions (cần confirm với khách hàng)
 
-| # | Decision | Impact | Default Assumption | Deadline |
-|---|----------|--------|--------------------|----------|
-| 1 | Algorithm weights (fit vs FIFO) | Ảnh hưởng suggestion quality | `w1=0.6, w2=0.4` (fit ưu tiên hơn) | Sprint 3 |
-| 2 | Overflow threshold % | Khi nào block xuất tấm nguyên | 15% | Sprint 5 |
-| 3 | Allocation timeout duration | Bao lâu auto-release remnant locked | 24 giờ | Sprint 3 |
-| 4 | Label printer model | Ảnh hưởng integration approach | ZPL-compatible (Zebra) hoặc PDF fallback | Sprint 4 |
-| 5 | Kiosk auth method | PIN, badge, hoặc no auth? | 4-digit PIN per operator | Sprint 6 |
-| 6 | Waste allocation policy | Waste tính vào đâu? | Absorbed as overhead (BR-C03) | Sprint 5 |
-| 7 | Hosting environment | VPS, cloud, on-premise? | Docker Compose on VPS | Sprint 6 |
+Tất cả các quyết định dưới đây đã được resolve trong quá trình triển khai MVP.
+
+| # | Decision | Impact | Resolution | Resolved |
+|---|----------|--------|------------|---------|
+| 1 | Algorithm weights (fit vs FIFO) | Ảnh hưởng suggestion quality | `w1=0.6, w2=0.4` (fit ưu tiên hơn) — configurable via env | ✅ Sprint 3 |
+| 2 | Overflow threshold % | Khi nào block xuất tấm nguyên | 15% (`REMNANT_OVERFLOW_THRESHOLD_PCT` env var) | ✅ Sprint 5 |
+| 3 | Allocation timeout duration | Bao lâu auto-release remnant locked | 24 giờ | ✅ Sprint 3 |
+| 4 | Label printer model | Ảnh hưởng integration approach | **R5 Fallback**: QR modal trong browser (`react-qr-code`) + browser print. Network printer defer → Phase 2 | ✅ Sprint 4 |
+| 5 | Kiosk auth method | PIN, badge, hoặc no auth? | JWT với role `cnc`. PIN 4 số defer → Phase 2 | ✅ Sprint 6 |
+| 6 | Waste allocation policy | Waste tính vào đâu? | Absorbed as overhead (BR-C03) | ✅ Sprint 5 |
+| 7 | Hosting environment | VPS, cloud, on-premise? | Docker Compose + nginx + SSL trên VPS | ✅ Sprint 6 |
 
 ---
 
@@ -357,33 +359,39 @@ PR naming: `[module] brief description` (e.g., `[inventory] add transaction supp
 ## Appendix A: Frontend Project Structure (Next.js)
 
 ```
-frontend/
+src/
 ├── app/
-│   ├── (kiosk)/              # Kiosk layout (mobile-optimized)
+│   ├── (kiosk)/              # Kiosk layout — mobile-first (375px baseline), bottom nav, touch ≥48px
 │   │   ├── cutting-orders/   # Lệnh cắt hôm nay
 │   │   ├── report-cut/       # Báo cáo kết quả cắt
-│   │   ├── remnant-store/    # Nhập kho tấm lẻ
-│   │   ├── remnant-list/     # Kho tấm lẻ
-│   │   ├── scan/             # QR scan checkpoints
-│   │   └── layout.tsx        # Bottom nav, big touch targets
-│   ├── (dashboard)/          # Dashboard layout (desktop/tablet)
-│   │   ├── overview/         # Tổng quan
-│   │   ├── remnants/         # Remnant inventory table
-│   │   ├── costing/          # Cost reports
-│   │   └── layout.tsx        # Side nav, charts
-│   ├── login/
-│   └── layout.tsx            # Root layout
+│   │   ├── remnant-store/    # Nhập kho tấm lẻ (gợi ý tấm lẻ)
+│   │   ├── remnant-list/     # Kho tấm lẻ — list AVAILABLE
+│   │   ├── scan/             # QR scan checkpoints (CNC_COMPLETE, FINISHED_GOODS, SHIPPED)
+│   │   └── layout.tsx        # Header (Vmarble Kiosk + role badge + logout), bottom tab nav
+│   ├── (dashboard)/          # Dashboard layout — desktop (1280px baseline), side nav
+│   │   ├── overview/         # Tổng quan: stats, overflow, cutting efficiency chart
+│   │   ├── remnants/         # Remnant inventory table + filters
+│   │   ├── costing/          # Cost reports by PO
+│   │   ├── materials/        # Material management
+│   │   ├── skus/             # SKU catalogue
+│   │   ├── pos/              # Purchase Orders
+│   │   ├── plans/            # Production Plans; [id]/ — plan detail
+│   │   ├── work-orders/      # Work Orders list; [id]/ — WO detail (barcode create, scan history)
+│   │   ├── barcodes/[id]/scans/  # ← NEW: timeline lịch sử quét checkpoint của 1 barcode
+│   │   └── layout.tsx        # SideNav (role-aware nav, role badge, logout)
+│   ├── (auth)/login/         # Login page (JWT, no nav chrome)
+│   └── layout.tsx            # Root: Providers, Toaster, PWA meta
 ├── components/
-│   ├── ui/                   # Base: Button, Card, Table, Modal, Toast
-│   ├── kiosk/                # BigButton, ScannerView, LabelPreview
-│   └── dashboard/            # Charts, StatCard, AlertBanner
+│   ├── ui/                   # shadcn/ui base components
+│   ├── kiosk/                # BigButton, ScannerView, LabelPreview, BottomNav, LogoutButton
+│   └── dashboard/            # SideNav, StatCard, AlertBanner
 ├── lib/
-│   ├── api/                  # Typed API client
-│   ├── hooks/                # useRemnants, useCuttingOrders, useScan
-│   └── utils/
-├── public/
-│   └── manifest.json         # PWA manifest
-└── next.config.ts
+│   ├── api/                  # client.ts + auth.ts, barcode.ts, cutting-orders.ts, remnants.ts, …
+│   ├── hooks/                # use-barcode.ts, use-work-orders.ts, use-plans.ts, use-scan.ts, …
+│   ├── auth/                 # authorization.ts (DASHBOARD_ROLES, KIOSK_ROLES, path tables)
+│   └── providers.tsx         # QueryClientProvider
+├── types/api.ts              # All shared DTOs (mirrors Go iface.go)
+└── styles/globals.css        # Tailwind v4 + shadcn CSS variables
 ```
 
 ---
@@ -399,10 +407,11 @@ frontend/
 | POST | `/api/v1/inventory/release-allocation` | S3 | Manual release locked remnant |
 | CRUD | `/api/v1/storage-locations` | S3 | Manage bin locations |
 | PUT | `/api/v1/remnants/:id/location` | S3 | Assign remnant to bin location |
-| GET | `/api/v1/barcode/:id/qr` | S4 | Get QR code image |
-| GET | `/api/v1/barcode/:id/label` | S4 | Get printable label PDF |
-| POST | `/api/v1/barcode/batch-print` | S4 | Batch print labels |
-| POST | `/api/v1/barcode/scan` | S4 | Record scan event |
+| GET | `/api/v1/barcodes/:id` | S4 | Get barcode info |
+| GET | `/api/v1/barcodes` | S4 | List barcodes (filter `?work_order_id=`) |
+| POST | `/api/v1/barcodes` | S4 | Create barcode manually |
+| POST | `/api/v1/barcodes/:id/scans` | S4 | Record scan event at checkpoint |
+| GET | `/api/v1/barcodes/:id/scans` | S4 | List scan events for a barcode |
 | GET | `/api/v1/inventory/overflow-status` | S5 | Get overflow alert status |
 | GET | `/api/v1/dashboard/remnant-summary` | S5 | Remnant statistics |
 | GET | `/api/v1/dashboard/cutting-efficiency` | S5 | Waste % by period |

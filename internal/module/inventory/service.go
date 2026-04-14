@@ -309,6 +309,18 @@ func (s *service) ListStorageLocations(ctx context.Context) ([]StorageLocation, 
 	return s.st.selectActiveStorageLocations(ctx)
 }
 
+func (s *service) GetRemnant(ctx context.Context, remnantID uuid.UUID) (Remnant, error) {
+	return s.st.selectRemnantByID(ctx, remnantID)
+}
+
+func (s *service) StockRemnant(ctx context.Context, remnantID uuid.UUID, locationBarcode string) error {
+	loc, err := s.st.selectStorageLocationByBarcode(ctx, locationBarcode)
+	if err != nil {
+		return err
+	}
+	return s.st.updateRemnantBinLocation(ctx, remnantID, loc.ID)
+}
+
 func (s *service) ReleaseExpiredAllocations(ctx context.Context, before time.Time) (int, error) {
 	n, err := s.st.releaseExpiredAllocations(ctx, before)
 	if err != nil {

@@ -28,9 +28,11 @@ func (h *Handler) Register(rg *gin.RouterGroup) {
 	inv.GET("/sheets/:id/lineage", h.lineage)
 	inv.POST("/cuts", h.recordCut)
 	inv.GET("/remnants", h.listRemnants)
+	inv.GET("/remnants/:id", h.getRemnant)
 	inv.GET("/remnants/:id/lineage", h.getRemnantLineage)
 	inv.POST("/remnants/:id/allocate", h.allocateRemnant)
 	inv.POST("/remnants/:id/waste", h.markWaste)
+	inv.POST("/remnants/:id/stock", h.stockRemnant)
 
 	rg.GET("/storage-locations", h.listStorageLocations)
 }
@@ -338,4 +340,62 @@ func (h *Handler) markWaste(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"status": "waste"})
+}
+
+// getRemnant godoc
+//
+// @Summary      Get remnant by ID
+// @Tags         inventory
+// @Produce      json
+// @Param        id   path      string  true  "remnant id (uuid)"
+// @Security     BearerAuth
+// @Success      200  {object}  Remnant
+// @Failure      400  {object}  map[string]string
+// @Failure      404  {object}  map[string]string
+// @Router       /api/v1/inventory/remnants/{id} [get]
+func (h *Handler) getRemnant(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+	remnant, err := h.svc.GetRemnant(c.Request.Context(), id)
+	if err != nil {
+		httpkit.Error(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, remnant)
+}
+
+// stockRemnant godoc
+//
+// @Summary      Assign a remnant to a physical storage bin
+// @Tags         inventory
+// @Accept       json
+// @Produce      json
+// @Param        id    path      string  true  "remnant id (uuid)"
+// @Param        body  body      object  true  "location barcode"
+// @Security     BearerAuth
+// @Success      200   {object}  map[string]string
+// @Failure      400   {object}  map[string]string
+// @Failure      404   {object}  map[string]string
+// @Router       /api/v1/inventory/remnants/{id}/stock [post]
+func (h *Handler) stockRemnant(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+	var body struct {
+		LocationBarcode string `json:"location_barcode"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil || body.LocationBarcode == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "location_barcode is required"})
+		return
+	}
+	if err := h.svc.StockRemnant(c.Request.Context(), id, body.LocationBarcode); err != nil {
+		httpkit.Error(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"status": "stocked"})
 }

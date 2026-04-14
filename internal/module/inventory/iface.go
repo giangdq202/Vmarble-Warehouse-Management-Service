@@ -122,11 +122,17 @@ type Service interface {
 	// ListRemnants returns a paginated list of remnants matching the filter.
 	// Status defaults to AVAILABLE when filter.Status is empty.
 	ListRemnants(ctx context.Context, f RemnantFilter, p httpkit.PageParams) (httpkit.PagedResult[Remnant], error)
+	// GetRemnant returns a single remnant by ID.
+	GetRemnant(ctx context.Context, remnantID uuid.UUID) (Remnant, error)
 	// FindAvailableRemnants returns the full sorted list of AVAILABLE remnants that
 	// meet the minimum bounding-box dimension. Used by the Best Fit algorithm.
 	FindAvailableRemnants(ctx context.Context, minDim domain.Dimension) ([]Remnant, error)
 	AllocateRemnant(ctx context.Context, remnantID uuid.UUID, workOrderID uuid.UUID) error
 	MarkRemnantWaste(ctx context.Context, remnantID uuid.UUID) error
+	// StockRemnant assigns a remnant to a physical storage bin by looking up the
+	// location with the given barcode string. The remnant must be AVAILABLE.
+	// Returns ErrNotFound if the barcode does not match any active storage location.
+	StockRemnant(ctx context.Context, remnantID uuid.UUID, locationBarcode string) error
 	GetRemnantLineage(ctx context.Context, boardSheetID uuid.UUID) ([]Remnant, error)
 	// GetRemnantLineageByRemnant resolves the parent_board_id from the given
 	// remnant, then returns all remnants in the same lineage tree.
