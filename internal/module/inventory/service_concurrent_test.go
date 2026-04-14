@@ -200,6 +200,12 @@ func (s *concurrentMockStore) markRemnantWasteAtomically(_ context.Context, remn
 func (s *concurrentMockStore) releaseExpiredAllocations(_ context.Context, _ time.Time) (int64, error) {
 	return 0, nil
 }
+func (s *concurrentMockStore) updateRemnantBinLocation(_ context.Context, _ uuid.UUID, _ uuid.UUID) error {
+	return nil
+}
+func (s *concurrentMockStore) selectStorageLocationByBarcode(_ context.Context, _ string) (StorageLocation, error) {
+	return StorageLocation{}, nil
+}
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 

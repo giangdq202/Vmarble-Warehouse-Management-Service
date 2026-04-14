@@ -169,6 +169,12 @@ func (m *mockStore) selectRemnantsByFilter(_ context.Context, _ RemnantFilter, _
 func (m *mockStore) selectActiveStorageLocations(_ context.Context) ([]StorageLocation, error) {
 	return m.selectActiveStorageLocationsResult, m.selectActiveStorageLocationsErr
 }
+func (m *mockStore) updateRemnantBinLocation(_ context.Context, _ uuid.UUID, _ uuid.UUID) error {
+	return nil
+}
+func (m *mockStore) selectStorageLocationByBarcode(_ context.Context, _ string) (StorageLocation, error) {
+	return StorageLocation{}, nil
+}
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
