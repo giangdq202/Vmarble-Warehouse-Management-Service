@@ -105,6 +105,23 @@ type Remnant struct {
 	CreatedAt           time.Time            `json:"created_at"`
 }
 
+// RemnantSuggestion pairs a candidate remnant with its physical storage
+// location (if stocked) and a 1-based rank. Suggestions are ordered by the
+// Best Fit + FIFO algorithm: smallest bounding-box area first, oldest first
+// among ties.
+type RemnantSuggestion struct {
+	Remnant  Remnant          `json:"remnant"`
+	Location *StorageLocation `json:"location,omitempty"`
+	Rank     int              `json:"rank"`
+}
+
+// SuggestRemnantsInput carries the parameters for the Best Fit + FIFO
+// remnant suggestion query.
+type SuggestRemnantsInput struct {
+	RequiredDimension domain.Dimension
+	Limit             int // defaults to 3; clamped to [1, 10]
+}
+
 type Service interface {
 	ReceiveStock(ctx context.Context, in ReceiveStockInput) (InventoryLot, error)
 	ListLots(ctx context.Context, p httpkit.PageParams) (httpkit.PagedResult[InventoryLot], error)
@@ -127,6 +144,10 @@ type Service interface {
 	// FindAvailableRemnants returns the full sorted list of AVAILABLE remnants that
 	// meet the minimum bounding-box dimension. Used by the Best Fit algorithm.
 	FindAvailableRemnants(ctx context.Context, minDim domain.Dimension) ([]Remnant, error)
+	// SuggestRemnants returns the top-N AVAILABLE remnants that fit the required
+	// dimension, ranked by Best Fit (smallest area) + FIFO (oldest first). Each
+	// suggestion includes the remnant's storage location when available.
+	SuggestRemnants(ctx context.Context, in SuggestRemnantsInput) ([]RemnantSuggestion, error)
 	AllocateRemnant(ctx context.Context, remnantID uuid.UUID, workOrderID uuid.UUID) error
 	MarkRemnantWaste(ctx context.Context, remnantID uuid.UUID) error
 	// StockRemnant assigns a remnant to a physical storage bin by looking up the

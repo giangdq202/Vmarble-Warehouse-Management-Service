@@ -253,6 +253,25 @@ func (s *service) FindAvailableRemnants(ctx context.Context, minDim domain.Dimen
 	return s.st.selectAvailableRemnantsByMinDimension(ctx, minDim)
 }
 
+const (
+	defaultSuggestionLimit = 3
+	maxSuggestionLimit     = 10
+)
+
+func (s *service) SuggestRemnants(ctx context.Context, in SuggestRemnantsInput) ([]RemnantSuggestion, error) {
+	if !in.RequiredDimension.Valid() {
+		return nil, domain.NewBizError(domain.ErrInvalidInput, "required dimension must have positive length and width")
+	}
+	limit := in.Limit
+	if limit <= 0 {
+		limit = defaultSuggestionLimit
+	}
+	if limit > maxSuggestionLimit {
+		limit = maxSuggestionLimit
+	}
+	return s.st.selectTopRemnantSuggestions(ctx, in.RequiredDimension, limit)
+}
+
 func (s *service) AllocateRemnant(ctx context.Context, remnantID uuid.UUID, workOrderID uuid.UUID) error {
 	// Optimistic pre-check: give an early ErrInvalidInput when the remnant is
 	// clearly not AVAILABLE before we even open a transaction. The authoritative

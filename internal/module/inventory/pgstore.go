@@ -322,13 +322,119 @@ func (s *pgStore) selectAvailableRemnantsByMinDimension(ctx context.Context, min
 		 WHERE status = 'AVAILABLE'
 		   AND COALESCE(bounding_box_length_mm, length_mm) >= $1
 		   AND COALESCE(bounding_box_width_mm, width_mm) >= $2
-		 ORDER BY (COALESCE(bounding_box_length_mm, length_mm) * COALESCE(bounding_box_width_mm, width_mm)) ASC`,
+		 ORDER BY (COALESCE(bounding_box_length_mm, length_mm) * COALESCE(bounding_box_width_mm, width_mm)) ASC,
+		          created_at ASC`,
 		minDim.LengthMM, minDim.WidthMM)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	return scanRemnants(rows)
+}
+
+// selectTopRemnantSuggestions returns up to `limit` AVAILABLE remnants that
+// fit `minDim`, ranked by Best Fit (smallest bounding-box area) + FIFO
+// (oldest created_at). Each row is LEFT JOINed with storage_locations so the
+// caller gets the shelf position without a second round trip.
+func (s *pgStore) selectTopRemnantSuggestions(ctx context.Context, minDim domain.Dimension, limit int) ([]RemnantSuggestion, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT
+			r.id, r.parent_board_id, r.parent_remnant_id,
+			r.length_mm, r.width_mm, r.status, r.allocated_to_wo_id, r.allocated_at,
+			r.supplier_code, r.lot_batch, r.grain_pattern, r.quality_grade,
+			r.bounding_box_length_mm, r.bounding_box_width_mm, r.bin_location_id, r.created_at,
+			sl.id, sl.zone, sl.rack, sl.shelf, sl.label, sl.barcode, sl.is_active, sl.created_at
+		 FROM remnants r
+		 LEFT JOIN storage_locations sl ON sl.id = r.bin_location_id AND sl.is_active = TRUE
+		 WHERE r.status = 'AVAILABLE'
+		   AND COALESCE(r.bounding_box_length_mm, r.length_mm) >= $1
+		   AND COALESCE(r.bounding_box_width_mm, r.width_mm) >= $2
+		 ORDER BY
+			(COALESCE(r.bounding_box_length_mm, r.length_mm) * COALESCE(r.bounding_box_width_mm, r.width_mm)) ASC,
+			r.created_at ASC
+		 LIMIT $3`,
+		minDim.LengthMM, minDim.WidthMM, limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []RemnantSuggestion
+	rank := 1
+	for rows.Next() {
+		var r Remnant
+		var loc StorageLocation
+		var locID uuid.NullUUID
+		var locZone, locRack, locShelf, locLabel, locBarcode sql.NullString
+		var locIsActive sql.NullBool
+		var locCreatedAt sql.NullTime
+		var allocatedAt sql.NullTime
+
+		var supplierCode, lotBatch, grainPattern, qualityGrade sql.NullString
+		var bbLengthMM, bbWidthMM sql.NullInt32
+		var binLocationID uuid.NullUUID
+
+		if err := rows.Scan(
+			&r.ID, &r.ParentBoardID, &r.ParentRemnantID,
+			&r.Dimensions.LengthMM, &r.Dimensions.WidthMM,
+			&r.Status, &r.AllocatedToWO, &allocatedAt,
+			&supplierCode, &lotBatch, &grainPattern, &qualityGrade,
+			&bbLengthMM, &bbWidthMM, &binLocationID, &r.CreatedAt,
+			&locID, &locZone, &locRack, &locShelf, &locLabel, &locBarcode, &locIsActive, &locCreatedAt,
+		); err != nil {
+			return nil, err
+		}
+
+		// Map nullable remnant fields.
+		r.SupplierCode = nullStringPtr(supplierCode)
+		r.LotBatch = nullStringPtr(lotBatch)
+		r.GrainPattern = nullStringPtr(grainPattern)
+		r.QualityGrade = nullStringPtr(qualityGrade)
+		r.BoundingBoxLengthMM = nullInt32Ptr(bbLengthMM)
+		r.BoundingBoxWidthMM = nullInt32Ptr(bbWidthMM)
+		if binLocationID.Valid {
+			v := binLocationID.UUID
+			r.BinLocationID = &v
+		}
+		if allocatedAt.Valid {
+			t := allocatedAt.Time
+			r.AllocatedAt = &t
+		}
+
+		sug := RemnantSuggestion{Remnant: r, Rank: rank}
+
+		// Map nullable location fields (LEFT JOIN may produce NULLs).
+		if locID.Valid {
+			loc.ID = locID.UUID
+			if locZone.Valid {
+				loc.Zone = locZone.String
+			}
+			if locRack.Valid {
+				loc.Rack = locRack.String
+			}
+			if locShelf.Valid {
+				loc.Shelf = locShelf.String
+			}
+			if locLabel.Valid {
+				loc.Label = locLabel.String
+			}
+			if locBarcode.Valid {
+				loc.Barcode = locBarcode.String
+			}
+			if locIsActive.Valid {
+				loc.IsActive = locIsActive.Bool
+			}
+			if locCreatedAt.Valid {
+				loc.CreatedAt = locCreatedAt.Time
+			}
+			sug.Location = &loc
+		}
+
+		out = append(out, sug)
+		rank++
+	}
+	return out, rows.Err()
 }
 
 // selectRemnantsByFilter returns a paginated slice of remnants that match f,
