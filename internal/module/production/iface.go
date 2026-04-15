@@ -16,16 +16,17 @@ type CreateWOInput struct {
 }
 
 type WorkOrder struct {
-	ID         uuid.UUID              `json:"id"`
-	PlanID     uuid.UUID              `json:"plan_id"`
-	SKUID      uuid.UUID              `json:"sku_id"`
-	SKUCode    string                 `json:"sku_code"`
-	SKUName    string                 `json:"sku_name"`
-	Quantity   int                    `json:"quantity"`
-	Status     domain.WorkOrderStatus `json:"status"`
-	AssignedTo *uuid.UUID             `json:"assigned_to,omitempty"`
-	AssignedAt *time.Time             `json:"assigned_at,omitempty"`
-	CreatedAt  time.Time              `json:"created_at"`
+	ID            uuid.UUID              `json:"id"`
+	PlanID        uuid.UUID              `json:"plan_id"`
+	SKUID         uuid.UUID              `json:"sku_id"`
+	SKUCode       string                 `json:"sku_code"`
+	SKUName       string                 `json:"sku_name"`
+	SKUDimensions domain.Dimension       `json:"sku_dimensions"`
+	Quantity      int                    `json:"quantity"`
+	Status        domain.WorkOrderStatus `json:"status"`
+	AssignedTo    *uuid.UUID             `json:"assigned_to,omitempty"`
+	AssignedAt    *time.Time             `json:"assigned_at,omitempty"`
+	CreatedAt     time.Time              `json:"created_at"`
 }
 
 type RecordConsumptionInput struct {

@@ -30,15 +30,16 @@ func (s *pgStore) insertWorkOrder(ctx context.Context, wo WorkOrder) error {
 	return err
 }
 
-// scanWorkOrder reads the 10-column projection used by all SELECT queries.
-// Columns: wo.id, wo.plan_id, wo.sku_id, s.code, s.name, wo.quantity, wo.status,
-//          wo.assigned_to, wo.assigned_at, wo.created_at
+// scanWorkOrder reads the 12-column projection used by all SELECT queries.
+// Columns: wo.id, wo.plan_id, wo.sku_id, s.code, s.name, s.length_mm, s.width_mm,
+//          wo.quantity, wo.status, wo.assigned_to, wo.assigned_at, wo.created_at
 func scanWorkOrder(row interface {
 	Scan(...any) error
 }) (WorkOrder, error) {
 	var wo WorkOrder
 	err := row.Scan(
 		&wo.ID, &wo.PlanID, &wo.SKUID, &wo.SKUCode, &wo.SKUName,
+		&wo.SKUDimensions.LengthMM, &wo.SKUDimensions.WidthMM,
 		&wo.Quantity, &wo.Status, &wo.AssignedTo, &wo.AssignedAt, &wo.CreatedAt,
 	)
 	return wo, err
@@ -50,6 +51,8 @@ const selectWOCols = `
 	wo.id, wo.plan_id, wo.sku_id,
 	COALESCE(s.code, '') AS sku_code,
 	COALESCE(s.name, '') AS sku_name,
+	COALESCE(s.length_mm, 0) AS sku_length_mm,
+	COALESCE(s.width_mm, 0)  AS sku_width_mm,
 	wo.quantity, wo.status, wo.assigned_to, wo.assigned_at, wo.created_at
 FROM work_orders wo
 LEFT JOIN skus s ON s.id = wo.sku_id`
