@@ -129,8 +129,8 @@ func (s *service) RecordCut(ctx context.Context, in RecordCutInput) (CutResult, 
 		if err != nil {
 			return CutResult{}, err
 		}
-		if remnant.Status != domain.RemnantAvailable {
-			return CutResult{}, domain.NewBizError(domain.ErrInvalidInput, "remnant is not available")
+		if remnant.Status != domain.RemnantAvailable && remnant.Status != domain.RemnantAllocated {
+			return CutResult{}, domain.NewBizError(domain.ErrInvalidInput, "remnant is not available for cutting")
 		}
 		sourceDim = remnant.Dimensions
 		parentBoardID = remnant.ParentBoardID
