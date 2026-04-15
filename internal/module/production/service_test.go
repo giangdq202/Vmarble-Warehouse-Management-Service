@@ -378,6 +378,37 @@ func TestGetWorkOrder_SKUFieldsPassThrough(t *testing.T) {
 	}
 }
 
+// GetWorkOrder must pass SKUDimensions through unchanged from the store.
+func TestGetWorkOrder_SKUDimensionsPassThrough(t *testing.T) {
+	woID := uuid.New()
+	want := WorkOrder{
+		ID:      woID,
+		PlanID:  uuid.New(),
+		SKUID:   uuid.New(),
+		SKUCode: "TB-001",
+		SKUName: "Tủ bếp trên 1 cánh",
+		SKUDimensions: domain.Dimension{
+			LengthMM: 1200,
+			WidthMM:  600,
+		},
+		Quantity: 3,
+		Status:   domain.WOPlanned,
+	}
+	st := &mockStore{selectWorkOrderByIDResult: want}
+	svc := newSvc(st, approvedPlan(uuid.New()), skuNoMetal(uuid.New()))
+
+	got, err := svc.GetWorkOrder(context.Background(), woID)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got.SKUDimensions.LengthMM != want.SKUDimensions.LengthMM {
+		t.Errorf("SKUDimensions.LengthMM = %d, want %d", got.SKUDimensions.LengthMM, want.SKUDimensions.LengthMM)
+	}
+	if got.SKUDimensions.WidthMM != want.SKUDimensions.WidthMM {
+		t.Errorf("SKUDimensions.WidthMM = %d, want %d", got.SKUDimensions.WidthMM, want.SKUDimensions.WidthMM)
+	}
+}
+
 func TestGetWorkOrder_NotFound_PropagatesError(t *testing.T) {
 	st := &mockStore{selectWorkOrderByIDErr: domain.NewBizError(domain.ErrNotFound, "not found")}
 	svc := newSvc(st, approvedPlan(uuid.New()), skuNoMetal(uuid.New()))
