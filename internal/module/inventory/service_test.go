@@ -646,7 +646,7 @@ func TestRecordCut_SheetNotAvailable_IsInvalidInput(t *testing.T) {
 	}
 }
 
-func TestRecordCut_RemnantNotAvailable_IsInvalidInput(t *testing.T) {
+func TestRecordCut_RemnantConsumed_IsInvalidInput(t *testing.T) {
 	boardID := uuid.New()
 	remID := uuid.New()
 	consumedRemnant := availableRemnant(remID, boardID)
@@ -662,10 +662,40 @@ func TestRecordCut_RemnantNotAvailable_IsInvalidInput(t *testing.T) {
 		UsedDimension: dim100x100,
 	})
 	if !errors.Is(err, domain.ErrInvalidInput) {
-		t.Errorf("expected ErrInvalidInput for non-AVAILABLE remnant, got %v", err)
+		t.Errorf("expected ErrInvalidInput for CONSUMED remnant, got %v", err)
 	}
 	if st.recordCutAtomicallyCalled {
-		t.Error("recordCutAtomically must NOT be called when remnant is not AVAILABLE")
+		t.Error("recordCutAtomically must NOT be called when remnant is CONSUMED")
+	}
+}
+
+// TestRecordCut_AllocatedRemnant_Succeeds verifies that a remnant in ALLOCATED
+// status (pre-reserved via AllocateRemnant) can be consumed by RecordCut.
+// This is the normal "suggest → allocate → cut" kiosk flow.
+func TestRecordCut_AllocatedRemnant_Succeeds(t *testing.T) {
+	boardID := uuid.New()
+	remID := uuid.New()
+	allocatedRemnant := availableRemnant(remID, boardID)
+	allocatedRemnant.Status = domain.RemnantAllocated
+
+	woID := uuid.New()
+	st := &mockStore{selectRemnantByIDResult: allocatedRemnant}
+	svc := NewService(st, nil)
+
+	result, err := svc.RecordCut(context.Background(), RecordCutInput{
+		RemnantID:     ptr(remID),
+		WorkOrderID:   woID,
+		SKUID:         uuid.New(),
+		UsedDimension: dim100x100,
+	})
+	if err != nil {
+		t.Fatalf("expected RecordCut to succeed for ALLOCATED remnant, got %v", err)
+	}
+	if result.CuttingRecordID == uuid.Nil {
+		t.Error("expected non-nil cutting record ID")
+	}
+	if !st.recordCutAtomicallyCalled {
+		t.Error("recordCutAtomically must be called for ALLOCATED remnant")
 	}
 }
 

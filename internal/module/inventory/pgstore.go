@@ -579,7 +579,8 @@ func (s *pgStore) recordCutAtomically(ctx context.Context, op cutWriteOp) error 
 			err = fmt.Errorf("lock remnant: %w", lockErr)
 			return err
 		}
-		if domain.RemnantStatus(lockedStatus) != domain.RemnantAvailable {
+		if domain.RemnantStatus(lockedStatus) != domain.RemnantAvailable &&
+			domain.RemnantStatus(lockedStatus) != domain.RemnantAllocated {
 			err = domain.NewBizError(domain.ErrPreconditionFailed, "remnant is no longer available")
 			return err
 		}
