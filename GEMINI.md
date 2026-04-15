@@ -223,6 +223,16 @@ From spec section 8 — confirm before implementing smart algorithms:
 - Workforce/shift management scope
 - Stone workshop shared entities
 
+## Automation Workflow (Trigger: "Làm task tiếp theo" / "Start next task")
+
+1. **Fetch**: Use the `product-manager` skill to identify the highest priority issue from `gh issue list`.
+2. **Analyze**: Use `gh issue view <id>` to read the full requirement and DoD.
+3. **Audit**: Invoke the `business-auditor` skill to cross-reference the task with `docs/backend-business-logic-vi.md` (BR-* rules).
+4. **Implement**: Automatically activate the `senior-workflow` skill and proceed directly to **Phase 1: Requirements Clarification**.
+5. **Architect**: Use the `integration-architect` skill if the task impacts the API contract or cross-module dependencies.
+
+---
+
 ## PR expectations
 
 - Title: `[module] brief description`

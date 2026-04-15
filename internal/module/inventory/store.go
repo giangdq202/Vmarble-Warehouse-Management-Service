@@ -29,6 +29,10 @@ type store interface {
 
 	insertRemnant(ctx context.Context, r Remnant) error
 	selectAvailableRemnantsByMinDimension(ctx context.Context, minDim domain.Dimension) ([]Remnant, error)
+	// selectTopRemnantSuggestions returns up to `limit` AVAILABLE remnants whose
+	// bounding box fits minDim, ranked by Best Fit (smallest area) + FIFO
+	// (oldest created_at). Each result is LEFT JOINed with storage_locations.
+	selectTopRemnantSuggestions(ctx context.Context, minDim domain.Dimension, limit int) ([]RemnantSuggestion, error)
 	// selectRemnantsByFilter returns a paginated slice of remnants matching the
 	// filter, plus the total count of matching rows.
 	selectRemnantsByFilter(ctx context.Context, f RemnantFilter, p httpkit.PageParams) ([]Remnant, int, error)

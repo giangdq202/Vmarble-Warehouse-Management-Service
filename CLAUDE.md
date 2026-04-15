@@ -212,3 +212,36 @@ From spec section 8 — confirm before implementing smart algorithms:
 - Title: `[module] brief description`
 - Body must include: Summary, Business rule(s) impacted (BR-*), Test plan.
 - Do not merge changes that weaken domain invariants.
+
+---
+
+## Skills
+
+| Skill | Auto-activates when… |
+|-------|----------------------|
+| `senior-workflow` | Starting ANY non-trivial Go feature or fix — always run Phases 1–6 in order |
+| `business-auditor` | Task body mentions a BR-* rule, or touches `service.go` business logic |
+| `product-manager` | Backlog management, sprint planning, creating/triaging GitHub issues |
+| `integration-architect` | New endpoint, API contract change, new cross-module dependency (`deps.go`) |
+
+> **Rule**: `business-auditor` and `integration-architect` run *inside* `senior-workflow` — they do not replace it. `senior-workflow` is always the outer shell.
+
+---
+
+## Automation Workflow
+
+**Trigger**: user says "Làm task tiếp theo" / "Start next task" / picks an issue from the GitHub Projects Kanban board.
+
+1. **Fetch** — invoke `product-manager` skill to identify the highest-priority open issue:
+   ```bash
+   gh issue list --repo giangdq202/Vmarble-Warehouse-Management-Service \
+     --assignee @me --state open --json number,title,labels \
+     | jq 'sort_by(.labels[].name) | .[0]'
+   ```
+2. **Analyze** — read the full requirement and DoD:
+   ```bash
+   gh issue view <number> --repo giangdq202/Vmarble-Warehouse-Management-Service
+   ```
+3. **Audit** — invoke `business-auditor` skill: cross-reference the task against `docs/backend-business-logic-vi.md` and identify all BR-* rules it touches. Block implementation if a rule is unclear.
+4. **Implement** — activate `senior-workflow` skill and start at **Phase 1: Requirements Clarification**. Do not skip to coding.
+5. **Architect** — invoke `integration-architect` skill if the task introduces a new endpoint, modifies an existing DTO in `iface.go`, or adds a new `deps.go` interface. Verify contract consistency with the frontend before merging.

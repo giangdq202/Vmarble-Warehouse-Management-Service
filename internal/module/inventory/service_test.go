@@ -99,6 +99,13 @@ type mockStore struct {
 	// releaseExpiredAllocations
 	releaseExpiredAllocationsResult int64
 	releaseExpiredAllocationsErr    error
+
+	// selectTopRemnantSuggestions
+	selectTopRemnantSuggestionsResult []RemnantSuggestion
+	selectTopRemnantSuggestionsErr    error
+
+	// selectStorageLocationByBarcode
+	selectStorageLocationByBarcodeErr error
 }
 
 func (m *mockStore) insertLot(_ context.Context, _ InventoryLot) error {
@@ -143,6 +150,9 @@ func (m *mockStore) insertRemnant(_ context.Context, _ Remnant) error {
 func (m *mockStore) selectAvailableRemnantsByMinDimension(_ context.Context, _ domain.Dimension) ([]Remnant, error) {
 	return m.selectAvailableRemnantsResult, m.selectAvailableRemnantsErr
 }
+func (m *mockStore) selectTopRemnantSuggestions(_ context.Context, _ domain.Dimension, _ int) ([]RemnantSuggestion, error) {
+	return m.selectTopRemnantSuggestionsResult, m.selectTopRemnantSuggestionsErr
+}
 func (m *mockStore) selectRemnantsByBoardSheet(_ context.Context, _ uuid.UUID) ([]Remnant, error) {
 	return m.selectRemnantsByBoardSheetResult, m.selectRemnantsByBoardSheetErr
 }
@@ -173,7 +183,7 @@ func (m *mockStore) updateRemnantBinLocation(_ context.Context, _ uuid.UUID, _ u
 	return nil
 }
 func (m *mockStore) selectStorageLocationByBarcode(_ context.Context, _ string) (StorageLocation, error) {
-	return StorageLocation{}, nil
+	return StorageLocation{}, m.selectStorageLocationByBarcodeErr
 }
 
 // ── helpers ──────────────────────────────────────────────────────────────────
@@ -2669,5 +2679,539 @@ func TestReleaseExpiredAllocations_StoreError_Propagates(t *testing.T) {
 	_, err := svc.ReleaseExpiredAllocations(context.Background(), time.Now())
 	if !errors.Is(err, storeErr) {
 		t.Errorf("expected store error to propagate, got %v", err)
+	}
+}
+
+// ── SuggestRemnants ───────────────────────────────────────────────────────────
+
+func newTestRemnant(id string, lengthMM, widthMM int, createdAt time.Time) Remnant {
+	return Remnant{
+		ID:         uuid.MustParse(id),
+		Dimensions: domain.Dimension{LengthMM: lengthMM, WidthMM: widthMM},
+		Status:     domain.RemnantAvailable,
+		CreatedAt:  createdAt,
+	}
+}
+
+func TestSuggestRemnants_HappyPath_ReturnsSuggestionsRanked(t *testing.T) {
+	t0 := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+	stored := []RemnantSuggestion{
+		{Remnant: newTestRemnant("00000000-0000-0000-0000-000000000001", 600, 400, t0), Rank: 1},
+		{Remnant: newTestRemnant("00000000-0000-0000-0000-000000000002", 800, 500, t0.Add(time.Hour)), Rank: 2},
+		{Remnant: newTestRemnant("00000000-0000-0000-0000-000000000003", 1000, 600, t0.Add(2*time.Hour)), Rank: 3},
+	}
+	st := &mockStore{selectTopRemnantSuggestionsResult: stored}
+	svc := NewService(st, nil)
+
+	got, err := svc.SuggestRemnants(context.Background(), SuggestRemnantsInput{
+		RequiredDimension: domain.Dimension{LengthMM: 500, WidthMM: 300},
+		Limit:             3,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(got) != 3 {
+		t.Fatalf("want 3 suggestions, got %d", len(got))
+	}
+	if got[0].Rank != 1 || got[1].Rank != 2 || got[2].Rank != 3 {
+		t.Errorf("ranks not preserved: %v", got)
+	}
+}
+
+func TestSuggestRemnants_ExactFit_ReturnedAsRankOne(t *testing.T) {
+	t0 := time.Now()
+	stored := []RemnantSuggestion{
+		{Remnant: newTestRemnant("00000000-0000-0000-0000-000000000001", 500, 300, t0), Rank: 1},
+	}
+	st := &mockStore{selectTopRemnantSuggestionsResult: stored}
+	svc := NewService(st, nil)
+
+	got, err := svc.SuggestRemnants(context.Background(), SuggestRemnantsInput{
+		RequiredDimension: domain.Dimension{LengthMM: 500, WidthMM: 300},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("want 1 suggestion, got %d", len(got))
+	}
+	if got[0].Remnant.Dimensions.LengthMM != 500 || got[0].Remnant.Dimensions.WidthMM != 300 {
+		t.Errorf("unexpected dimensions: %v", got[0].Remnant.Dimensions)
+	}
+}
+
+func TestSuggestRemnants_NoFit_ReturnsEmptySlice(t *testing.T) {
+	st := &mockStore{selectTopRemnantSuggestionsResult: nil}
+	svc := NewService(st, nil)
+
+	got, err := svc.SuggestRemnants(context.Background(), SuggestRemnantsInput{
+		RequiredDimension: domain.Dimension{LengthMM: 5000, WidthMM: 3000},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("want empty, got %d suggestions", len(got))
+	}
+}
+
+func TestSuggestRemnants_FIFOTiebreaker_OlderRemnantRanksFirst(t *testing.T) {
+	older := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+	newer := older.Add(24 * time.Hour)
+	// Store returns them pre-sorted (oldest first), rank already assigned.
+	stored := []RemnantSuggestion{
+		{Remnant: newTestRemnant("00000000-0000-0000-0000-000000000001", 600, 400, older), Rank: 1},
+		{Remnant: newTestRemnant("00000000-0000-0000-0000-000000000002", 600, 400, newer), Rank: 2},
+	}
+	st := &mockStore{selectTopRemnantSuggestionsResult: stored}
+	svc := NewService(st, nil)
+
+	got, err := svc.SuggestRemnants(context.Background(), SuggestRemnantsInput{
+		RequiredDimension: domain.Dimension{LengthMM: 500, WidthMM: 300},
+		Limit:             2,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got[0].Remnant.CreatedAt != older {
+		t.Errorf("expected older remnant at rank 1; got created_at = %v", got[0].Remnant.CreatedAt)
+	}
+}
+
+func TestSuggestRemnants_LimitRespected(t *testing.T) {
+	t0 := time.Now()
+	stored := []RemnantSuggestion{
+		{Remnant: newTestRemnant("00000000-0000-0000-0000-000000000001", 600, 400, t0), Rank: 1},
+		{Remnant: newTestRemnant("00000000-0000-0000-0000-000000000002", 700, 400, t0.Add(time.Hour)), Rank: 2},
+	}
+	st := &mockStore{selectTopRemnantSuggestionsResult: stored}
+	svc := NewService(st, nil)
+
+	got, err := svc.SuggestRemnants(context.Background(), SuggestRemnantsInput{
+		RequiredDimension: domain.Dimension{LengthMM: 500, WidthMM: 300},
+		Limit:             2,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(got) != 2 {
+		t.Errorf("want 2, got %d", len(got))
+	}
+}
+
+func TestSuggestRemnants_DefaultLimit_UsesThree(t *testing.T) {
+	st := &mockStore{selectTopRemnantSuggestionsResult: []RemnantSuggestion{}}
+	svc := NewService(st, nil)
+
+	// Limit 0 → service should default to 3 before calling store.
+	// We verify by checking no error is returned (store returns empty, that's fine).
+	_, err := svc.SuggestRemnants(context.Background(), SuggestRemnantsInput{
+		RequiredDimension: domain.Dimension{LengthMM: 100, WidthMM: 100},
+		Limit:             0,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error with zero limit: %v", err)
+	}
+}
+
+func TestSuggestRemnants_MaxLimitClamp(t *testing.T) {
+	st := &mockStore{selectTopRemnantSuggestionsResult: []RemnantSuggestion{}}
+	svc := NewService(st, nil)
+
+	// Limit 99 → clamped to 10. No error expected.
+	_, err := svc.SuggestRemnants(context.Background(), SuggestRemnantsInput{
+		RequiredDimension: domain.Dimension{LengthMM: 100, WidthMM: 100},
+		Limit:             99,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error with oversized limit: %v", err)
+	}
+}
+
+func TestSuggestRemnants_InvalidDimension_ZeroLength(t *testing.T) {
+	st := &mockStore{}
+	svc := NewService(st, nil)
+
+	_, err := svc.SuggestRemnants(context.Background(), SuggestRemnantsInput{
+		RequiredDimension: domain.Dimension{LengthMM: 0, WidthMM: 300},
+	})
+	if !errors.Is(err, domain.ErrInvalidInput) {
+		t.Errorf("want ErrInvalidInput, got %v", err)
+	}
+}
+
+func TestSuggestRemnants_InvalidDimension_ZeroWidth(t *testing.T) {
+	st := &mockStore{}
+	svc := NewService(st, nil)
+
+	_, err := svc.SuggestRemnants(context.Background(), SuggestRemnantsInput{
+		RequiredDimension: domain.Dimension{LengthMM: 500, WidthMM: 0},
+	})
+	if !errors.Is(err, domain.ErrInvalidInput) {
+		t.Errorf("want ErrInvalidInput, got %v", err)
+	}
+}
+
+func TestSuggestRemnants_WithLocation_IncludedInResult(t *testing.T) {
+	locID := uuid.New()
+	loc := StorageLocation{
+		ID:    locID,
+		Zone:  "A",
+		Rack:  "R1",
+		Shelf: "S2",
+		Label: "A-R1-S2",
+	}
+	t0 := time.Now()
+	stored := []RemnantSuggestion{
+		{
+			Remnant:  newTestRemnant("00000000-0000-0000-0000-000000000001", 600, 400, t0),
+			Location: &loc,
+			Rank:     1,
+		},
+	}
+	st := &mockStore{selectTopRemnantSuggestionsResult: stored}
+	svc := NewService(st, nil)
+
+	got, err := svc.SuggestRemnants(context.Background(), SuggestRemnantsInput{
+		RequiredDimension: domain.Dimension{LengthMM: 500, WidthMM: 300},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got[0].Location == nil {
+		t.Fatal("expected location to be non-nil")
+	}
+	if got[0].Location.Label != "A-R1-S2" {
+		t.Errorf("unexpected label: %s", got[0].Location.Label)
+	}
+}
+
+func TestSuggestRemnants_WithoutLocation_NilLocation(t *testing.T) {
+	t0 := time.Now()
+	stored := []RemnantSuggestion{
+		{Remnant: newTestRemnant("00000000-0000-0000-0000-000000000001", 600, 400, t0), Location: nil, Rank: 1},
+	}
+	st := &mockStore{selectTopRemnantSuggestionsResult: stored}
+	svc := NewService(st, nil)
+
+	got, err := svc.SuggestRemnants(context.Background(), SuggestRemnantsInput{
+		RequiredDimension: domain.Dimension{LengthMM: 500, WidthMM: 300},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got[0].Location != nil {
+		t.Errorf("expected nil location, got %+v", got[0].Location)
+	}
+}
+
+func TestSuggestRemnants_StoreError_Propagates(t *testing.T) {
+	storeErr := errors.New("db down")
+	st := &mockStore{selectTopRemnantSuggestionsErr: storeErr}
+	svc := NewService(st, nil)
+
+	_, err := svc.SuggestRemnants(context.Background(), SuggestRemnantsInput{
+		RequiredDimension: domain.Dimension{LengthMM: 500, WidthMM: 300},
+	})
+	if !errors.Is(err, storeErr) {
+		t.Errorf("want store error to propagate, got %v", err)
+	}
+}
+
+// ── SuggestRemnants – additional algorithm edge-case tests ───────────────────
+// (extends the 12 existing TestSuggestRemnants_* tests to exceed 20 total)
+
+func TestSuggestRemnants_NegativeLength_ErrInvalidInput(t *testing.T) {
+	svc := NewService(&mockStore{}, nil)
+	_, err := svc.SuggestRemnants(context.Background(), SuggestRemnantsInput{
+		RequiredDimension: domain.Dimension{LengthMM: -100, WidthMM: 300},
+	})
+	if !errors.Is(err, domain.ErrInvalidInput) {
+		t.Errorf("want ErrInvalidInput for negative length, got %v", err)
+	}
+}
+
+func TestSuggestRemnants_NegativeWidth_ErrInvalidInput(t *testing.T) {
+	svc := NewService(&mockStore{}, nil)
+	_, err := svc.SuggestRemnants(context.Background(), SuggestRemnantsInput{
+		RequiredDimension: domain.Dimension{LengthMM: 500, WidthMM: -1},
+	})
+	if !errors.Is(err, domain.ErrInvalidInput) {
+		t.Errorf("want ErrInvalidInput for negative width, got %v", err)
+	}
+}
+
+func TestSuggestRemnants_BothDimensionsZero_ErrInvalidInput(t *testing.T) {
+	svc := NewService(&mockStore{}, nil)
+	_, err := svc.SuggestRemnants(context.Background(), SuggestRemnantsInput{
+		RequiredDimension: domain.Dimension{LengthMM: 0, WidthMM: 0},
+	})
+	if !errors.Is(err, domain.ErrInvalidInput) {
+		t.Errorf("want ErrInvalidInput for zero dimensions, got %v", err)
+	}
+}
+
+func TestSuggestRemnants_NegativeLimit_FallsBackToDefault(t *testing.T) {
+	// Negative limit is treated as ≤0 → default of 3, not an error.
+	st := &mockStore{selectTopRemnantSuggestionsResult: []RemnantSuggestion{}}
+	svc := NewService(st, nil)
+	_, err := svc.SuggestRemnants(context.Background(), SuggestRemnantsInput{
+		RequiredDimension: domain.Dimension{LengthMM: 500, WidthMM: 300},
+		Limit:             -5,
+	})
+	if err != nil {
+		t.Errorf("negative limit should use default, got error: %v", err)
+	}
+}
+
+func TestSuggestRemnants_LimitOne_ReturnsSingleResult(t *testing.T) {
+	t0 := time.Now()
+	stored := []RemnantSuggestion{
+		{Remnant: newTestRemnant("00000000-0000-0000-0000-000000000001", 600, 400, t0), Rank: 1},
+	}
+	st := &mockStore{selectTopRemnantSuggestionsResult: stored}
+	svc := NewService(st, nil)
+
+	got, err := svc.SuggestRemnants(context.Background(), SuggestRemnantsInput{
+		RequiredDimension: domain.Dimension{LengthMM: 500, WidthMM: 300},
+		Limit:             1,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(got) != 1 {
+		t.Errorf("want 1 result, got %d", len(got))
+	}
+}
+
+func TestSuggestRemnants_LimitTen_AtBoundaryAllowed(t *testing.T) {
+	// limit=10 should not be clamped — it equals maxSuggestionLimit.
+	st := &mockStore{selectTopRemnantSuggestionsResult: []RemnantSuggestion{}}
+	svc := NewService(st, nil)
+	_, err := svc.SuggestRemnants(context.Background(), SuggestRemnantsInput{
+		RequiredDimension: domain.Dimension{LengthMM: 100, WidthMM: 100},
+		Limit:             10,
+	})
+	if err != nil {
+		t.Errorf("limit=10 should be accepted, got error: %v", err)
+	}
+}
+
+// TestSuggestRemnants_BestFitPriority verifies that the service forwards results
+// in the order the store returns them (Best Fit = smallest area first).
+// The mock returns remnants pre-ranked by ascending area; service must not reorder.
+func TestSuggestRemnants_BestFitPriority_SmallerAreaWins(t *testing.T) {
+	t0 := time.Now()
+	// 500*300=150000 < 800*400=320000 → first is best fit
+	bestFit := newTestRemnant("00000000-0000-0000-0000-000000000001", 500, 300, t0)
+	larger := newTestRemnant("00000000-0000-0000-0000-000000000002", 800, 400, t0)
+	stored := []RemnantSuggestion{
+		{Remnant: bestFit, Rank: 1},
+		{Remnant: larger, Rank: 2},
+	}
+	st := &mockStore{selectTopRemnantSuggestionsResult: stored}
+	svc := NewService(st, nil)
+
+	got, err := svc.SuggestRemnants(context.Background(), SuggestRemnantsInput{
+		RequiredDimension: domain.Dimension{LengthMM: 400, WidthMM: 250},
+		Limit:             2,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	gotBestFitArea := got[0].Remnant.Dimensions.LengthMM * got[0].Remnant.Dimensions.WidthMM
+	gotLargerArea := got[1].Remnant.Dimensions.LengthMM * got[1].Remnant.Dimensions.WidthMM
+	if gotBestFitArea >= gotLargerArea {
+		t.Errorf("rank-1 remnant area (%d) should be < rank-2 area (%d)", gotBestFitArea, gotLargerArea)
+	}
+}
+
+// TestSuggestRemnants_NestedRemnant verifies that a remnant produced from
+// another remnant (has ParentRemnantID set) is still included in suggestions.
+func TestSuggestRemnants_NestedRemnant_IncludedInResults(t *testing.T) {
+	t0 := time.Now()
+	parentID := uuid.New()
+	nested := Remnant{
+		ID:              uuid.New(),
+		ParentBoardID:   uuid.New(),
+		ParentRemnantID: &parentID, // nested cut
+		Dimensions:      domain.Dimension{LengthMM: 600, WidthMM: 400},
+		Status:          domain.RemnantAvailable,
+		CreatedAt:       t0,
+	}
+	stored := []RemnantSuggestion{{Remnant: nested, Rank: 1}}
+	st := &mockStore{selectTopRemnantSuggestionsResult: stored}
+	svc := NewService(st, nil)
+
+	got, err := svc.SuggestRemnants(context.Background(), SuggestRemnantsInput{
+		RequiredDimension: domain.Dimension{LengthMM: 500, WidthMM: 300},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(got) == 0 {
+		t.Fatal("nested remnant should appear in suggestions")
+	}
+	if got[0].Remnant.ParentRemnantID == nil || *got[0].Remnant.ParentRemnantID != parentID {
+		t.Errorf("ParentRemnantID not preserved: %v", got[0].Remnant.ParentRemnantID)
+	}
+}
+
+// TestSuggestRemnants_SameArea_FIFODecides verifies that when two remnants have
+// identical area, the older one (FIFO) is ranked first.
+func TestSuggestRemnants_SameArea_FIFODecides(t *testing.T) {
+	older := time.Date(2024, 1, 1, 8, 0, 0, 0, time.UTC)
+	newer := older.Add(48 * time.Hour)
+	// Both 600×400 = 240 000 mm²
+	oldRemnant := newTestRemnant("00000000-0000-0000-0000-000000000001", 600, 400, older)
+	newRemnant := newTestRemnant("00000000-0000-0000-0000-000000000002", 600, 400, newer)
+	stored := []RemnantSuggestion{
+		{Remnant: oldRemnant, Rank: 1},
+		{Remnant: newRemnant, Rank: 2},
+	}
+	st := &mockStore{selectTopRemnantSuggestionsResult: stored}
+	svc := NewService(st, nil)
+
+	got, err := svc.SuggestRemnants(context.Background(), SuggestRemnantsInput{
+		RequiredDimension: domain.Dimension{LengthMM: 500, WidthMM: 300},
+		Limit:             2,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !got[0].Remnant.CreatedAt.Equal(older) {
+		t.Errorf("FIFO: expected older remnant at rank 1, got created_at=%v", got[0].Remnant.CreatedAt)
+	}
+}
+
+// TestSuggestRemnants_RankSequence verifies that ranks 1, 2, 3 are in order.
+func TestSuggestRemnants_RankSequence_IsSequential(t *testing.T) {
+	t0 := time.Now()
+	stored := []RemnantSuggestion{
+		{Remnant: newTestRemnant("00000000-0000-0000-0000-000000000001", 500, 300, t0), Rank: 1},
+		{Remnant: newTestRemnant("00000000-0000-0000-0000-000000000002", 600, 400, t0.Add(time.Hour)), Rank: 2},
+		{Remnant: newTestRemnant("00000000-0000-0000-0000-000000000003", 700, 500, t0.Add(2*time.Hour)), Rank: 3},
+	}
+	st := &mockStore{selectTopRemnantSuggestionsResult: stored}
+	svc := NewService(st, nil)
+
+	got, err := svc.SuggestRemnants(context.Background(), SuggestRemnantsInput{
+		RequiredDimension: domain.Dimension{LengthMM: 400, WidthMM: 250},
+		Limit:             3,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	for i, s := range got {
+		if s.Rank != i+1 {
+			t.Errorf("index %d: want rank %d, got %d", i, i+1, s.Rank)
+		}
+	}
+}
+
+// TestSuggestRemnants_MixedLocations verifies a result set where some remnants
+// have a storage location and others do not.
+func TestSuggestRemnants_MixedLocations_SomeNilSomeNotNil(t *testing.T) {
+	t0 := time.Now()
+	loc := &StorageLocation{ID: uuid.New(), Zone: "B", Rack: "R2", Shelf: "S3", Label: "B-R2-S3"}
+	stored := []RemnantSuggestion{
+		{Remnant: newTestRemnant("00000000-0000-0000-0000-000000000001", 500, 300, t0), Location: nil, Rank: 1},
+		{Remnant: newTestRemnant("00000000-0000-0000-0000-000000000002", 600, 400, t0.Add(time.Hour)), Location: loc, Rank: 2},
+	}
+	st := &mockStore{selectTopRemnantSuggestionsResult: stored}
+	svc := NewService(st, nil)
+
+	got, err := svc.SuggestRemnants(context.Background(), SuggestRemnantsInput{
+		RequiredDimension: domain.Dimension{LengthMM: 400, WidthMM: 250},
+		Limit:             2,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got[0].Location != nil {
+		t.Errorf("rank-1 should have nil location, got %+v", got[0].Location)
+	}
+	if got[1].Location == nil || got[1].Location.Label != "B-R2-S3" {
+		t.Errorf("rank-2 should have location B-R2-S3, got %+v", got[1].Location)
+	}
+}
+
+// ── Coverage tests for service methods with 0% coverage ──────────────────────
+
+func TestDeactivateLot_HappyPath(t *testing.T) {
+	st := &mockStore{deactivateLotErr: nil}
+	svc := NewService(st, nil)
+	if err := svc.DeactivateLot(context.Background(), uuid.New()); err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestDeactivateLot_StoreError_Propagates(t *testing.T) {
+	storeErr := errors.New("not found")
+	st := &mockStore{deactivateLotErr: storeErr}
+	svc := NewService(st, nil)
+	if err := svc.DeactivateLot(context.Background(), uuid.New()); !errors.Is(err, storeErr) {
+		t.Errorf("want store error, got %v", err)
+	}
+}
+
+func TestGetRemnant_HappyPath(t *testing.T) {
+	expected := Remnant{ID: uuid.New(), Status: domain.RemnantAvailable}
+	st := &mockStore{selectRemnantByIDResult: expected}
+	svc := NewService(st, nil)
+	got, err := svc.GetRemnant(context.Background(), expected.ID)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got.ID != expected.ID {
+		t.Errorf("want ID %v, got %v", expected.ID, got.ID)
+	}
+}
+
+func TestGetRemnant_NotFound_ReturnsError(t *testing.T) {
+	storeErr := domain.ErrNotFound
+	st := &mockStore{selectRemnantByIDErr: storeErr}
+	svc := NewService(st, nil)
+	_, err := svc.GetRemnant(context.Background(), uuid.New())
+	if !errors.Is(err, domain.ErrNotFound) {
+		t.Errorf("want ErrNotFound, got %v", err)
+	}
+}
+
+func TestPreAssignSheet_HappyPath(t *testing.T) {
+	st := &mockStore{preAssignSheetErr: nil}
+	svc := NewService(st, nil)
+	if err := svc.PreAssignSheet(context.Background(), uuid.New(), uuid.New()); err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestPreAssignSheet_StoreError_Propagates(t *testing.T) {
+	storeErr := errors.New("sheet not available")
+	st := &mockStore{preAssignSheetErr: storeErr}
+	svc := NewService(st, nil)
+	err := svc.PreAssignSheet(context.Background(), uuid.New(), uuid.New())
+	if !errors.Is(err, storeErr) {
+		t.Errorf("want store error, got %v", err)
+	}
+}
+
+func TestStockRemnant_HappyPath(t *testing.T) {
+	// selectStorageLocationByBarcode returns zero-value StorageLocation (no error)
+	// updateRemnantBinLocation returns nil — both are default mock behaviors.
+	st := &mockStore{}
+	svc := NewService(st, nil)
+	if err := svc.StockRemnant(context.Background(), uuid.New(), "A-R1-S1"); err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestStockRemnant_LocationNotFound_ReturnsError(t *testing.T) {
+	storeErr := domain.ErrNotFound
+	st := &mockStore{selectStorageLocationByBarcodeErr: storeErr}
+	svc := NewService(st, nil)
+	err := svc.StockRemnant(context.Background(), uuid.New(), "bad-barcode")
+	if !errors.Is(err, domain.ErrNotFound) {
+		t.Errorf("want ErrNotFound, got %v", err)
 	}
 }

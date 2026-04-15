@@ -28,6 +28,7 @@ func (h *Handler) Register(rg *gin.RouterGroup) {
 	inv.GET("/sheets/:id/lineage", h.lineage)
 	inv.POST("/cuts", h.recordCut)
 	inv.GET("/remnants", h.listRemnants)
+	inv.GET("/remnants/suggestions", h.suggestRemnants)
 	inv.GET("/remnants/:id", h.getRemnant)
 	inv.GET("/remnants/:id/lineage", h.getRemnantLineage)
 	inv.POST("/remnants/:id/allocate", h.allocateRemnant)
@@ -239,6 +240,43 @@ func (h *Handler) listRemnants(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, result)
+}
+
+// suggestRemnants godoc
+//
+// @Summary      Suggest best-fit remnants for a required dimension
+// @Description  Returns up to `limit` AVAILABLE remnants ranked by Best Fit (smallest area) + FIFO (oldest first). Each suggestion includes the remnant's storage location when available.
+// @Tags         inventory
+// @Produce      json
+// @Param        length_mm  query     int   true   "required length in mm"
+// @Param        width_mm   query     int   true   "required width in mm"
+// @Param        limit      query     int   false  "max results (default 3, max 10)"
+// @Security     BearerAuth
+// @Success      200  {array}   RemnantSuggestion
+// @Failure      400  {object}  map[string]string
+// @Router       /api/v1/inventory/remnants/suggestions [get]
+func (h *Handler) suggestRemnants(c *gin.Context) {
+	lengthMM, err := strconv.Atoi(c.Query("length_mm"))
+	if err != nil || lengthMM <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "length_mm must be a positive integer"})
+		return
+	}
+	widthMM, err := strconv.Atoi(c.Query("width_mm"))
+	if err != nil || widthMM <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "width_mm must be a positive integer"})
+		return
+	}
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "3"))
+
+	suggestions, err := h.svc.SuggestRemnants(c.Request.Context(), SuggestRemnantsInput{
+		RequiredDimension: domain.Dimension{LengthMM: lengthMM, WidthMM: widthMM},
+		Limit:             limit,
+	})
+	if err != nil {
+		httpkit.Error(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, suggestions)
 }
 
 // getRemnantLineage godoc
