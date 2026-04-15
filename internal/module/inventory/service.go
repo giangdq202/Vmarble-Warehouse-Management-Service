@@ -41,6 +41,7 @@ func (s *service) ReceiveStock(ctx context.Context, in ReceiveStockInput) (Inven
 		return InventoryLot{}, err
 	}
 
+	lotBatch := &lot.SupplierRef
 	sheets := make([]BoardSheet, in.Quantity)
 	for i := 0; i < in.Quantity; i++ {
 		sheets[i] = BoardSheet{
@@ -49,6 +50,7 @@ func (s *service) ReceiveStock(ctx context.Context, in ReceiveStockInput) (Inven
 			Dimensions:   in.Dimensions,
 			CostPerSheet: in.CostPerSheet,
 			Status:       "AVAILABLE",
+			LotBatch:     lotBatch,
 		}
 	}
 	if err := s.st.insertSheets(ctx, sheets); err != nil {
