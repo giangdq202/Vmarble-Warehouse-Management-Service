@@ -2,11 +2,24 @@ package barcode
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
+	qrcode "github.com/skip2/go-qrcode"
 	"github.com/vmarble/warehouse-management-service/internal/domain"
 )
+
+const qrSize = 256 // pixels
+
+// qrPayload is the JSON content encoded into the QR image.
+type qrPayload struct {
+	ID         string `json:"id"`
+	SKUCode    string `json:"sku_code"`
+	Dimensions string `json:"dimensions"`
+	POID       string `json:"po_id"`
+}
 
 type service struct {
 	st store
@@ -83,4 +96,32 @@ func (s *service) RecordScan(ctx context.Context, in RecordScanInput) (ScanEvent
 
 func (s *service) ListScans(ctx context.Context, barcodeID uuid.UUID) ([]ScanEvent, error) {
 	return s.st.selectScanEventsByBarcode(ctx, barcodeID)
+}
+
+// GenerateQRCode returns a PNG image containing the barcode's key metadata
+// encoded as JSON. Scanning the QR with a mobile app yields:
+//
+//	{"id":"<uuid>","sku_code":"...","dimensions":"...","po_id":"<uuid>"}
+func (s *service) GenerateQRCode(ctx context.Context, barcodeID uuid.UUID) ([]byte, error) {
+	bc, err := s.st.selectBarcodeByID(ctx, barcodeID)
+	if err != nil {
+		return nil, err
+	}
+
+	payload := qrPayload{
+		ID:         bc.ID.String(),
+		SKUCode:    bc.SKUCode,
+		Dimensions: bc.Dimensions,
+		POID:       bc.POID.String(),
+	}
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("marshal qr payload: %w", err)
+	}
+
+	png, err := qrcode.Encode(string(raw), qrcode.Medium, qrSize)
+	if err != nil {
+		return nil, fmt.Errorf("encode qr code: %w", err)
+	}
+	return png, nil
 }

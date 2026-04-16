@@ -20,6 +20,7 @@ func (h *Handler) Register(rg *gin.RouterGroup) {
 	rg.POST("/barcodes", h.generate)
 	rg.GET("/barcodes", h.listByWorkOrder)
 	rg.GET("/barcodes/:id", h.lookup)
+	rg.GET("/barcodes/:id/qr", h.generateQR)
 	rg.POST("/barcodes/:id/scans", h.recordScan)
 	rg.GET("/barcodes/:id/scans", h.listScans)
 }
@@ -101,6 +102,32 @@ func (h *Handler) lookup(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, bc)
+}
+
+// generateQR godoc
+//
+// @Summary      Generate QR code image for a barcode
+// @Tags         barcode
+// @Produce      image/png
+// @Param        id   path      string  true  "barcode id (uuid)"
+// @Success      200  {file}    binary
+// @Failure      400  {object}  map[string]string
+// @Failure      404  {object}  map[string]string
+// @Security     BearerAuth
+// @Failure      401  {object}  map[string]string
+// @Router       /api/v1/barcodes/{id}/qr [get]
+func (h *Handler) generateQR(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+	png, err := h.svc.GenerateQRCode(c.Request.Context(), id)
+	if err != nil {
+		httpkit.Error(c, err)
+		return
+	}
+	c.Data(http.StatusOK, "image/png", png)
 }
 
 // recordScan godoc

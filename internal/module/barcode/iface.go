@@ -59,4 +59,5 @@ type Service interface {
 	ListBarcodesByWorkOrder(ctx context.Context, workOrderID uuid.UUID) ([]Barcode, error)
 	RecordScan(ctx context.Context, in RecordScanInput) (ScanEvent, error)
 	ListScans(ctx context.Context, barcodeID uuid.UUID) ([]ScanEvent, error)
+	GenerateQRCode(ctx context.Context, barcodeID uuid.UUID) ([]byte, error)
 }

@@ -364,3 +364,35 @@ func TestListScans_StoreError_Propagates(t *testing.T) {
 		t.Errorf("expected selectScanEventsByBarcode error to propagate, got %v", err)
 	}
 }
+
+// ── TestGenerateQRCode ────────────────────────────────────────────────────────
+
+func TestGenerateQRCode_HappyPath_ReturnsPNGBytes(t *testing.T) {
+	id := uuid.New()
+	bc := storedBarcode(id)
+	bc.SKUCode = "SKU-001"
+	bc.Dimensions = "1200x600"
+	bc.POID = uuid.New()
+
+	st := &mockStore{selectBarcodeByIDResult: bc}
+	svc := NewService(st)
+
+	png, err := svc.GenerateQRCode(context.Background(), id)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// PNG magic bytes: 0x89 0x50 0x4E 0x47
+	if len(png) < 4 || png[0] != 0x89 || png[1] != 0x50 || png[2] != 0x4E || png[3] != 0x47 {
+		t.Errorf("response is not a valid PNG (first bytes: %v)", png[:4])
+	}
+}
+
+func TestGenerateQRCode_BarcodeNotFound_PropagatesError(t *testing.T) {
+	st := &mockStore{selectBarcodeByIDErr: domain.NewBizError(domain.ErrNotFound, "barcode not found")}
+	svc := NewService(st)
+
+	_, err := svc.GenerateQRCode(context.Background(), uuid.New())
+	if !errors.Is(err, domain.ErrNotFound) {
+		t.Errorf("expected ErrNotFound, got %v", err)
+	}
+}
