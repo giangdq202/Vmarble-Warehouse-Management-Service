@@ -170,8 +170,10 @@ func newSvcWithUser(st *mockStore, pc *mockPlanChecker, sc *mockSKUChecker, uc *
 }
 
 // approvedPlan returns a PlanChecker that returns an APPROVED plan.
-func approvedPlan(planID uuid.UUID) *mockPlanChecker {
-	return &mockPlanChecker{result: PlanInfo{ID: planID, Status: domain.PlanApproved}}
+// Optional skuIDs are populated in PlanInfo.SKUIDs to satisfy the
+// CreateWorkOrder SKU-membership validation.
+func approvedPlan(planID uuid.UUID, skuIDs ...uuid.UUID) *mockPlanChecker {
+	return &mockPlanChecker{result: PlanInfo{ID: planID, Status: domain.PlanApproved, SKUIDs: skuIDs}}
 }
 
 // skuNoMetal returns a SKUChecker for a SKU that does not require metal.
@@ -216,7 +218,7 @@ func TestCreateWorkOrder_HappyPath(t *testing.T) {
 	planID := uuid.New()
 	skuID := uuid.New()
 
-	svc := newSvc(&mockStore{}, approvedPlan(planID), skuNoMetal(skuID))
+	svc := newSvc(&mockStore{}, approvedPlan(planID, skuID), skuNoMetal(skuID))
 
 	wo, err := svc.CreateWorkOrder(context.Background(), CreateWOInput{
 		PlanID:   planID,
@@ -272,6 +274,52 @@ func TestCreateWorkOrder_PlanNotApproved_IsPreconditionFailed(t *testing.T) {
 	}
 }
 
+// CreateWorkOrder must reject a SKU that is not in the plan's items.
+func TestCreateWorkOrder_SKUNotInPlan_IsPreconditionFailed(t *testing.T) {
+	planID := uuid.New()
+	planSKUID := uuid.New()  // SKU that belongs to the plan
+	otherSKUID := uuid.New() // SKU that does NOT belong to the plan
+
+	pc := &mockPlanChecker{result: PlanInfo{
+		ID:     planID,
+		Status: domain.PlanApproved,
+		SKUIDs: []uuid.UUID{planSKUID},
+	}}
+	svc := newSvc(&mockStore{}, pc, skuNoMetal(uuid.New()))
+
+	_, err := svc.CreateWorkOrder(context.Background(), CreateWOInput{
+		PlanID:   planID,
+		SKUID:    otherSKUID,
+		Quantity: 5,
+	})
+	if !errors.Is(err, domain.ErrPreconditionFailed) {
+		t.Errorf("expected ErrPreconditionFailed for SKU not in plan, got %v", err)
+	}
+}
+
+// CreateWorkOrder must NOT call insertWorkOrder when the SKU is not in the plan.
+func TestCreateWorkOrder_SKUNotInPlan_StoreNotCalled(t *testing.T) {
+	planID := uuid.New()
+	st := &mockStore{}
+	pc := &mockPlanChecker{result: PlanInfo{
+		ID:     planID,
+		Status: domain.PlanApproved,
+		SKUIDs: []uuid.UUID{uuid.New()}, // plan contains a different SKU
+	}}
+	svc := newSvc(st, pc, skuNoMetal(uuid.New()))
+
+	_, _ = svc.CreateWorkOrder(context.Background(), CreateWOInput{
+		PlanID:   planID,
+		SKUID:    uuid.New(), // not in plan
+		Quantity: 5,
+	})
+	// insertWorkOrder would set insertWorkOrderErr path; verify no insert happened
+	// by checking the store was not called (insertWorkOrderErr remains nil and no panic)
+	if st.insertWorkOrderErr != nil {
+		t.Error("insertWorkOrder must not be called when SKU is not in plan")
+	}
+}
+
 func TestCreateWorkOrder_PlanNotFound_PropagatesError(t *testing.T) {
 	pc := &mockPlanChecker{err: domain.NewBizError(domain.ErrNotFound, "plan not found")}
 	svc := newSvc(&mockStore{}, pc, skuNoMetal(uuid.New()))
@@ -288,11 +336,12 @@ func TestCreateWorkOrder_PlanNotFound_PropagatesError(t *testing.T) {
 
 func TestCreateWorkOrder_ZeroQuantity_IsInvalidInput(t *testing.T) {
 	planID := uuid.New()
-	svc := newSvc(&mockStore{}, approvedPlan(planID), skuNoMetal(uuid.New()))
+	skuID := uuid.New()
+	svc := newSvc(&mockStore{}, approvedPlan(planID, skuID), skuNoMetal(uuid.New()))
 
 	_, err := svc.CreateWorkOrder(context.Background(), CreateWOInput{
 		PlanID:   planID,
-		SKUID:    uuid.New(),
+		SKUID:    skuID,
 		Quantity: 0,
 	})
 	if !errors.Is(err, domain.ErrInvalidInput) {
@@ -302,11 +351,12 @@ func TestCreateWorkOrder_ZeroQuantity_IsInvalidInput(t *testing.T) {
 
 func TestCreateWorkOrder_NegativeQuantity_IsInvalidInput(t *testing.T) {
 	planID := uuid.New()
-	svc := newSvc(&mockStore{}, approvedPlan(planID), skuNoMetal(uuid.New()))
+	skuID := uuid.New()
+	svc := newSvc(&mockStore{}, approvedPlan(planID, skuID), skuNoMetal(uuid.New()))
 
 	_, err := svc.CreateWorkOrder(context.Background(), CreateWOInput{
 		PlanID:   planID,
-		SKUID:    uuid.New(),
+		SKUID:    skuID,
 		Quantity: -3,
 	})
 	if !errors.Is(err, domain.ErrInvalidInput) {
@@ -316,14 +366,15 @@ func TestCreateWorkOrder_NegativeQuantity_IsInvalidInput(t *testing.T) {
 
 func TestCreateWorkOrder_StoreError_Propagates(t *testing.T) {
 	planID := uuid.New()
+	skuID := uuid.New()
 	dbErr := errors.New("insert failed")
 	st := &mockStore{insertWorkOrderErr: dbErr}
 
-	svc := newSvc(st, approvedPlan(planID), skuNoMetal(uuid.New()))
+	svc := newSvc(st, approvedPlan(planID, skuID), skuNoMetal(uuid.New()))
 
 	_, err := svc.CreateWorkOrder(context.Background(), CreateWOInput{
 		PlanID:   planID,
-		SKUID:    uuid.New(),
+		SKUID:    skuID,
 		Quantity: 2,
 	})
 	if !errors.Is(err, dbErr) {

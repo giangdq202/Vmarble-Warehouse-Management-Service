@@ -194,7 +194,11 @@ func (a *planAdapter) GetPlan(ctx context.Context, planID uuid.UUID) (production
 	if err != nil {
 		return production.PlanInfo{}, err
 	}
-	return production.PlanInfo{ID: p.ID, Status: p.Status}, nil
+	skuIDs := make([]uuid.UUID, len(p.Items))
+	for i, item := range p.Items {
+		skuIDs[i] = item.SKUID
+	}
+	return production.PlanInfo{ID: p.ID, Status: p.Status, SKUIDs: skuIDs}, nil
 }
 
 type skuAdapter struct {
