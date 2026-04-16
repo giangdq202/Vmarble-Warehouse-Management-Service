@@ -223,8 +223,10 @@ From spec section 8 — confirm before implementing smart algorithms:
 | `business-auditor` | Task body mentions a BR-* rule, or touches `service.go` business logic |
 | `product-manager` | Backlog management, sprint planning, creating/triaging GitHub issues |
 | `integration-architect` | New endpoint, API contract change, new cross-module dependency (`deps.go`) |
+| `deploy` | User says "deploy", "docker", "CI/CD", "go live", "staging", "production", "health check" |
+| `rbac-hardener` | User says "phân quyền", "rbac", "role guard", "access control", "security audit", or before go-live |
 
-> **Rule**: `business-auditor` and `integration-architect` run *inside* `senior-workflow` — they do not replace it. `senior-workflow` is always the outer shell.
+> **Rule**: `business-auditor` and `integration-architect` run *inside* `senior-workflow` — they do not replace it. `senior-workflow` is always the outer shell. `rbac-hardener` should run at least once before first production deploy.
 
 ---
 
