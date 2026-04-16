@@ -6,6 +6,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/vmarble/warehouse-management-service/internal/domain"
+	"github.com/vmarble/warehouse-management-service/internal/platform/auth"
 	"github.com/vmarble/warehouse-management-service/internal/platform/httpkit"
 )
 
@@ -18,10 +19,10 @@ func NewHandler(s Service) *Handler {
 }
 
 func (h *Handler) Register(rg *gin.RouterGroup) {
-	rg.POST("/pos", h.create)
+	rg.POST("/pos", auth.RequireRole(auth.RoleAccountant, auth.RoleAdmin), h.create)
 	rg.GET("/pos", h.list)
 	rg.GET("/pos/:id", h.get)
-	rg.DELETE("/pos/:id", h.delete)
+	rg.DELETE("/pos/:id", auth.RequireRole(auth.RoleAccountant, auth.RoleAdmin), h.delete)
 	rg.GET("/pos/:id/line-items", h.lineItems)
 }
 

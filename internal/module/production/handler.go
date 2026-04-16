@@ -18,13 +18,13 @@ func NewHandler(s Service) *Handler {
 }
 
 func (h *Handler) Register(rg *gin.RouterGroup) {
-	rg.POST("/work-orders", h.create)
+	rg.POST("/work-orders", auth.RequireRole(auth.RolePlanner, auth.RoleCNCManager, auth.RoleAdmin), h.create)
 	rg.GET("/work-orders", h.list)
 	// /mine must be registered before /:id to avoid Gin treating "mine" as an id param.
 	rg.GET("/work-orders/mine", auth.RequireRole(auth.RoleCNC), h.listMine)
 	rg.GET("/work-orders/:id", h.get)
-	rg.POST("/work-orders/:id/advance", h.advance)
-	rg.POST("/work-orders/:id/consumptions", h.recordConsumption)
+	rg.POST("/work-orders/:id/advance", auth.RequireRole(auth.RoleCNC, auth.RoleCNCManager, auth.RoleWarehouse, auth.RoleForeman), h.advance)
+	rg.POST("/work-orders/:id/consumptions", auth.RequireRole(auth.RoleWarehouse, auth.RoleForeman), h.recordConsumption)
 	rg.GET("/work-orders/:id/consumptions", h.listConsumptions)
 	rg.POST("/work-orders/:id/assign", auth.RequireRole(auth.RoleCNCManager), h.assign)
 	rg.POST("/work-orders/:id/suggest-assignment", auth.RequireRole(auth.RoleCNCManager), h.suggestAssignment)

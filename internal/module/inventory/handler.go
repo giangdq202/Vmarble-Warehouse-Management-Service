@@ -7,6 +7,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/vmarble/warehouse-management-service/internal/domain"
+	"github.com/vmarble/warehouse-management-service/internal/platform/auth"
 	"github.com/vmarble/warehouse-management-service/internal/platform/httpkit"
 )
 
@@ -20,20 +21,20 @@ func NewHandler(s Service) *Handler {
 
 func (h *Handler) Register(rg *gin.RouterGroup) {
 	inv := rg.Group("/inventory")
-	inv.POST("/lots", h.receiveStock)
+	inv.POST("/lots", auth.RequireRole(auth.RoleWarehouse, auth.RoleAdmin), h.receiveStock)
 	inv.GET("/lots", h.listLots)
-	inv.DELETE("/lots/:id", h.deleteLot)
+	inv.DELETE("/lots/:id", auth.RequireRole(auth.RoleWarehouse, auth.RoleAdmin), h.deleteLot)
 	inv.GET("/sheets", h.listSheets)
 	inv.GET("/sheets/:id", h.getSheet)
 	inv.GET("/sheets/:id/lineage", h.lineage)
-	inv.POST("/cuts", h.recordCut)
+	inv.POST("/cuts", auth.RequireRole(auth.RoleWarehouse, auth.RoleCNC, auth.RoleCNCManager), h.recordCut)
 	inv.GET("/remnants", h.listRemnants)
 	inv.GET("/remnants/suggestions", h.suggestRemnants)
 	inv.GET("/remnants/:id", h.getRemnant)
 	inv.GET("/remnants/:id/lineage", h.getRemnantLineage)
-	inv.POST("/remnants/:id/allocate", h.allocateRemnant)
-	inv.POST("/remnants/:id/waste", h.markWaste)
-	inv.POST("/remnants/:id/stock", h.stockRemnant)
+	inv.POST("/remnants/:id/allocate", auth.RequireRole(auth.RoleWarehouse, auth.RoleCNC, auth.RoleCNCManager), h.allocateRemnant)
+	inv.POST("/remnants/:id/waste", auth.RequireRole(auth.RoleWarehouse, auth.RoleAdmin), h.markWaste)
+	inv.POST("/remnants/:id/stock", auth.RequireRole(auth.RoleWarehouse), h.stockRemnant)
 
 	rg.GET("/storage-locations", h.listStorageLocations)
 }
