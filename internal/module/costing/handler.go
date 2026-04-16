@@ -5,6 +5,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/vmarble/warehouse-management-service/internal/platform/auth"
 	"github.com/vmarble/warehouse-management-service/internal/platform/httpkit"
 )
 
@@ -17,10 +18,10 @@ func NewHandler(s Service) *Handler {
 }
 
 func (h *Handler) Register(rg *gin.RouterGroup) {
-	rg.POST("/costing/:workOrderID/compute", h.compute)
-	rg.POST("/costing/:workOrderID/finalize", h.finalize)
-	rg.GET("/costing/:workOrderID", h.get)
-	rg.GET("/costing", h.list)
+	rg.POST("/costing/:workOrderID/compute", auth.RequireRole(auth.RoleAccountant, auth.RoleAdmin), h.compute)
+	rg.POST("/costing/:workOrderID/finalize", auth.RequireRole(auth.RoleAccountant, auth.RoleAdmin), h.finalize)
+	rg.GET("/costing/:workOrderID", auth.RequireRole(auth.RoleAccountant, auth.RolePlanner, auth.RoleAdmin), h.get)
+	rg.GET("/costing", auth.RequireRole(auth.RoleAccountant, auth.RoleAdmin), h.list)
 }
 
 // computeCost godoc

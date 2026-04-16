@@ -6,6 +6,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/vmarble/warehouse-management-service/internal/domain"
+	"github.com/vmarble/warehouse-management-service/internal/platform/auth"
 	"github.com/vmarble/warehouse-management-service/internal/platform/httpkit"
 )
 
@@ -18,17 +19,17 @@ func NewHandler(s Service) *Handler {
 }
 
 func (h *Handler) Register(rg *gin.RouterGroup) {
-	rg.POST("/materials", h.createMaterial)
+	rg.POST("/materials", auth.RequireRole(auth.RoleWarehouse, auth.RoleAdmin), h.createMaterial)
 	rg.GET("/materials", h.listMaterials)
 	rg.GET("/materials/:id", h.getMaterial)
-	rg.DELETE("/materials/:id", h.deleteMaterial)
+	rg.DELETE("/materials/:id", auth.RequireRole(auth.RoleAdmin), h.deleteMaterial)
 
-	rg.POST("/skus", h.createSKU)
+	rg.POST("/skus", auth.RequireRole(auth.RoleWarehouse, auth.RoleAdmin), h.createSKU)
 	rg.GET("/skus", h.listSKUs)
 	rg.GET("/skus/:id", h.getSKU)
-	rg.DELETE("/skus/:id", h.deleteSKU)
+	rg.DELETE("/skus/:id", auth.RequireRole(auth.RoleAdmin), h.deleteSKU)
 
-	rg.PUT("/skus/:id/bom", h.setBOM)
+	rg.PUT("/skus/:id/bom", auth.RequireRole(auth.RoleWarehouse, auth.RolePlanner, auth.RoleAdmin), h.setBOM)
 	rg.GET("/skus/:id/bom", h.getBOM)
 }
 

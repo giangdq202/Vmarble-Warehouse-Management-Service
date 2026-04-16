@@ -5,6 +5,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/vmarble/warehouse-management-service/internal/platform/auth"
 	"github.com/vmarble/warehouse-management-service/internal/platform/httpkit"
 )
 
@@ -17,11 +18,11 @@ func NewHandler(s Service) *Handler {
 }
 
 func (h *Handler) Register(rg *gin.RouterGroup) {
-	rg.POST("/barcodes", h.generate)
+	rg.POST("/barcodes", auth.RequireRole(auth.RoleWarehouse, auth.RoleCNC, auth.RoleCNCManager), h.generate)
 	rg.GET("/barcodes", h.listByWorkOrder)
 	rg.GET("/barcodes/:id", h.lookup)
 	rg.GET("/barcodes/:id/qr", h.generateQR)
-	rg.POST("/barcodes/:id/scans", h.recordScan)
+	rg.POST("/barcodes/:id/scans", auth.RequireRole(auth.RoleCNC, auth.RoleWarehouse, auth.RoleForeman), h.recordScan)
 	rg.GET("/barcodes/:id/scans", h.listScans)
 }
 
