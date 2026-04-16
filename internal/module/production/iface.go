@@ -55,9 +55,12 @@ type AssignWorkOrderInput struct {
 // AdvanceStatusInput is the request to advance a work order's status.
 // SheetID is optional — when provided and the target status is IN_CUTTING,
 // the sheet will be pre-assigned to the work order before the transition.
+// CallerID is optional — when provided and the target status is IN_CUTTING,
+// the caller must be the assigned CNC operator for this work order.
 type AdvanceStatusInput struct {
-	To      domain.WorkOrderStatus `json:"status"`
-	SheetID *uuid.UUID             `json:"sheet_id,omitempty"`
+	To       domain.WorkOrderStatus `json:"status"`
+	SheetID  *uuid.UUID             `json:"sheet_id,omitempty"`
+	CallerID *uuid.UUID             `json:"-"` // populated by handler from JWT claims, not from request body
 }
 
 type SuggestAssignmentResult struct {

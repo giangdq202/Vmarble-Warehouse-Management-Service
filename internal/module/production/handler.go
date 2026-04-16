@@ -149,6 +149,12 @@ func (h *Handler) advance(c *gin.Context) {
 	if !httpkit.Bind(c, &in) {
 		return
 	}
+	// Populate CallerID from JWT so service can enforce operator identity check.
+	if identity, ok := auth.FromContext(c); ok {
+		if callerID, err := uuid.Parse(identity.UserID); err == nil {
+			in.CallerID = &callerID
+		}
+	}
 	if err := h.svc.AdvanceStatus(c.Request.Context(), id, in); err != nil {
 		httpkit.Error(c, err)
 		return

@@ -96,6 +96,18 @@ func (svc *service) AdvanceStatus(ctx context.Context, woID uuid.UUID, in Advanc
 		return domain.NewBizError(domain.ErrInvalidTransition, err.Error())
 	}
 
+	// When advancing to IN_CUTTING, enforce assignment invariant (Spec 5.1):
+	// - WO must already be assigned to a CNC operator.
+	// - If a CallerID is provided (from JWT), it must match the assigned operator.
+	if in.To == domain.WOInCutting {
+		if wo.AssignedTo == nil {
+			return domain.NewBizError(domain.ErrPreconditionFailed, "work order must be assigned to a CNC operator before cutting starts")
+		}
+		if in.CallerID != nil && *in.CallerID != *wo.AssignedTo {
+			return domain.NewBizError(domain.ErrPreconditionFailed, "only the assigned CNC operator can start cutting this work order")
+		}
+	}
+
 	if in.To == domain.WOCompleted {
 		sku, err := svc.sc.GetSKU(ctx, wo.SKUID)
 		if err != nil {

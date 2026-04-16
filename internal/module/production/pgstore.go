@@ -165,11 +165,18 @@ func (s *pgStore) updateWorkOrderStatus(ctx context.Context, id uuid.UUID, statu
 }
 
 func (s *pgStore) updateWorkOrderAssignment(ctx context.Context, woID uuid.UUID, userID uuid.UUID, assignedAt time.Time) error {
-	_, err := s.pool.Exec(ctx,
-		`UPDATE work_orders SET assigned_to = $1, assigned_at = $2 WHERE id = $3`,
+	tag, err := s.pool.Exec(ctx,
+		`UPDATE work_orders SET assigned_to = $1, assigned_at = $2
+		 WHERE id = $3 AND assigned_to IS NULL`,
 		userID, assignedAt, woID,
 	)
-	return err
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return domain.NewBizError(domain.ErrPreconditionFailed, "work order is already assigned to another operator")
+	}
+	return nil
 }
 
 func (s *pgStore) insertConsumption(ctx context.Context, cr ConsumptionRecord) error {

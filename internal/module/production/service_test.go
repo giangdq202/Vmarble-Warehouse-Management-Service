@@ -210,6 +210,16 @@ func woWithStatus(woID uuid.UUID, status domain.WorkOrderStatus) WorkOrder {
 	}
 }
 
+// assignedWO returns a WorkOrder in the given status with AssignedTo populated.
+// The second return value is the assigned operator's UUID so callers can use it
+// in CallerID checks or assertions.
+func assignedWO(woID uuid.UUID, status domain.WorkOrderStatus) (WorkOrder, uuid.UUID) {
+	userID := uuid.New()
+	wo := woWithStatus(woID, status)
+	wo.AssignedTo = &userID
+	return wo, userID
+}
+
 // ═════════════════════════════════════════════════════════════════════════════
 // CreateWorkOrder
 // ═════════════════════════════════════════════════════════════════════════════
@@ -537,8 +547,14 @@ func TestAdvanceStatus_ValidTransitions(t *testing.T) {
 		t.Run(string(tc.from)+"->"+string(tc.to), func(t *testing.T) {
 			woID := uuid.New()
 			skuID := uuid.New()
+			wo := woWithStatus(woID, tc.from)
+			// PLANNED→IN_CUTTING requires an assigned operator (Spec 5.1).
+			if tc.from == domain.WOPlanned {
+				userID := uuid.New()
+				wo.AssignedTo = &userID
+			}
 			st := &mockStore{
-				selectWorkOrderByIDResult: woWithStatus(woID, tc.from),
+				selectWorkOrderByIDResult: wo,
 				hasMetalConsumptionResult: true, // always satisfy BR-P04 for metal check
 			}
 			// Use skuNoMetal to avoid BR-P04 interference on most transitions;
@@ -616,8 +632,9 @@ func TestAdvanceStatus_WorkOrderNotFound_PropagatesError(t *testing.T) {
 func TestAdvanceStatus_StoreUpdateError_Propagates(t *testing.T) {
 	woID := uuid.New()
 	dbErr := errors.New("update failed")
+	wo, _ := assignedWO(woID, domain.WOPlanned)
 	st := &mockStore{
-		selectWorkOrderByIDResult: woWithStatus(woID, domain.WOPlanned),
+		selectWorkOrderByIDResult: wo,
 		updateWorkOrderStatusErr:  dbErr,
 	}
 	svc := newSvc(st, approvedPlan(uuid.New()), skuNoMetal(uuid.New()))
@@ -758,8 +775,13 @@ func TestAdvanceStatus_NonCompletedTransitions_DoNotTriggerMetalCheck(t *testing
 		t.Run(string(tc.from)+"->"+string(tc.to), func(t *testing.T) {
 			woID := uuid.New()
 			skuID := uuid.New()
+			wo := woWithStatus(woID, tc.from)
+			if tc.from == domain.WOPlanned {
+				userID := uuid.New()
+				wo.AssignedTo = &userID
+			}
 			st := &mockStore{
-				selectWorkOrderByIDResult: woWithStatus(woID, tc.from),
+				selectWorkOrderByIDResult: wo,
 				// If hasMetalConsumption were called it would return an error,
 				// proving the check was incorrectly invoked.
 				hasMetalConsumptionErr: errors.New("metal check must not run here"),
@@ -781,7 +803,8 @@ func TestAdvanceStatus_NonCompletedTransitions_DoNotTriggerMetalCheck(t *testing
 func TestAdvanceStatus_ToInCutting_WithSheetID_CallsPreAssign(t *testing.T) {
 	woID := uuid.New()
 	sheetID := uuid.New()
-	st := &mockStore{selectWorkOrderByIDResult: woWithStatus(woID, domain.WOPlanned)}
+	wo, _ := assignedWO(woID, domain.WOPlanned)
+	st := &mockStore{selectWorkOrderByIDResult: wo}
 	sa := &mockSheetAssigner{}
 	svc := NewService(st, approvedPlan(uuid.New()), skuNoMetal(uuid.New()), &mockUserChecker{}, sa, nil)
 
@@ -808,7 +831,8 @@ func TestAdvanceStatus_ToInCutting_WithSheetID_CallsPreAssign(t *testing.T) {
 
 func TestAdvanceStatus_ToInCutting_NoSheetID_SkipsPreAssign(t *testing.T) {
 	woID := uuid.New()
-	st := &mockStore{selectWorkOrderByIDResult: woWithStatus(woID, domain.WOPlanned)}
+	wo, _ := assignedWO(woID, domain.WOPlanned)
+	st := &mockStore{selectWorkOrderByIDResult: wo}
 	sa := &mockSheetAssigner{}
 	svc := NewService(st, approvedPlan(uuid.New()), skuNoMetal(uuid.New()), &mockUserChecker{}, sa, nil)
 
@@ -825,7 +849,8 @@ func TestAdvanceStatus_ToInCutting_PreAssignFails_AbortsAdvance(t *testing.T) {
 	woID := uuid.New()
 	sheetID := uuid.New()
 	assignErr := domain.NewBizError(domain.ErrPreconditionFailed, "sheet not available")
-	st := &mockStore{selectWorkOrderByIDResult: woWithStatus(woID, domain.WOPlanned)}
+	wo, _ := assignedWO(woID, domain.WOPlanned)
+	st := &mockStore{selectWorkOrderByIDResult: wo}
 	sa := &mockSheetAssigner{err: assignErr}
 	svc := NewService(st, approvedPlan(uuid.New()), skuNoMetal(uuid.New()), &mockUserChecker{}, sa, nil)
 
@@ -868,6 +893,85 @@ func TestAdvanceStatus_SheetID_OnNonCuttingTransition_IsIgnored(t *testing.T) {
 	}
 	if sa.called {
 		t.Error("PreAssignSheet must NOT be called for non-IN_CUTTING transitions")
+	}
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// AdvanceStatus — assignment guard (Issue #141)
+// ═════════════════════════════════════════════════════════════════════════════
+
+// Spec 5.1: WO must be assigned before cutting starts.
+func TestAdvanceStatus_ToInCutting_UnassignedWO_IsPreconditionFailed(t *testing.T) {
+	woID := uuid.New()
+	st := &mockStore{selectWorkOrderByIDResult: woWithStatus(woID, domain.WOPlanned)} // AssignedTo == nil
+	svc := newSvc(st, approvedPlan(uuid.New()), skuNoMetal(uuid.New()))
+
+	err := svc.AdvanceStatus(context.Background(), woID, AdvanceStatusInput{To: domain.WOInCutting})
+	if !errors.Is(err, domain.ErrPreconditionFailed) {
+		t.Errorf("expected ErrPreconditionFailed for unassigned WO, got %v", err)
+	}
+	if st.updateWorkOrderStatusCalled {
+		t.Error("updateWorkOrderStatus must NOT be called when WO is unassigned")
+	}
+}
+
+// CallerID must match the assigned operator when provided.
+func TestAdvanceStatus_ToInCutting_WrongCaller_IsPreconditionFailed(t *testing.T) {
+	woID := uuid.New()
+	wo, _ := assignedWO(woID, domain.WOPlanned)
+	wrongCaller := uuid.New() // different from wo.AssignedTo
+	st := &mockStore{selectWorkOrderByIDResult: wo}
+	svc := newSvc(st, approvedPlan(uuid.New()), skuNoMetal(uuid.New()))
+
+	err := svc.AdvanceStatus(context.Background(), woID, AdvanceStatusInput{
+		To:       domain.WOInCutting,
+		CallerID: &wrongCaller,
+	})
+	if !errors.Is(err, domain.ErrPreconditionFailed) {
+		t.Errorf("expected ErrPreconditionFailed for wrong caller, got %v", err)
+	}
+	if st.updateWorkOrderStatusCalled {
+		t.Error("updateWorkOrderStatus must NOT be called for wrong caller")
+	}
+}
+
+// The assigned operator can advance their own WO to IN_CUTTING.
+func TestAdvanceStatus_ToInCutting_CorrectCaller_Succeeds(t *testing.T) {
+	woID := uuid.New()
+	wo, assignedUserID := assignedWO(woID, domain.WOPlanned)
+	st := &mockStore{selectWorkOrderByIDResult: wo}
+	svc := newSvc(st, approvedPlan(uuid.New()), skuNoMetal(uuid.New()))
+
+	err := svc.AdvanceStatus(context.Background(), woID, AdvanceStatusInput{
+		To:       domain.WOInCutting,
+		CallerID: &assignedUserID,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error for correct caller: %v", err)
+	}
+	if !st.updateWorkOrderStatusCalled {
+		t.Error("updateWorkOrderStatus must be called for correct caller")
+	}
+}
+
+// AssignWorkOrder must propagate ErrPreconditionFailed when the store signals
+// the WO is already assigned (atomic guard fired 0 rows affected).
+func TestAssignWorkOrder_AlreadyAssigned_IsPreconditionFailed(t *testing.T) {
+	woID := uuid.New()
+	userID := uuid.New()
+	st := &mockStore{
+		selectWorkOrderByIDResult:    plannedWO(woID, uuid.New(), uuid.New()),
+		updateWorkOrderAssignmentErr: domain.NewBizError(domain.ErrPreconditionFailed, "work order is already assigned to another operator"),
+	}
+	uc := &mockUserChecker{result: UserInfo{ID: userID, Role: "cnc"}}
+	svc := newSvcWithUser(st, approvedPlan(uuid.New()), skuNoMetal(uuid.New()), uc)
+
+	_, err := svc.AssignWorkOrder(context.Background(), AssignWorkOrderInput{
+		WorkOrderID: woID,
+		UserID:      userID,
+	})
+	if !errors.Is(err, domain.ErrPreconditionFailed) {
+		t.Errorf("expected ErrPreconditionFailed for already-assigned WO, got %v", err)
 	}
 }
 
