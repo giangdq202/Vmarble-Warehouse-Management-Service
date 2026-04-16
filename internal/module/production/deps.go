@@ -14,6 +14,7 @@ type PlanChecker interface {
 type PlanInfo struct {
 	ID     uuid.UUID
 	Status domain.PlanStatus
+	SKUIDs []uuid.UUID // SKU IDs from plan items — used to validate CreateWorkOrder
 }
 
 type SKUChecker interface {

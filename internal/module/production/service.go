@@ -33,6 +33,10 @@ func (svc *service) CreateWorkOrder(ctx context.Context, in CreateWOInput) (Work
 		return WorkOrder{}, domain.NewBizError(domain.ErrPreconditionFailed, "production plan must be approved")
 	}
 
+	if !planContainsSKU(plan, in.SKUID) {
+		return WorkOrder{}, domain.NewBizError(domain.ErrPreconditionFailed, "SKU does not belong to this production plan")
+	}
+
 	if in.Quantity <= 0 {
 		return WorkOrder{}, domain.NewBizError(domain.ErrInvalidInput, "quantity must be greater than 0")
 	}
@@ -50,6 +54,16 @@ func (svc *service) CreateWorkOrder(ctx context.Context, in CreateWOInput) (Work
 		return WorkOrder{}, err
 	}
 	return wo, nil
+}
+
+// planContainsSKU returns true if the given SKU ID is among the plan's items.
+func planContainsSKU(plan PlanInfo, skuID uuid.UUID) bool {
+	for _, id := range plan.SKUIDs {
+		if id == skuID {
+			return true
+		}
+	}
+	return false
 }
 
 func (svc *service) GetWorkOrder(ctx context.Context, woID uuid.UUID) (WorkOrder, error) {
