@@ -92,7 +92,7 @@ func (s *concurrentMockStore) selectSheetByID(_ context.Context, id uuid.UUID) (
 func (s *concurrentMockStore) selectAvailableSheets(_ context.Context) ([]BoardSheet, error) {
 	return nil, nil
 }
-func (s *concurrentMockStore) selectAvailableSheetsPaged(_ context.Context, _ httpkit.PageParams) ([]BoardSheet, int, error) {
+func (s *concurrentMockStore) selectAvailableSheetsPaged(_ context.Context, _ httpkit.PageParams, _ *uuid.UUID) ([]BoardSheet, int, error) {
 	return nil, 0, nil
 }
 func (s *concurrentMockStore) updateSheetStatus(_ context.Context, _ uuid.UUID, _ string, _ *uuid.UUID) error {

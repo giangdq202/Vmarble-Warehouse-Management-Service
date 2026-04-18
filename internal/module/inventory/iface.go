@@ -30,6 +30,8 @@ type InventoryLot struct {
 type BoardSheet struct {
 	ID                  uuid.UUID        `json:"id"`
 	LotID               uuid.UUID        `json:"lot_id"`
+	MaterialID          uuid.UUID        `json:"material_id"`
+	MaterialName        string           `json:"material_name"`
 	Dimensions          domain.Dimension `json:"dimensions"`
 	CostPerSheet        domain.Money     `json:"cost_per_sheet"`
 	Status              string           `json:"status"`
@@ -128,7 +130,8 @@ type Service interface {
 	DeactivateLot(ctx context.Context, lotID uuid.UUID) error
 
 	GetSheet(ctx context.Context, sheetID uuid.UUID) (BoardSheet, error)
-	ListAvailableSheets(ctx context.Context, p httpkit.PageParams) (httpkit.PagedResult[BoardSheet], error)
+	// ListAvailableSheets returns AVAILABLE sheets, optionally filtered by materialID.
+	ListAvailableSheets(ctx context.Context, p httpkit.PageParams, materialID *uuid.UUID) (httpkit.PagedResult[BoardSheet], error)
 	// PreAssignSheet stamps issued_to_work_order_id on a board sheet that is still
 	// AVAILABLE, reserving it for a work order before cutting begins.
 	// Returns ErrPreconditionFailed if the sheet is not AVAILABLE.

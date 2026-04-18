@@ -18,7 +18,7 @@ type store interface {
 	insertSheets(ctx context.Context, sheets []BoardSheet) error
 	selectSheetByID(ctx context.Context, id uuid.UUID) (BoardSheet, error)
 	selectAvailableSheets(ctx context.Context) ([]BoardSheet, error)
-	selectAvailableSheetsPaged(ctx context.Context, p httpkit.PageParams) ([]BoardSheet, int, error)
+	selectAvailableSheetsPaged(ctx context.Context, p httpkit.PageParams, materialID *uuid.UUID) ([]BoardSheet, int, error)
 	updateSheetStatus(ctx context.Context, id uuid.UUID, status string, issuedToWO *uuid.UUID) error
 	// preAssignSheet sets issued_to_work_order_id on an AVAILABLE sheet inside a
 	// transaction with FOR UPDATE. Returns ErrPreconditionFailed if the sheet

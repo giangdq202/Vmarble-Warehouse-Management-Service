@@ -129,7 +129,7 @@ func (m *mockStore) selectSheetByID(_ context.Context, _ uuid.UUID) (BoardSheet,
 func (m *mockStore) selectAvailableSheets(_ context.Context) ([]BoardSheet, error) {
 	return m.selectAvailableSheetsResult, m.selectAvailableSheetsErr
 }
-func (m *mockStore) selectAvailableSheetsPaged(_ context.Context, _ httpkit.PageParams) ([]BoardSheet, int, error) {
+func (m *mockStore) selectAvailableSheetsPaged(_ context.Context, _ httpkit.PageParams, _ *uuid.UUID) ([]BoardSheet, int, error) {
 	return m.selectAvailableSheetsPagedResult, m.selectAvailableSheetsPagedTotal, m.selectAvailableSheetsPagedErr
 }
 func (m *mockStore) updateSheetStatus(_ context.Context, _ uuid.UUID, _ string, _ *uuid.UUID) error {
@@ -1160,7 +1160,7 @@ func TestListAvailableSheets_ReturnsOnlyAvailable(t *testing.T) {
 	}
 	svc := NewService(st, nil)
 
-	result, err := svc.ListAvailableSheets(context.Background(), httpkit.PageParams{Page: 1, Limit: 10})
+	result, err := svc.ListAvailableSheets(context.Background(), httpkit.PageParams{Page: 1, Limit: 10}, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1181,7 +1181,7 @@ func TestListAvailableSheets_Empty_ReturnsNil(t *testing.T) {
 	}
 	svc := NewService(st, nil)
 
-	result, err := svc.ListAvailableSheets(context.Background(), httpkit.PageParams{Page: 1, Limit: 10})
+	result, err := svc.ListAvailableSheets(context.Background(), httpkit.PageParams{Page: 1, Limit: 10}, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1195,7 +1195,7 @@ func TestListAvailableSheets_StoreError_Propagates(t *testing.T) {
 	st := &mockStore{selectAvailableSheetsPagedErr: dbErr}
 	svc := NewService(st, nil)
 
-	_, err := svc.ListAvailableSheets(context.Background(), httpkit.PageParams{Page: 1, Limit: 10})
+	_, err := svc.ListAvailableSheets(context.Background(), httpkit.PageParams{Page: 1, Limit: 10}, nil)
 	if !errors.Is(err, dbErr) {
 		t.Errorf("expected store error to propagate, got %v", err)
 	}
@@ -1605,7 +1605,7 @@ func TestListAvailableSheets_ReturnsPagedResult(t *testing.T) {
 	svc := NewService(st, nil)
 
 	p := httpkit.PageParams{Page: 1, Limit: 10}
-	result, err := svc.ListAvailableSheets(context.Background(), p)
+	result, err := svc.ListAvailableSheets(context.Background(), p, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1628,7 +1628,7 @@ func TestListAvailableSheets_Empty_ReturnsEmptyItems(t *testing.T) {
 	svc := NewService(st, nil)
 
 	p := httpkit.PageParams{Page: 1, Limit: 10}
-	result, err := svc.ListAvailableSheets(context.Background(), p)
+	result, err := svc.ListAvailableSheets(context.Background(), p, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1653,7 +1653,7 @@ func TestListAvailableSheets_LastPage_CorrectMetadata(t *testing.T) {
 	svc := NewService(st, nil)
 
 	p := httpkit.PageParams{Page: 3, Limit: 10}
-	result, err := svc.ListAvailableSheets(context.Background(), p)
+	result, err := svc.ListAvailableSheets(context.Background(), p, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1676,12 +1676,33 @@ func TestListAvailableSheets_StoreError_Propagated(t *testing.T) {
 	st := &mockStore{selectAvailableSheetsPagedErr: storeErr}
 	svc := NewService(st, nil)
 
-	_, err := svc.ListAvailableSheets(context.Background(), httpkit.PageParams{Page: 1, Limit: 10})
+	_, err := svc.ListAvailableSheets(context.Background(), httpkit.PageParams{Page: 1, Limit: 10}, nil)
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
 	if !errors.Is(err, storeErr) {
 		t.Errorf("got %v, want %v", err, storeErr)
+	}
+}
+
+func TestListAvailableSheets_FilterByMaterialID_PassedToStore(t *testing.T) {
+	matID := uuid.New()
+	sh := BoardSheet{ID: uuid.New(), LotID: uuid.New(), MaterialID: matID, MaterialName: "Granite", Status: "AVAILABLE"}
+	st := &mockStore{
+		selectAvailableSheetsPagedResult: []BoardSheet{sh},
+		selectAvailableSheetsPagedTotal:  1,
+	}
+	svc := NewService(st, nil)
+
+	result, err := svc.ListAvailableSheets(context.Background(), httpkit.PageParams{Page: 1, Limit: 10}, &matID)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.TotalItems != 1 {
+		t.Errorf("TotalItems = %d, want 1", result.TotalItems)
+	}
+	if result.Items[0].MaterialID != matID {
+		t.Errorf("MaterialID = %v, want %v", result.Items[0].MaterialID, matID)
 	}
 }
 

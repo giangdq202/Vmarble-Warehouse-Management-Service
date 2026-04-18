@@ -141,17 +141,34 @@ func (s *pgStore) insertSheets(ctx context.Context, sheets []BoardSheet) error {
 	return nil
 }
 
-func (s *pgStore) selectSheetByID(ctx context.Context, id uuid.UUID) (BoardSheet, error) {
+// sheetCols is the shared SELECT projection for all BoardSheet queries.
+// Joins inventory_lots and materials to expose material_id + material_name directly on the DTO.
+const sheetCols = `
+	bs.id, bs.lot_id,
+	COALESCE(il.material_id, '00000000-0000-0000-0000-000000000000'::uuid) AS material_id,
+	COALESCE(m.name, '')                                                   AS material_name,
+	bs.length_mm, bs.width_mm, bs.cost_amount, bs.cost_currency,
+	bs.status, bs.issued_to_wo_id,
+	bs.supplier_code, bs.lot_batch, bs.grain_pattern, bs.quality_grade
+FROM board_sheets bs
+LEFT JOIN inventory_lots il ON il.id = bs.lot_id
+LEFT JOIN materials m ON m.id = il.material_id`
+
+func scanSheet(row interface{ Scan(...any) error }) (BoardSheet, error) {
 	var sh BoardSheet
-	err := s.pool.QueryRow(ctx,
-		`SELECT id, lot_id, length_mm, width_mm, cost_amount, cost_currency, status, issued_to_wo_id,
-		        supplier_code, lot_batch, grain_pattern, quality_grade
-		 FROM board_sheets WHERE id = $1`, id).
-		Scan(&sh.ID, &sh.LotID,
-			&sh.Dimensions.LengthMM, &sh.Dimensions.WidthMM,
-			&sh.CostPerSheet.Amount, &sh.CostPerSheet.Currency,
-			&sh.Status, &sh.IssuedToWorkOrderID,
-			&sh.SupplierCode, &sh.LotBatch, &sh.GrainPattern, &sh.QualityGrade)
+	err := row.Scan(
+		&sh.ID, &sh.LotID, &sh.MaterialID, &sh.MaterialName,
+		&sh.Dimensions.LengthMM, &sh.Dimensions.WidthMM,
+		&sh.CostPerSheet.Amount, &sh.CostPerSheet.Currency,
+		&sh.Status, &sh.IssuedToWorkOrderID,
+		&sh.SupplierCode, &sh.LotBatch, &sh.GrainPattern, &sh.QualityGrade,
+	)
+	return sh, err
+}
+
+func (s *pgStore) selectSheetByID(ctx context.Context, id uuid.UUID) (BoardSheet, error) {
+	row := s.pool.QueryRow(ctx, `SELECT `+sheetCols+` WHERE bs.id = $1`, id)
+	sh, err := scanSheet(row)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return BoardSheet{}, domain.NewBizError(domain.ErrNotFound, "board sheet not found")
 	}
@@ -159,10 +176,7 @@ func (s *pgStore) selectSheetByID(ctx context.Context, id uuid.UUID) (BoardSheet
 }
 
 func (s *pgStore) selectAvailableSheets(ctx context.Context) ([]BoardSheet, error) {
-	rows, err := s.pool.Query(ctx,
-		`SELECT id, lot_id, length_mm, width_mm, cost_amount, cost_currency, status, issued_to_wo_id,
-		        supplier_code, lot_batch, grain_pattern, quality_grade
-		 FROM board_sheets WHERE status = 'AVAILABLE' ORDER BY id`)
+	rows, err := s.pool.Query(ctx, `SELECT `+sheetCols+` WHERE bs.status = 'AVAILABLE' ORDER BY bs.id`)
 	if err != nil {
 		return nil, err
 	}
@@ -170,12 +184,8 @@ func (s *pgStore) selectAvailableSheets(ctx context.Context) ([]BoardSheet, erro
 
 	var sheets []BoardSheet
 	for rows.Next() {
-		var sh BoardSheet
-		if err := rows.Scan(&sh.ID, &sh.LotID,
-			&sh.Dimensions.LengthMM, &sh.Dimensions.WidthMM,
-			&sh.CostPerSheet.Amount, &sh.CostPerSheet.Currency,
-			&sh.Status, &sh.IssuedToWorkOrderID,
-			&sh.SupplierCode, &sh.LotBatch, &sh.GrainPattern, &sh.QualityGrade); err != nil {
+		sh, err := scanSheet(rows)
+		if err != nil {
 			return nil, err
 		}
 		sheets = append(sheets, sh)
@@ -189,12 +199,10 @@ func (s *pgStore) selectAvailableSheets(ctx context.Context) ([]BoardSheet, erro
 // practice, but the field is provided for API consistency — an empty search
 // returns all available sheets).
 // It returns (items, totalMatchingItems, error).
-func (s *pgStore) selectAvailableSheetsPaged(ctx context.Context, p httpkit.PageParams) ([]BoardSheet, int, error) {
-	// Board sheets don't have a natural text field; we support sorting but not
-	// keyword search (search param is ignored — all available sheets match).
-	sortCol := "id"
+func (s *pgStore) selectAvailableSheetsPaged(ctx context.Context, p httpkit.PageParams, materialID *uuid.UUID) ([]BoardSheet, int, error) {
+	sortCol := "bs.id"
 	if p.SortBy == "length_mm" || p.SortBy == "width_mm" {
-		sortCol = p.SortBy
+		sortCol = "bs." + p.SortBy
 	}
 	orderDir := "ASC"
 	if p.Order == "desc" {
@@ -203,21 +211,25 @@ func (s *pgStore) selectAvailableSheetsPaged(ctx context.Context, p httpkit.Page
 
 	var total int
 	if err := s.pool.QueryRow(ctx,
-		`SELECT COUNT(*) FROM board_sheets WHERE status = 'AVAILABLE'`,
+		`SELECT COUNT(*)
+		 FROM board_sheets bs
+		 LEFT JOIN inventory_lots il ON il.id = bs.lot_id
+		 WHERE bs.status = 'AVAILABLE'
+		   AND ($1::uuid IS NULL OR il.material_id = $1)`,
+		materialID,
 	).Scan(&total); err != nil {
 		return nil, 0, fmt.Errorf("count board_sheets: %w", err)
 	}
 
 	query := fmt.Sprintf(
-		`SELECT id, lot_id, length_mm, width_mm, cost_amount, cost_currency, status, issued_to_wo_id,
-		        supplier_code, lot_batch, grain_pattern, quality_grade
-		 FROM board_sheets
-		 WHERE status = 'AVAILABLE'
+		`SELECT `+sheetCols+`
+		 WHERE bs.status = 'AVAILABLE'
+		   AND ($1::uuid IS NULL OR il.material_id = $1)
 		 ORDER BY %s %s
-		 LIMIT $1 OFFSET $2`,
+		 LIMIT $2 OFFSET $3`,
 		sortCol, orderDir,
 	)
-	rows, err := s.pool.Query(ctx, query, p.Limit, p.Offset())
+	rows, err := s.pool.Query(ctx, query, materialID, p.Limit, p.Offset())
 	if err != nil {
 		return nil, 0, err
 	}
@@ -225,12 +237,8 @@ func (s *pgStore) selectAvailableSheetsPaged(ctx context.Context, p httpkit.Page
 
 	var sheets []BoardSheet
 	for rows.Next() {
-		var sh BoardSheet
-		if err := rows.Scan(&sh.ID, &sh.LotID,
-			&sh.Dimensions.LengthMM, &sh.Dimensions.WidthMM,
-			&sh.CostPerSheet.Amount, &sh.CostPerSheet.Currency,
-			&sh.Status, &sh.IssuedToWorkOrderID,
-			&sh.SupplierCode, &sh.LotBatch, &sh.GrainPattern, &sh.QualityGrade); err != nil {
+		sh, err := scanSheet(rows)
+		if err != nil {
 			return nil, 0, err
 		}
 		sheets = append(sheets, sh)
