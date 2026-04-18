@@ -67,9 +67,8 @@ func (s *pgStore) selectWorkOrdersPaged(ctx context.Context, p httpkit.PageParam
 		orderDir = "ASC"
 	}
 
-	// planID is passed as a UUID pointer; convert to *string for nullable SQL param.
-	// When nil, the WHERE clause condition ($2::uuid IS NULL OR ...) is always true.
-	var planIDArg *uuid.UUID = planID
+	// planIDArg is passed as a UUID pointer; when nil the WHERE clause ($2::uuid IS NULL OR ...) is always true.
+	planIDArg := planID
 
 	var total int
 	if err := s.pool.QueryRow(ctx,
