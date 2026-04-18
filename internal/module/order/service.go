@@ -39,10 +39,6 @@ func (svc *service) CreatePO(ctx context.Context, in CreatePOInput) (PO, error) 
 		CreatedAt:        now,
 	}
 
-	if err := svc.s.insertPO(ctx, po); err != nil {
-		return PO{}, err
-	}
-
 	items := make([]LineItem, len(in.LineItems))
 	for i, li := range in.LineItems {
 		items[i] = LineItem{
@@ -53,7 +49,8 @@ func (svc *service) CreatePO(ctx context.Context, in CreatePOInput) (PO, error) 
 			SellingPrice: li.SellingPrice,
 		}
 	}
-	if err := svc.s.insertLineItems(ctx, items); err != nil {
+
+	if err := svc.s.insertPOWithItems(ctx, po, items); err != nil {
 		return PO{}, err
 	}
 

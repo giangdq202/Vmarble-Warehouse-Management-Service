@@ -20,13 +20,32 @@ func NewPGStore(pool *pgxpool.Pool) store {
 	return &pgStore{pool: pool}
 }
 
-func (s *pgStore) insertPO(ctx context.Context, p PO) error {
-	_, err := s.pool.Exec(ctx,
+func (s *pgStore) insertPOWithItems(ctx context.Context, p PO, items []LineItem) error {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+
+	if _, err := tx.Exec(ctx,
 		`INSERT INTO purchase_orders (id, code, expected_delivery, is_active, created_at)
 		 VALUES ($1, $2, $3, $4, $5)`,
 		p.ID, p.Code, p.ExpectedDelivery, p.IsActive, p.CreatedAt,
-	)
-	return err
+	); err != nil {
+		return err
+	}
+
+	for _, item := range items {
+		if _, err := tx.Exec(ctx,
+			`INSERT INTO po_line_items (id, po_id, sku_id, quantity, selling_price_amount, selling_price_currency)
+			 VALUES ($1, $2, $3, $4, $5, $6)`,
+			item.ID, item.POID, item.SKUID, item.Quantity, item.SellingPrice.Amount, item.SellingPrice.Currency,
+		); err != nil {
+			return err
+		}
+	}
+
+	return tx.Commit(ctx)
 }
 
 func (s *pgStore) selectPOsPaged(ctx context.Context, p httpkit.PageParams) ([]PO, int, error) {
@@ -100,20 +119,6 @@ func (s *pgStore) deactivatePO(ctx context.Context, id uuid.UUID) error {
 	}
 	if tag.RowsAffected() == 0 {
 		return domain.ErrNotFound
-	}
-	return nil
-}
-
-func (s *pgStore) insertLineItems(ctx context.Context, items []LineItem) error {
-	for _, item := range items {
-		_, err := s.pool.Exec(ctx,
-			`INSERT INTO po_line_items (id, po_id, sku_id, quantity, selling_price_amount, selling_price_currency)
-			 VALUES ($1, $2, $3, $4, $5, $6)`,
-			item.ID, item.POID, item.SKUID, item.Quantity, item.SellingPrice.Amount, item.SellingPrice.Currency,
-		)
-		if err != nil {
-			return err
-		}
 	}
 	return nil
 }
