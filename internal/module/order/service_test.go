@@ -15,8 +15,8 @@ import (
 // Hand-written mock satisfying the unexported store interface.
 
 type mockStore struct {
-	// insertPO
-	insertPOErr error
+	// insertPOWithItems — atomic
+	insertPOWithItemsErr error
 
 	// selectPOs
 	selectPOsResult []PO
@@ -29,9 +29,6 @@ type mockStore struct {
 	// deactivatePO
 	deactivatePOErr error
 
-	// insertLineItems
-	insertLineItemsErr error
-
 	// selectLineItemsByPO
 	selectLineItemsByPOResult []LineItem
 	selectLineItemsByPOErr    error
@@ -41,8 +38,8 @@ type mockStore struct {
 	selectLineItemsBySKUErr    error
 }
 
-func (m *mockStore) insertPO(_ context.Context, _ PO) error {
-	return m.insertPOErr
+func (m *mockStore) insertPOWithItems(_ context.Context, _ PO, _ []LineItem) error {
+	return m.insertPOWithItemsErr
 }
 
 func (m *mockStore) selectPOsPaged(_ context.Context, _ httpkit.PageParams) ([]PO, int, error) {
@@ -55,10 +52,6 @@ func (m *mockStore) selectPOByID(_ context.Context, _ uuid.UUID) (PO, error) {
 
 func (m *mockStore) deactivatePO(_ context.Context, _ uuid.UUID) error {
 	return m.deactivatePOErr
-}
-
-func (m *mockStore) insertLineItems(_ context.Context, _ []LineItem) error {
-	return m.insertLineItemsErr
 }
 
 func (m *mockStore) selectLineItemsByPO(_ context.Context, _ uuid.UUID) ([]LineItem, error) {
@@ -257,27 +250,15 @@ func TestCreatePO_SecondLineItemInvalidQuantity_ReturnsErrInvalidInput(t *testin
 
 // ── Store error propagation ───────────────────────────────────────────────────
 
-func TestCreatePO_StoreInsertPOError_Propagates(t *testing.T) {
-	dbErr := errors.New("insert po failed")
-	st := &mockStore{insertPOErr: dbErr}
+func TestCreatePO_StoreInsertPOWithItemsError_Propagates(t *testing.T) {
+	dbErr := errors.New("tx failed")
+	st := &mockStore{insertPOWithItemsErr: dbErr}
 
 	svc := NewService(st)
 	_, err := svc.CreatePO(context.Background(), validInput())
 
 	if !errors.Is(err, dbErr) {
-		t.Errorf("expected insertPO error to propagate, got %v", err)
-	}
-}
-
-func TestCreatePO_StoreInsertLineItemsError_Propagates(t *testing.T) {
-	dbErr := errors.New("insert line items failed")
-	st := &mockStore{insertLineItemsErr: dbErr}
-
-	svc := NewService(st)
-	_, err := svc.CreatePO(context.Background(), validInput())
-
-	if !errors.Is(err, dbErr) {
-		t.Errorf("expected insertLineItems error to propagate, got %v", err)
+		t.Errorf("expected insertPOWithItems error to propagate, got %v", err)
 	}
 }
 
