@@ -990,6 +990,48 @@ paths:
       summary: Lookup barcode
       tags:
       - barcode
+  /api/v1/barcodes/{id}/label.pdf:
+    get:
+      parameters:
+      - description: barcode id (uuid)
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: 'label size: 50x30 or 100x70'
+        in: query
+        name: size
+        type: string
+      produces:
+      - application/pdf
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: file
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Generate printable PDF label for a barcode
+      tags:
+      - barcode
   /api/v1/barcodes/{id}/qr:
     get:
       parameters:

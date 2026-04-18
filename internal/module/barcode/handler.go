@@ -22,6 +22,7 @@ func (h *Handler) Register(rg *gin.RouterGroup) {
 	rg.GET("/barcodes", h.listByWorkOrder)
 	rg.GET("/barcodes/:id", h.lookup)
 	rg.GET("/barcodes/:id/qr", h.generateQR)
+	rg.GET("/barcodes/:id/label.pdf", h.generateLabelPDF)
 	rg.POST("/barcodes/:id/scans", auth.RequireRole(auth.RoleCNC, auth.RoleWarehouse, auth.RoleForeman), h.recordScan)
 	rg.GET("/barcodes/:id/scans", h.listScans)
 }
@@ -129,6 +130,39 @@ func (h *Handler) generateQR(c *gin.Context) {
 		return
 	}
 	c.Data(http.StatusOK, "image/png", png)
+}
+
+// generateLabelPDF godoc
+//
+// @Summary      Generate printable PDF label for a barcode
+// @Tags         barcode
+// @Produce      application/pdf
+// @Param        id    path      string  true  "barcode id (uuid)"
+// @Param        size  query     string  false  "label size: 50x30 or 100x70"
+// @Success      200   {file}    binary
+// @Failure      400   {object}  map[string]string
+// @Failure      404   {object}  map[string]string
+// @Security     BearerAuth
+// @Failure      401  {object}  map[string]string
+// @Router       /api/v1/barcodes/{id}/label.pdf [get]
+func (h *Handler) generateLabelPDF(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+	size := LabelSize(c.Query("size"))
+	if size == "" {
+		size = LabelSize50x30
+	}
+
+	pdf, err := h.svc.GenerateLabelPDF(c.Request.Context(), id, size)
+	if err != nil {
+		httpkit.Error(c, err)
+		return
+	}
+	c.Header("Content-Disposition", "inline; filename=barcode-label-"+id.String()+"-"+string(size)+".pdf")
+	c.Data(http.StatusOK, "application/pdf", pdf)
 }
 
 // recordScan godoc
