@@ -66,7 +66,7 @@ type mockStore struct {
 func (m *mockStore) insertWorkOrder(_ context.Context, _ WorkOrder) error {
 	return m.insertWorkOrderErr
 }
-func (m *mockStore) selectWorkOrdersPaged(_ context.Context, _ httpkit.PageParams, _ string) ([]WorkOrder, int, error) {
+func (m *mockStore) selectWorkOrdersPaged(_ context.Context, _ httpkit.PageParams, _ string, _ *uuid.UUID) ([]WorkOrder, int, error) {
 	return m.selectWorkOrdersResult, len(m.selectWorkOrdersResult), m.selectWorkOrdersErr
 }
 func (m *mockStore) selectWorkOrderByID(_ context.Context, _ uuid.UUID) (WorkOrder, error) {
@@ -487,7 +487,7 @@ func TestListWorkOrders_ReturnsAll(t *testing.T) {
 
 	svc := newSvc(st, approvedPlan(uuid.New()), skuNoMetal(uuid.New()))
 
-	wos, err := svc.ListWorkOrders(context.Background(), httpkit.PageParams{Page: 1, Limit: 10}, "")
+	wos, err := svc.ListWorkOrders(context.Background(), httpkit.PageParams{Page: 1, Limit: 10}, "", nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -501,9 +501,43 @@ func TestListWorkOrders_StoreError_Propagates(t *testing.T) {
 	st := &mockStore{selectWorkOrdersErr: dbErr}
 	svc := newSvc(st, approvedPlan(uuid.New()), skuNoMetal(uuid.New()))
 
-	_, err := svc.ListWorkOrders(context.Background(), httpkit.PageParams{Page: 1, Limit: 10}, "")
+	_, err := svc.ListWorkOrders(context.Background(), httpkit.PageParams{Page: 1, Limit: 10}, "", nil)
 	if !errors.Is(err, dbErr) {
 		t.Errorf("expected store error, got %v", err)
+	}
+}
+
+func TestListWorkOrders_FilterByPlanID_ReturnsPaged(t *testing.T) {
+	planID := uuid.New()
+	wo1 := plannedWO(uuid.New(), planID, uuid.New())
+	st := &mockStore{selectWorkOrdersResult: []WorkOrder{wo1}}
+	svc := newSvc(st, approvedPlan(planID), skuNoMetal(uuid.New()))
+
+	result, err := svc.ListWorkOrders(context.Background(), httpkit.PageParams{Page: 1, Limit: 10}, "", &planID)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(result.Items) != 1 {
+		t.Errorf("len = %d, want 1", len(result.Items))
+	}
+	if result.Items[0].PlanID != planID {
+		t.Errorf("PlanID = %v, want %v", result.Items[0].PlanID, planID)
+	}
+}
+
+func TestListWorkOrders_FilterByPlanAndStatus_ReturnsSubset(t *testing.T) {
+	planID := uuid.New()
+	wo1 := plannedWO(uuid.New(), planID, uuid.New())
+	// mock returns only the planned one (store does the real filtering in DB)
+	st := &mockStore{selectWorkOrdersResult: []WorkOrder{wo1}}
+	svc := newSvc(st, approvedPlan(planID), skuNoMetal(uuid.New()))
+
+	result, err := svc.ListWorkOrders(context.Background(), httpkit.PageParams{Page: 1, Limit: 10}, "PLANNED", &planID)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(result.Items) != 1 {
+		t.Errorf("len = %d, want 1", len(result.Items))
 	}
 }
 

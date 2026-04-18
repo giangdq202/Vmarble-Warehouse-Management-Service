@@ -71,7 +71,7 @@ type SuggestAssignmentResult struct {
 type Service interface {
 	CreateWorkOrder(ctx context.Context, in CreateWOInput) (WorkOrder, error)
 	GetWorkOrder(ctx context.Context, woID uuid.UUID) (WorkOrder, error)
-	ListWorkOrders(ctx context.Context, p httpkit.PageParams, status string) (httpkit.PagedResult[WorkOrder], error)
+	ListWorkOrders(ctx context.Context, p httpkit.PageParams, status string, planID *uuid.UUID) (httpkit.PagedResult[WorkOrder], error)
 	ListWorkOrdersByPlan(ctx context.Context, planID uuid.UUID) ([]WorkOrder, error)
 	ListWorkOrdersByAssignee(ctx context.Context, userID uuid.UUID) ([]WorkOrder, error)
 	AdvanceStatus(ctx context.Context, woID uuid.UUID, in AdvanceStatusInput) error

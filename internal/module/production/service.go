@@ -70,8 +70,8 @@ func (svc *service) GetWorkOrder(ctx context.Context, woID uuid.UUID) (WorkOrder
 	return svc.s.selectWorkOrderByID(ctx, woID)
 }
 
-func (svc *service) ListWorkOrders(ctx context.Context, p httpkit.PageParams, status string) (httpkit.PagedResult[WorkOrder], error) {
-	wos, total, err := svc.s.selectWorkOrdersPaged(ctx, p, status)
+func (svc *service) ListWorkOrders(ctx context.Context, p httpkit.PageParams, status string, planID *uuid.UUID) (httpkit.PagedResult[WorkOrder], error) {
+	wos, total, err := svc.s.selectWorkOrdersPaged(ctx, p, status, planID)
 	if err != nil {
 		return httpkit.PagedResult[WorkOrder]{}, err
 	}

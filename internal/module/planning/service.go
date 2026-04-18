@@ -28,8 +28,14 @@ func (svc *service) CreatePlan(ctx context.Context, in CreatePlanInput) (Plan, e
 	}
 
 	now := time.Now()
+	code, err := svc.s.nextPlanCode(ctx, now.Year())
+	if err != nil {
+		return Plan{}, err
+	}
+
 	plan := Plan{
 		ID:        uuid.New(),
+		Code:      code,
 		POID:      in.POID,
 		Status:    domain.PlanDraft,
 		Deadline:  in.Deadline,
