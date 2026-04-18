@@ -57,7 +57,7 @@ const selectWOCols = `
 FROM work_orders wo
 LEFT JOIN skus s ON s.id = wo.sku_id`
 
-func (s *pgStore) selectWorkOrdersPaged(ctx context.Context, p httpkit.PageParams, status string) ([]WorkOrder, int, error) {
+func (s *pgStore) selectWorkOrdersPaged(ctx context.Context, p httpkit.PageParams, status string, planID *uuid.UUID) ([]WorkOrder, int, error) {
 	sortCol := "created_at"
 	if p.SortBy == "status" {
 		sortCol = "status"
@@ -67,10 +67,16 @@ func (s *pgStore) selectWorkOrdersPaged(ctx context.Context, p httpkit.PageParam
 		orderDir = "ASC"
 	}
 
+	// planID is passed as a UUID pointer; convert to *string for nullable SQL param.
+	// When nil, the WHERE clause condition ($2::uuid IS NULL OR ...) is always true.
+	var planIDArg *uuid.UUID = planID
+
 	var total int
 	if err := s.pool.QueryRow(ctx,
-		`SELECT COUNT(*) FROM work_orders WHERE ($1::text = '' OR status = $1)`,
-		status,
+		`SELECT COUNT(*) FROM work_orders
+		 WHERE ($1::text = '' OR status = $1)
+		   AND ($2::uuid IS NULL OR plan_id = $2)`,
+		status, planIDArg,
 	).Scan(&total); err != nil {
 		return nil, 0, err
 	}
@@ -78,11 +84,12 @@ func (s *pgStore) selectWorkOrdersPaged(ctx context.Context, p httpkit.PageParam
 	query := fmt.Sprintf(
 		`SELECT `+selectWOCols+`
 		 WHERE ($1::text = '' OR wo.status = $1)
+		   AND ($2::uuid IS NULL OR wo.plan_id = $2)
 		 ORDER BY wo.%s %s
-		 LIMIT $2 OFFSET $3`,
+		 LIMIT $3 OFFSET $4`,
 		sortCol, orderDir,
 	)
-	rows, err := s.pool.Query(ctx, query, status, p.Limit, p.Offset())
+	rows, err := s.pool.Query(ctx, query, status, planIDArg, p.Limit, p.Offset())
 	if err != nil {
 		return nil, 0, err
 	}

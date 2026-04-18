@@ -60,38 +60,32 @@ func (h *Handler) create(c *gin.Context) {
 // @Summary      List work orders
 // @Tags         production
 // @Produce      json
-// @Param        plan_id  query     string  false  "filter by plan id (uuid) — returns full list, no pagination"
+// @Param        plan_id  query     string  false  "filter by plan id (uuid)"
 // @Param        page     query     int     false  "page number (default 1)"
 // @Param        limit    query     int     false  "items per page (default 10, max 100)"
 // @Param        status   query     string  false  "filter by status: PLANNED, IN_CUTTING, IN_PROCESSING, COMPLETED, COSTED"
 // @Param        sort_by  query     string  false  "sort column: created_at, status (default created_at)"
 // @Param        order    query     string  false  "sort direction: asc, desc (default desc)"
-// @Success      200      {object}  httpkit.PagedResult[WorkOrder]  "paginated list (when plan_id is absent)"
-// @Success      200      {array}   WorkOrder                       "full list (when plan_id is present)"
+// @Success      200      {object}  httpkit.PagedResult[WorkOrder]
 // @Failure      400      {object}  map[string]string
 // @Failure      500      {object}  map[string]string
 // @Security     BearerAuth
 // @Failure      401  {object}  map[string]string
 // @Router       /api/v1/work-orders [get]
 func (h *Handler) list(c *gin.Context) {
-	planIDStr := c.Query("plan_id")
-	if planIDStr != "" {
-		planID, err := uuid.Parse(planIDStr)
+	var planID *uuid.UUID
+	if planIDStr := c.Query("plan_id"); planIDStr != "" {
+		parsed, err := uuid.Parse(planIDStr)
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid plan_id"})
 			return
 		}
-		wos, err := h.svc.ListWorkOrdersByPlan(c.Request.Context(), planID)
-		if err != nil {
-			httpkit.Error(c, err)
-			return
-		}
-		c.JSON(http.StatusOK, wos)
-		return
+		planID = &parsed
 	}
+
 	p := httpkit.BindPageParams(c)
 	status := c.Query("status")
-	result, err := h.svc.ListWorkOrders(c.Request.Context(), p, status)
+	result, err := h.svc.ListWorkOrders(c.Request.Context(), p, status, planID)
 	if err != nil {
 		httpkit.Error(c, err)
 		return
