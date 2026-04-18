@@ -18,6 +18,7 @@ import (
 	"github.com/vmarble/warehouse-management-service/internal/module/authn"
 	"github.com/vmarble/warehouse-management-service/internal/module/catalog"
 	"github.com/vmarble/warehouse-management-service/internal/module/costing"
+	"github.com/vmarble/warehouse-management-service/internal/module/dashboard"
 	"github.com/vmarble/warehouse-management-service/internal/module/inventory"
 	"github.com/vmarble/warehouse-management-service/internal/module/order"
 	"github.com/vmarble/warehouse-management-service/internal/module/planning"
@@ -77,6 +78,7 @@ func main() {
 	inventoryStore := inventory.NewPGStore(pool)
 	productionStore := production.NewPGStore(pool)
 	costingStore := costing.NewPGStore(pool)
+	dashboardStore := dashboard.NewPGStore(pool)
 	barcodeStore := barcode.NewPGStore(pool)
 
 	// ── Module services ─────────────────────────────────────
@@ -106,6 +108,7 @@ func main() {
 		&cuttingAdapter{pool: pool},
 		&consumptionAdapter{pool: pool},
 	)
+	dashboardSvc := dashboard.NewService(dashboardStore)
 
 	barcodeSvc := barcode.NewService(barcodeStore)
 
@@ -155,6 +158,7 @@ func main() {
 	inventory.NewHandler(inventorySvc).Register(api)
 	production.NewHandler(productionSvc).Register(api)
 	costing.NewHandler(costingSvc).Register(api)
+	dashboard.NewHandler(dashboardSvc).Register(api)
 	barcode.NewHandler(barcodeSvc).Register(api)
 	events.NewHandler(eventBroker).Register(api)
 
