@@ -2,6 +2,7 @@ package inventory
 
 import (
 	"context"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/vmarble/warehouse-management-service/internal/domain"
@@ -15,6 +16,24 @@ import (
 // submitted), the transition error is silently logged and ignored.
 type WorkOrderAdvancer interface {
 	AdvanceStatus(ctx context.Context, woID uuid.UUID, in AdvanceWOInput) error
+}
+
+// BarcodeGenerator creates barcode records for cut outputs.
+// Implementation lives in barcode module; wired in main.go.
+type BarcodeGenerator interface {
+	GenerateForCut(ctx context.Context, in BarcodeForCutInput) (BarcodeForCutOutput, error)
+}
+
+type BarcodeForCutInput struct {
+	WorkOrderID      uuid.UUID
+	UsedDimension    domain.Dimension
+	RemnantDimension *domain.Dimension
+	ProducedDate     time.Time
+}
+
+type BarcodeForCutOutput struct {
+	WIPBarcodeID     *uuid.UUID
+	RemnantBarcodeID *uuid.UUID
 }
 
 // AdvanceWOInput is the inventory module's view of a work order advance request.

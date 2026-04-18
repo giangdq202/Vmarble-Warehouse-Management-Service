@@ -14,10 +14,15 @@ import (
 type service struct {
 	st  store
 	woa WorkOrderAdvancer
+	bcg BarcodeGenerator
 }
 
-func NewService(st store, woa WorkOrderAdvancer) Service {
-	return &service{st: st, woa: woa}
+func NewService(st store, woa WorkOrderAdvancer, bcg ...BarcodeGenerator) Service {
+	var generator BarcodeGenerator
+	if len(bcg) > 0 {
+		generator = bcg[0]
+	}
+	return &service{st: st, woa: woa, bcg: generator}
 }
 
 func (s *service) ReceiveStock(ctx context.Context, in ReceiveStockInput) (InventoryLot, error) {
@@ -232,6 +237,30 @@ func (s *service) RecordCut(ctx context.Context, in RecordCutInput) (CutResult, 
 		return CutResult{}, err
 	}
 
+	result := CutResult{CuttingRecordID: cr.ID}
+	if op.NewRemnant != nil {
+		result.RemnantID = &op.NewRemnant.ID
+	}
+
+	if s.bcg != nil {
+		bcOut, err := s.bcg.GenerateForCut(ctx, BarcodeForCutInput{
+			WorkOrderID:      in.WorkOrderID,
+			UsedDimension:    in.UsedDimension,
+			RemnantDimension: in.RemnantDimension,
+			ProducedDate:     cr.CreatedAt,
+		})
+		if bcOut.WIPBarcodeID != nil {
+			result.BarcodeIDs = append(result.BarcodeIDs, *bcOut.WIPBarcodeID)
+		}
+		if bcOut.RemnantBarcodeID != nil {
+			result.BarcodeIDs = append(result.BarcodeIDs, *bcOut.RemnantBarcodeID)
+		}
+		if err != nil {
+			slog.Warn("inventory: RecordCut barcode generation failed",
+				"work_order_id", in.WorkOrderID, "err", err)
+		}
+	}
+
 	// After a successful cut, auto-advance the work order from IN_CUTTING to
 	// IN_PROCESSING. If the transition is not valid (e.g. the work order has
 	// already been advanced by another path), silently log and continue.
@@ -244,10 +273,6 @@ func (s *service) RecordCut(ctx context.Context, in RecordCutInput) (CutResult, 
 		}
 	}
 
-	result := CutResult{CuttingRecordID: cr.ID}
-	if op.NewRemnant != nil {
-		result.RemnantID = &op.NewRemnant.ID
-	}
 	return result, nil
 }
 

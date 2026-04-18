@@ -287,6 +287,19 @@ func (m *mockWorkOrderAdvancer) AdvanceStatus(_ context.Context, woID uuid.UUID,
 	return m.err
 }
 
+type mockBarcodeGenerator struct {
+	called bool
+	in     BarcodeForCutInput
+	out    BarcodeForCutOutput
+	err    error
+}
+
+func (m *mockBarcodeGenerator) GenerateForCut(_ context.Context, in BarcodeForCutInput) (BarcodeForCutOutput, error) {
+	m.called = true
+	m.in = in
+	return m.out, m.err
+}
+
 // ── TestRecordCut ─────────────────────────────────────────────────────────────
 
 func TestRecordCut_FromSheet_NoRemnant(t *testing.T) {
@@ -723,7 +736,7 @@ func TestRecordCut_AtomicStoreError_PropagatesAndDoesNotReturnResult(t *testing.
 	storeErr := errors.New("DB connection lost")
 
 	st := &mockStore{
-		selectSheetByIDResult: availableSheet(sheetID),
+		selectSheetByIDResult:  availableSheet(sheetID),
 		recordCutAtomicallyErr: storeErr,
 	}
 	svc := NewService(st, nil)
@@ -2218,34 +2231,34 @@ func TestNestedCut_ParentBoardID_ConsistentAcrossAllLevels(t *testing.T) {
 	remnantDim := domain.Dimension{LengthMM: 200, WidthMM: 200}
 
 	cases := []struct {
-		name               string
-		sourceParentBoard  uuid.UUID
+		name                string
+		sourceParentBoard   uuid.UUID
 		sourceParentRemnant *uuid.UUID
-		wantParentBoard    uuid.UUID
+		wantParentBoard     uuid.UUID
 	}{
 		{
-			name:               "L1_source_is_board_child",
-			sourceParentBoard:  boardID,
+			name:                "L1_source_is_board_child",
+			sourceParentBoard:   boardID,
 			sourceParentRemnant: nil,
-			wantParentBoard:    boardID,
+			wantParentBoard:     boardID,
 		},
 		{
-			name:               "L2_source_is_L1_remnant",
-			sourceParentBoard:  boardID,
+			name:                "L2_source_is_L1_remnant",
+			sourceParentBoard:   boardID,
 			sourceParentRemnant: ptr(uuid.New()),
-			wantParentBoard:    boardID,
+			wantParentBoard:     boardID,
 		},
 		{
-			name:               "L3_source_is_L2_remnant",
-			sourceParentBoard:  boardID,
+			name:                "L3_source_is_L2_remnant",
+			sourceParentBoard:   boardID,
 			sourceParentRemnant: ptr(uuid.New()),
-			wantParentBoard:    boardID,
+			wantParentBoard:     boardID,
 		},
 		{
-			name:               "L4_source_is_L3_remnant",
-			sourceParentBoard:  boardID,
+			name:                "L4_source_is_L3_remnant",
+			sourceParentBoard:   boardID,
 			sourceParentRemnant: ptr(uuid.New()),
-			wantParentBoard:    boardID,
+			wantParentBoard:     boardID,
 		},
 	}
 
@@ -2688,6 +2701,103 @@ func TestRecordCut_NoAdvancer_DoesNotPanic(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestRecordCut_BarcodeGenerator_ReturnsBarcodeIDs(t *testing.T) {
+	woID := uuid.New()
+	skuID := uuid.New()
+	sheet := baseSheetForAutoAdvance()
+	sheetID := sheet.ID
+	wipID := uuid.New()
+	remID := uuid.New()
+
+	st := &mockStore{selectSheetByIDResult: sheet}
+	bcg := &mockBarcodeGenerator{out: BarcodeForCutOutput{WIPBarcodeID: &wipID, RemnantBarcodeID: &remID}}
+	svc := NewService(st, nil, bcg)
+
+	remnantDim := domain.Dimension{LengthMM: 200, WidthMM: 100}
+	got, err := svc.RecordCut(context.Background(), RecordCutInput{
+		SheetID:          &sheetID,
+		WorkOrderID:      woID,
+		SKUID:            skuID,
+		UsedDimension:    domain.Dimension{LengthMM: 500, WidthMM: 400},
+		RemnantDimension: &remnantDim,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !bcg.called {
+		t.Fatal("barcode generator must be called")
+	}
+	if bcg.in.WorkOrderID != woID {
+		t.Errorf("barcode input work_order_id = %v, want %v", bcg.in.WorkOrderID, woID)
+	}
+	if bcg.in.UsedDimension != (domain.Dimension{LengthMM: 500, WidthMM: 400}) {
+		t.Errorf("barcode input used dimension mismatch: %+v", bcg.in.UsedDimension)
+	}
+	if bcg.in.RemnantDimension == nil || *bcg.in.RemnantDimension != remnantDim {
+		t.Errorf("barcode input remnant dimension mismatch: %+v", bcg.in.RemnantDimension)
+	}
+	if len(got.BarcodeIDs) != 2 {
+		t.Fatalf("barcode_ids len = %d, want 2", len(got.BarcodeIDs))
+	}
+	if got.BarcodeIDs[0] != wipID || got.BarcodeIDs[1] != remID {
+		t.Errorf("barcode_ids = %v, want [%v %v]", got.BarcodeIDs, wipID, remID)
+	}
+}
+
+func TestRecordCut_BarcodeGenerator_Error_DoesNotFailRecordCut(t *testing.T) {
+	woID := uuid.New()
+	skuID := uuid.New()
+	sheet := baseSheetForAutoAdvance()
+	sheetID := sheet.ID
+	wipID := uuid.New()
+
+	st := &mockStore{selectSheetByIDResult: sheet}
+	bcg := &mockBarcodeGenerator{
+		out: BarcodeForCutOutput{WIPBarcodeID: &wipID},
+		err: errors.New("barcode db down"),
+	}
+	svc := NewService(st, nil, bcg)
+
+	got, err := svc.RecordCut(context.Background(), RecordCutInput{
+		SheetID:       &sheetID,
+		WorkOrderID:   woID,
+		SKUID:         skuID,
+		UsedDimension: domain.Dimension{LengthMM: 500, WidthMM: 400},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !bcg.called {
+		t.Fatal("barcode generator must be called")
+	}
+	if len(got.BarcodeIDs) != 1 || got.BarcodeIDs[0] != wipID {
+		t.Errorf("barcode_ids = %v, want [%v]", got.BarcodeIDs, wipID)
+	}
+}
+
+func TestRecordCut_NoBarcodeGenerator_LeavesBarcodeIDsEmpty(t *testing.T) {
+	woID := uuid.New()
+	skuID := uuid.New()
+	sheet := baseSheetForAutoAdvance()
+	sheetID := sheet.ID
+
+	st := &mockStore{selectSheetByIDResult: sheet}
+	svc := NewService(st, nil)
+
+	got, err := svc.RecordCut(context.Background(), RecordCutInput{
+		SheetID:       &sheetID,
+		WorkOrderID:   woID,
+		SKUID:         skuID,
+		UsedDimension: domain.Dimension{LengthMM: 500, WidthMM: 400},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(got.BarcodeIDs) != 0 {
+		t.Errorf("barcode_ids len = %d, want 0", len(got.BarcodeIDs))
 	}
 }
 

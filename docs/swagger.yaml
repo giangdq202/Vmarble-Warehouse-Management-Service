@@ -543,6 +543,10 @@ definitions:
     type: object
   internal_module_inventory.CutResult:
     properties:
+      barcode_ids:
+        items:
+          type: string
+        type: array
       cutting_record_id:
         type: string
       remnant_id:

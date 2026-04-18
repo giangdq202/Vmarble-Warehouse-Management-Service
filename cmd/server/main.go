@@ -10,12 +10,12 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
 	swaggerFiles "github.com/swaggo/files"
 	ginSwagger "github.com/swaggo/gin-swagger"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/vmarble/warehouse-management-service/internal/domain"
-	"github.com/vmarble/warehouse-management-service/internal/module/barcode"
 	"github.com/vmarble/warehouse-management-service/internal/module/authn"
+	"github.com/vmarble/warehouse-management-service/internal/module/barcode"
 	"github.com/vmarble/warehouse-management-service/internal/module/catalog"
 	"github.com/vmarble/warehouse-management-service/internal/module/costing"
 	"github.com/vmarble/warehouse-management-service/internal/module/dashboard"
@@ -71,7 +71,7 @@ func main() {
 	go events.NewListener(cfg.DatabaseURL, eventBroker).Start(ctx)
 
 	// ── Module stores ───────────────────────────────────────
-	authnStore   := authn.NewPGStore(pool)
+	authnStore := authn.NewPGStore(pool)
 	catalogStore := catalog.NewPGStore(pool)
 	orderStore := order.NewPGStore(pool)
 	planningStore := planning.NewPGStore(pool)
@@ -82,14 +82,15 @@ func main() {
 	barcodeStore := barcode.NewPGStore(pool)
 
 	// ── Module services ─────────────────────────────────────
-	authnSvc  := authn.NewService(authnStore, cfg.AuthSecret)
+	authnSvc := authn.NewService(authnStore, cfg.AuthSecret)
 	catalogSvc := catalog.NewService(catalogStore)
 	orderSvc := order.NewService(orderStore)
 	planningSvc := planning.NewService(planningStore)
 	// woAdvanceAdapter is wired after productionSvc is constructed to avoid a
 	// construction-time cycle (inventory → production → inventory).
 	woAdvance := &woAdvanceAdapter{}
-	inventorySvc := inventory.NewService(inventoryStore, woAdvance)
+	barcodeGen := &cutBarcodeAdapter{planSvc: planningSvc}
+	inventorySvc := inventory.NewService(inventoryStore, woAdvance, barcodeGen)
 
 	productionSvc := production.NewService(
 		productionStore,
@@ -99,8 +100,13 @@ func main() {
 		&sheetAssignAdapter{svc: inventorySvc},
 		eventPublisher,
 	)
+	barcodeSvc := barcode.NewService(barcodeStore)
+
 	// Wire production into the advance adapter now that it exists.
 	woAdvance.svc = productionSvc
+	barcodeGen.skuSvc = catalogSvc
+	barcodeGen.woSvc = productionSvc
+	barcodeGen.barcodeSvc = barcodeSvc
 
 	costingSvc := costing.NewService(
 		costingStore,
@@ -109,8 +115,6 @@ func main() {
 		&consumptionAdapter{pool: pool},
 	)
 	dashboardSvc := dashboard.NewService(dashboardStore)
-
-	barcodeSvc := barcode.NewService(barcodeStore)
 
 	// ── Background: auto-release expired remnant allocations ─────────────────
 	// Ticks every cfg.RemnantAllocCheckInterval. Remnants that have been
@@ -258,6 +262,65 @@ type woAdvanceAdapter struct {
 
 func (a *woAdvanceAdapter) AdvanceStatus(ctx context.Context, woID uuid.UUID, in inventory.AdvanceWOInput) error {
 	return a.svc.AdvanceStatus(ctx, woID, production.AdvanceStatusInput{To: in.To})
+}
+
+type cutBarcodeAdapter struct {
+	woSvc      production.Service
+	skuSvc     catalog.Service
+	planSvc    planning.Service
+	barcodeSvc barcode.Service
+}
+
+func (a *cutBarcodeAdapter) GenerateForCut(ctx context.Context, in inventory.BarcodeForCutInput) (inventory.BarcodeForCutOutput, error) {
+	if a.woSvc == nil || a.skuSvc == nil || a.planSvc == nil || a.barcodeSvc == nil {
+		return inventory.BarcodeForCutOutput{}, nil
+	}
+
+	wo, err := a.woSvc.GetWorkOrder(ctx, in.WorkOrderID)
+	if err != nil {
+		return inventory.BarcodeForCutOutput{}, err
+	}
+	sku, err := a.skuSvc.GetSKU(ctx, wo.SKUID)
+	if err != nil {
+		return inventory.BarcodeForCutOutput{}, err
+	}
+	plan, err := a.planSvc.GetPlan(ctx, wo.PlanID)
+	if err != nil {
+		return inventory.BarcodeForCutOutput{}, err
+	}
+
+	wip, err := a.barcodeSvc.GenerateBarcode(ctx, barcode.GenerateBarcodeInput{
+		WorkOrderID:      in.WorkOrderID,
+		SKUID:            wo.SKUID,
+		POID:             plan.POID,
+		ProductionPlanID: wo.PlanID,
+		SKUCode:          sku.Code,
+		SKUName:          sku.Name,
+		Dimensions:       in.UsedDimension.String(),
+		ProducedDate:     in.ProducedDate,
+	})
+	if err != nil {
+		return inventory.BarcodeForCutOutput{}, err
+	}
+
+	out := inventory.BarcodeForCutOutput{WIPBarcodeID: &wip.ID}
+	if in.RemnantDimension != nil {
+		remnant, err := a.barcodeSvc.GenerateBarcode(ctx, barcode.GenerateBarcodeInput{
+			WorkOrderID:      in.WorkOrderID,
+			SKUID:            wo.SKUID,
+			POID:             plan.POID,
+			ProductionPlanID: wo.PlanID,
+			SKUCode:          sku.Code,
+			SKUName:          sku.Name + " [REMNANT]",
+			Dimensions:       in.RemnantDimension.String(),
+			ProducedDate:     in.ProducedDate,
+		})
+		if err != nil {
+			return out, err
+		}
+		out.RemnantBarcodeID = &remnant.ID
+	}
+	return out, nil
 }
 
 type cuttingAdapter struct {
