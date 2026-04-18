@@ -4273,6 +4273,12 @@ const docTemplate = `{
         "internal_module_inventory.CutResult": {
             "type": "object",
             "properties": {
+                "barcode_ids": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
                 "cutting_record_id": {
                     "type": "string"
                 },

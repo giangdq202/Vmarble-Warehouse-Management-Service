@@ -59,8 +59,9 @@ type RecordCutInput struct {
 }
 
 type CutResult struct {
-	CuttingRecordID uuid.UUID  `json:"cutting_record_id"`
-	RemnantID       *uuid.UUID `json:"remnant_id,omitempty"`
+	CuttingRecordID uuid.UUID   `json:"cutting_record_id"`
+	RemnantID       *uuid.UUID  `json:"remnant_id,omitempty"`
+	BarcodeIDs      []uuid.UUID `json:"barcode_ids,omitempty"`
 }
 
 // RemnantFilter holds optional filter parameters for ListRemnants.
