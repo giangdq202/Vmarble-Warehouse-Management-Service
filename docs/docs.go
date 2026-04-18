@@ -36,7 +36,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/authn.LoginInput"
+                            "$ref": "#/definitions/internal_module_authn.LoginInput"
                         }
                     }
                 ],
@@ -44,7 +44,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/authn.LoginResult"
+                            "$ref": "#/definitions/internal_module_authn.LoginResult"
                         }
                     },
                     "400": {
@@ -69,6 +69,58 @@ const docTemplate = `{
             }
         },
         "/api/v1/barcodes": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "barcode"
+                ],
+                "summary": "List barcodes by work order",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "work order id (uuid)",
+                        "name": "work_order_id",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/internal_module_barcode.Barcode"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            },
             "post": {
                 "security": [
                     {
@@ -92,7 +144,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/barcode.GenerateBarcodeInput"
+                            "$ref": "#/definitions/internal_module_barcode.GenerateBarcodeInput"
                         }
                     }
                 ],
@@ -100,7 +152,7 @@ const docTemplate = `{
                     "201": {
                         "description": "Created",
                         "schema": {
-                            "$ref": "#/definitions/barcode.Barcode"
+                            "$ref": "#/definitions/internal_module_barcode.Barcode"
                         }
                     },
                     "400": {
@@ -151,7 +203,67 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/barcode.Barcode"
+                            "$ref": "#/definitions/internal_module_barcode.Barcode"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/barcodes/{id}/qr": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "image/png"
+                ],
+                "tags": [
+                    "barcode"
+                ],
+                "summary": "Generate QR code image for a barcode",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "barcode id (uuid)",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "file"
                         }
                     },
                     "400": {
@@ -213,7 +325,7 @@ const docTemplate = `{
                         "schema": {
                             "type": "array",
                             "items": {
-                                "$ref": "#/definitions/barcode.ScanEvent"
+                                "$ref": "#/definitions/internal_module_barcode.ScanEvent"
                             }
                         }
                     },
@@ -276,7 +388,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/barcode.RecordScanInput"
+                            "$ref": "#/definitions/internal_module_barcode.RecordScanInput"
                         }
                     }
                 ],
@@ -284,7 +396,7 @@ const docTemplate = `{
                     "201": {
                         "description": "Created",
                         "schema": {
-                            "$ref": "#/definitions/barcode.ScanEvent"
+                            "$ref": "#/definitions/internal_module_barcode.ScanEvent"
                         }
                     },
                     "400": {
@@ -361,7 +473,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/httpkit.PagedResult-costing_CostingRecord"
+                            "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_costing_CostingRecord"
                         }
                     },
                     "401": {
@@ -412,7 +524,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/costing.CostingRecord"
+                            "$ref": "#/definitions/internal_module_costing.CostingRecord"
                         }
                     },
                     "400": {
@@ -472,7 +584,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/costing.CostingRecord"
+                            "$ref": "#/definitions/internal_module_costing.CostingRecord"
                         }
                     },
                     "400": {
@@ -577,6 +689,58 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/dashboard/overview": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Aggregated KPI, chart, and recent activity data for admin dashboard",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "dashboard"
+                ],
+                "summary": "Get dashboard overview",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_module_dashboard.OverviewOutput"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/inventory/cuts": {
             "post": {
                 "security": [
@@ -601,7 +765,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/inventory.RecordCutInput"
+                            "$ref": "#/definitions/internal_module_inventory.RecordCutInput"
                         }
                     }
                 ],
@@ -609,7 +773,7 @@ const docTemplate = `{
                     "201": {
                         "description": "Created",
                         "schema": {
-                            "$ref": "#/definitions/inventory.CutResult"
+                            "$ref": "#/definitions/internal_module_inventory.CutResult"
                         }
                     },
                     "400": {
@@ -683,7 +847,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/httpkit.PagedResult-inventory_InventoryLot"
+                            "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_inventory_InventoryLot"
                         }
                     },
                     "500": {
@@ -720,7 +884,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/inventory.ReceiveStockInput"
+                            "$ref": "#/definitions/internal_module_inventory.ReceiveStockInput"
                         }
                     }
                 ],
@@ -728,11 +892,59 @@ const docTemplate = `{
                     "201": {
                         "description": "Created",
                         "schema": {
-                            "$ref": "#/definitions/inventory.InventoryLot"
+                            "$ref": "#/definitions/internal_module_inventory.InventoryLot"
                         }
                     },
                     "400": {
                         "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/inventory/lots/{id}": {
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "inventory"
+                ],
+                "summary": "Deactivate inventory lot (soft delete)",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "lot id (uuid)",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -799,11 +1011,121 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/httpkit.PagedResult-inventory_Remnant"
+                            "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_inventory_Remnant"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/inventory/remnants/suggestions": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns up to ` + "`" + `limit` + "`" + ` AVAILABLE remnants ranked by Best Fit (smallest area) + FIFO (oldest first). Each suggestion includes the remnant's storage location when available.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "inventory"
+                ],
+                "summary": "Suggest best-fit remnants for a required dimension",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "required length in mm",
+                        "name": "length_mm",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "required width in mm",
+                        "name": "width_mm",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "max results (default 3, max 10)",
+                        "name": "limit",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/internal_module_inventory.RemnantSuggestion"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/inventory/remnants/{id}": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "inventory"
+                ],
+                "summary": "Get remnant by ID",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "remnant id (uuid)",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_module_inventory.Remnant"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -910,7 +1232,73 @@ const docTemplate = `{
                         "schema": {
                             "type": "array",
                             "items": {
-                                "$ref": "#/definitions/inventory.Remnant"
+                                "$ref": "#/definitions/internal_module_inventory.Remnant"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/inventory/remnants/{id}/stock": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "inventory"
+                ],
+                "summary": "Assign a remnant to a physical storage bin",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "remnant id (uuid)",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "location barcode",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "object"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
                             }
                         }
                     },
@@ -1005,6 +1393,12 @@ const docTemplate = `{
                 "summary": "List available board sheets (paginated)",
                 "parameters": [
                     {
+                        "type": "string",
+                        "description": "filter by material id (uuid)",
+                        "name": "material_id",
+                        "in": "query"
+                    },
+                    {
                         "type": "integer",
                         "description": "page number (default 1)",
                         "name": "page",
@@ -1033,7 +1427,16 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/httpkit.PagedResult-inventory_BoardSheet"
+                            "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_inventory_BoardSheet"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
                         }
                     },
                     "500": {
@@ -1075,7 +1478,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/inventory.BoardSheet"
+                            "$ref": "#/definitions/internal_module_inventory.BoardSheet"
                         }
                     },
                     "400": {
@@ -1128,7 +1531,7 @@ const docTemplate = `{
                         "schema": {
                             "type": "array",
                             "items": {
-                                "$ref": "#/definitions/inventory.Remnant"
+                                "$ref": "#/definitions/internal_module_inventory.Remnant"
                             }
                         }
                     },
@@ -1203,7 +1606,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/httpkit.PagedResult-catalog_Material"
+                            "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_catalog_Material"
                         }
                     },
                     "401": {
@@ -1249,7 +1652,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/catalog.CreateMaterialInput"
+                            "$ref": "#/definitions/internal_module_catalog.CreateMaterialInput"
                         }
                     }
                 ],
@@ -1257,7 +1660,7 @@ const docTemplate = `{
                     "201": {
                         "description": "Created",
                         "schema": {
-                            "$ref": "#/definitions/catalog.Material"
+                            "$ref": "#/definitions/internal_module_catalog.Material"
                         }
                     },
                     "400": {
@@ -1308,8 +1711,63 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/catalog.Material"
+                            "$ref": "#/definitions/internal_module_catalog.Material"
                         }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "catalog"
+                ],
+                "summary": "Deactivate material (soft delete)",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "material id (uuid)",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
                     },
                     "400": {
                         "description": "Bad Request",
@@ -1391,7 +1849,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/httpkit.PagedResult-planning_Plan"
+                            "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_planning_Plan"
                         }
                     },
                     "401": {
@@ -1437,7 +1895,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/planning.CreatePlanInput"
+                            "$ref": "#/definitions/internal_module_planning.CreatePlanInput"
                         }
                     }
                 ],
@@ -1445,7 +1903,7 @@ const docTemplate = `{
                     "201": {
                         "description": "Created",
                         "schema": {
-                            "$ref": "#/definitions/planning.Plan"
+                            "$ref": "#/definitions/internal_module_planning.Plan"
                         }
                     },
                     "400": {
@@ -1496,7 +1954,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/planning.Plan"
+                            "$ref": "#/definitions/internal_module_planning.Plan"
                         }
                     },
                     "400": {
@@ -1705,7 +2163,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/httpkit.PagedResult-order_PO"
+                            "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_order_PO"
                         }
                     },
                     "401": {
@@ -1751,7 +2209,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/order.CreatePOInput"
+                            "$ref": "#/definitions/internal_module_order.CreatePOInput"
                         }
                     }
                 ],
@@ -1759,7 +2217,7 @@ const docTemplate = `{
                     "201": {
                         "description": "Created",
                         "schema": {
-                            "$ref": "#/definitions/order.PO"
+                            "$ref": "#/definitions/internal_module_order.PO"
                         }
                     },
                     "400": {
@@ -1810,8 +2268,63 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/order.PO"
+                            "$ref": "#/definitions/internal_module_order.PO"
                         }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "order"
+                ],
+                "summary": "Void PO (soft delete)",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "po id (uuid)",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
                     },
                     "400": {
                         "description": "Bad Request",
@@ -1872,7 +2385,7 @@ const docTemplate = `{
                         "schema": {
                             "type": "array",
                             "items": {
-                                "$ref": "#/definitions/order.LineItem"
+                                "$ref": "#/definitions/internal_module_order.LineItem"
                             }
                         }
                     },
@@ -1956,7 +2469,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/httpkit.PagedResult-catalog_SKU"
+                            "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_catalog_SKU"
                         }
                     },
                     "401": {
@@ -2002,7 +2515,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/catalog.CreateSKUInput"
+                            "$ref": "#/definitions/internal_module_catalog.CreateSKUInput"
                         }
                     }
                 ],
@@ -2010,7 +2523,7 @@ const docTemplate = `{
                     "201": {
                         "description": "Created",
                         "schema": {
-                            "$ref": "#/definitions/catalog.SKU"
+                            "$ref": "#/definitions/internal_module_catalog.SKU"
                         }
                     },
                     "400": {
@@ -2061,8 +2574,63 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/catalog.SKU"
+                            "$ref": "#/definitions/internal_module_catalog.SKU"
                         }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "catalog"
+                ],
+                "summary": "Deactivate SKU (soft delete)",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "sku id (uuid)",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
                     },
                     "400": {
                         "description": "Bad Request",
@@ -2121,7 +2689,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/catalog.BOM"
+                            "$ref": "#/definitions/internal_module_catalog.BOM"
                         }
                     },
                     "400": {
@@ -2183,7 +2751,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/catalog.SetBOMInput"
+                            "$ref": "#/definitions/internal_module_catalog.SetBOMInput"
                         }
                     }
                 ],
@@ -2191,7 +2759,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/catalog.BOM"
+                            "$ref": "#/definitions/internal_module_catalog.BOM"
                         }
                     },
                     "400": {
@@ -2245,7 +2813,7 @@ const docTemplate = `{
                         "schema": {
                             "type": "array",
                             "items": {
-                                "$ref": "#/definitions/inventory.StorageLocation"
+                                "$ref": "#/definitions/internal_module_inventory.StorageLocation"
                             }
                         }
                     },
@@ -2278,7 +2846,7 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "filter by plan id (uuid) — returns full list, no pagination",
+                        "description": "filter by plan id (uuid)",
                         "name": "plan_id",
                         "in": "query"
                     },
@@ -2315,12 +2883,9 @@ const docTemplate = `{
                 ],
                 "responses": {
                     "200": {
-                        "description": "full list (when plan_id is present)",
+                        "description": "OK",
                         "schema": {
-                            "type": "array",
-                            "items": {
-                                "$ref": "#/definitions/production.WorkOrder"
-                            }
+                            "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_production_WorkOrder"
                         }
                     },
                     "400": {
@@ -2375,7 +2940,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/production.CreateWOInput"
+                            "$ref": "#/definitions/internal_module_production.CreateWOInput"
                         }
                     }
                 ],
@@ -2383,7 +2948,7 @@ const docTemplate = `{
                     "201": {
                         "description": "Created",
                         "schema": {
-                            "$ref": "#/definitions/production.WorkOrder"
+                            "$ref": "#/definitions/internal_module_production.WorkOrder"
                         }
                     },
                     "400": {
@@ -2427,7 +2992,7 @@ const docTemplate = `{
                         "schema": {
                             "type": "array",
                             "items": {
-                                "$ref": "#/definitions/production.WorkOrder"
+                                "$ref": "#/definitions/internal_module_production.WorkOrder"
                             }
                         }
                     },
@@ -2479,7 +3044,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/production.WorkOrder"
+                            "$ref": "#/definitions/internal_module_production.WorkOrder"
                         }
                     },
                     "400": {
@@ -2543,7 +3108,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "type": "object"
+                            "$ref": "#/definitions/internal_module_production.AdvanceStatusInput"
                         }
                     }
                 ],
@@ -2626,7 +3191,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/production.WorkOrder"
+                            "$ref": "#/definitions/internal_module_production.WorkOrder"
                         }
                     },
                     "400": {
@@ -2697,7 +3262,7 @@ const docTemplate = `{
                         "schema": {
                             "type": "array",
                             "items": {
-                                "$ref": "#/definitions/production.ConsumptionRecord"
+                                "$ref": "#/definitions/internal_module_production.ConsumptionRecord"
                             }
                         }
                     },
@@ -2760,7 +3325,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/production.RecordConsumptionInput"
+                            "$ref": "#/definitions/internal_module_production.RecordConsumptionInput"
                         }
                     }
                 ],
@@ -2768,7 +3333,7 @@ const docTemplate = `{
                     "201": {
                         "description": "Created",
                         "schema": {
-                            "$ref": "#/definitions/production.ConsumptionRecord"
+                            "$ref": "#/definitions/internal_module_production.ConsumptionRecord"
                         }
                     },
                     "400": {
@@ -2828,7 +3393,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/production.SuggestAssignmentResult"
+                            "$ref": "#/definitions/internal_module_production.SuggestAssignmentResult"
                         }
                     },
                     "400": {
@@ -2889,306 +3454,7 @@ const docTemplate = `{
         }
     },
     "definitions": {
-        "authn.LoginInput": {
-            "type": "object",
-            "properties": {
-                "password": {
-                    "type": "string"
-                },
-                "username": {
-                    "type": "string"
-                }
-            }
-        },
-        "authn.LoginResult": {
-            "type": "object",
-            "properties": {
-                "expires_at": {
-                    "type": "string"
-                },
-                "role": {
-                    "type": "string"
-                },
-                "token": {
-                    "type": "string"
-                }
-            }
-        },
-        "barcode.Barcode": {
-            "type": "object",
-            "properties": {
-                "created_at": {
-                    "type": "string"
-                },
-                "dimensions": {
-                    "type": "string"
-                },
-                "id": {
-                    "type": "string"
-                },
-                "po_id": {
-                    "type": "string"
-                },
-                "produced_date": {
-                    "type": "string"
-                },
-                "production_plan_id": {
-                    "type": "string"
-                },
-                "sku_code": {
-                    "type": "string"
-                },
-                "sku_id": {
-                    "type": "string"
-                },
-                "sku_name": {
-                    "type": "string"
-                },
-                "work_order_id": {
-                    "type": "string"
-                }
-            }
-        },
-        "barcode.GenerateBarcodeInput": {
-            "type": "object",
-            "properties": {
-                "dimensions": {
-                    "type": "string"
-                },
-                "po_id": {
-                    "type": "string"
-                },
-                "produced_date": {
-                    "type": "string"
-                },
-                "production_plan_id": {
-                    "type": "string"
-                },
-                "sku_code": {
-                    "type": "string"
-                },
-                "sku_id": {
-                    "type": "string"
-                },
-                "sku_name": {
-                    "type": "string"
-                },
-                "work_order_id": {
-                    "type": "string"
-                }
-            }
-        },
-        "barcode.RecordScanInput": {
-            "type": "object",
-            "properties": {
-                "barcode_id": {
-                    "type": "string"
-                },
-                "checkpoint": {
-                    "$ref": "#/definitions/barcode.ScanCheckpoint"
-                },
-                "scanned_by": {
-                    "type": "string"
-                }
-            }
-        },
-        "barcode.ScanCheckpoint": {
-            "type": "string",
-            "enum": [
-                "CNC_COMPLETE",
-                "FINISHED_GOODS",
-                "SHIPPED"
-            ],
-            "x-enum-varnames": [
-                "CheckpointCNCComplete",
-                "CheckpointFinishedGoods",
-                "CheckpointShipped"
-            ]
-        },
-        "barcode.ScanEvent": {
-            "type": "object",
-            "properties": {
-                "barcode_id": {
-                    "type": "string"
-                },
-                "checkpoint": {
-                    "$ref": "#/definitions/barcode.ScanCheckpoint"
-                },
-                "id": {
-                    "type": "string"
-                },
-                "scanned_at": {
-                    "type": "string"
-                },
-                "scanned_by": {
-                    "type": "string"
-                }
-            }
-        },
-        "catalog.BOM": {
-            "type": "object",
-            "properties": {
-                "components": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/catalog.BOMComponent"
-                    }
-                },
-                "sku_id": {
-                    "type": "string"
-                }
-            }
-        },
-        "catalog.BOMComponent": {
-            "type": "object",
-            "properties": {
-                "material_id": {
-                    "type": "string"
-                },
-                "material_type": {
-                    "$ref": "#/definitions/catalog.MaterialType"
-                },
-                "quantity_per_unit": {
-                    "type": "number"
-                },
-                "unit": {
-                    "type": "string"
-                }
-            }
-        },
-        "catalog.CreateMaterialInput": {
-            "type": "object",
-            "properties": {
-                "name": {
-                    "type": "string"
-                },
-                "type": {
-                    "$ref": "#/definitions/catalog.MaterialType"
-                },
-                "unit": {
-                    "type": "string"
-                }
-            }
-        },
-        "catalog.CreateSKUInput": {
-            "type": "object",
-            "properties": {
-                "code": {
-                    "type": "string"
-                },
-                "dimensions": {
-                    "$ref": "#/definitions/domain.Dimension"
-                },
-                "name": {
-                    "type": "string"
-                },
-                "requires_metal": {
-                    "type": "boolean"
-                }
-            }
-        },
-        "catalog.Material": {
-            "type": "object",
-            "properties": {
-                "created_at": {
-                    "type": "string"
-                },
-                "id": {
-                    "type": "string"
-                },
-                "name": {
-                    "type": "string"
-                },
-                "type": {
-                    "$ref": "#/definitions/catalog.MaterialType"
-                },
-                "unit": {
-                    "type": "string"
-                }
-            }
-        },
-        "catalog.MaterialType": {
-            "type": "string",
-            "enum": [
-                "PLYWOOD",
-                "GLUE",
-                "METAL",
-                "OTHER"
-            ],
-            "x-enum-varnames": [
-                "MaterialTypePlywood",
-                "MaterialTypeGlue",
-                "MaterialTypeMetal",
-                "MaterialTypeOther"
-            ]
-        },
-        "catalog.SKU": {
-            "type": "object",
-            "properties": {
-                "code": {
-                    "type": "string"
-                },
-                "created_at": {
-                    "type": "string"
-                },
-                "dimensions": {
-                    "$ref": "#/definitions/domain.Dimension"
-                },
-                "id": {
-                    "type": "string"
-                },
-                "name": {
-                    "type": "string"
-                },
-                "requires_metal": {
-                    "type": "boolean"
-                }
-            }
-        },
-        "catalog.SetBOMInput": {
-            "type": "object",
-            "properties": {
-                "components": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/catalog.BOMComponent"
-                    }
-                },
-                "sku_id": {
-                    "type": "string"
-                }
-            }
-        },
-        "costing.CostingRecord": {
-            "type": "object",
-            "properties": {
-                "auxiliary_cost": {
-                    "$ref": "#/definitions/domain.Money"
-                },
-                "created_at": {
-                    "type": "string"
-                },
-                "finalized": {
-                    "type": "boolean"
-                },
-                "id": {
-                    "type": "string"
-                },
-                "material_cost": {
-                    "$ref": "#/definitions/domain.Money"
-                },
-                "sku_id": {
-                    "type": "string"
-                },
-                "total_cost": {
-                    "$ref": "#/definitions/domain.Money"
-                },
-                "work_order_id": {
-                    "type": "string"
-                }
-            }
-        },
-        "domain.Dimension": {
+        "github_com_vmarble_warehouse-management-service_internal_domain.Dimension": {
             "type": "object",
             "properties": {
                 "length_mm": {
@@ -3199,7 +3465,7 @@ const docTemplate = `{
                 }
             }
         },
-        "domain.Money": {
+        "github_com_vmarble_warehouse-management-service_internal_domain.Money": {
             "type": "object",
             "properties": {
                 "amount": {
@@ -3210,7 +3476,7 @@ const docTemplate = `{
                 }
             }
         },
-        "domain.PlanStatus": {
+        "github_com_vmarble_warehouse-management-service_internal_domain.PlanStatus": {
             "type": "string",
             "enum": [
                 "DRAFT",
@@ -3223,7 +3489,7 @@ const docTemplate = `{
                 "PlanCanceled"
             ]
         },
-        "domain.RemnantStatus": {
+        "github_com_vmarble_warehouse-management-service_internal_domain.RemnantStatus": {
             "type": "string",
             "enum": [
                 "AVAILABLE",
@@ -3238,7 +3504,7 @@ const docTemplate = `{
                 "RemnantWaste"
             ]
         },
-        "domain.WorkOrderStatus": {
+        "github_com_vmarble_warehouse-management-service_internal_domain.WorkOrderStatus": {
             "type": "string",
             "enum": [
                 "PLANNED",
@@ -3255,7 +3521,7 @@ const docTemplate = `{
                 "WOCosted"
             ]
         },
-        "httpkit.PagedResult-catalog_Material": {
+        "github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_catalog_Material": {
             "type": "object",
             "properties": {
                 "current_page": {
@@ -3264,7 +3530,7 @@ const docTemplate = `{
                 "items": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/catalog.Material"
+                        "$ref": "#/definitions/internal_module_catalog.Material"
                     }
                 },
                 "limit": {
@@ -3278,7 +3544,7 @@ const docTemplate = `{
                 }
             }
         },
-        "httpkit.PagedResult-catalog_SKU": {
+        "github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_catalog_SKU": {
             "type": "object",
             "properties": {
                 "current_page": {
@@ -3287,7 +3553,7 @@ const docTemplate = `{
                 "items": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/catalog.SKU"
+                        "$ref": "#/definitions/internal_module_catalog.SKU"
                     }
                 },
                 "limit": {
@@ -3301,7 +3567,7 @@ const docTemplate = `{
                 }
             }
         },
-        "httpkit.PagedResult-costing_CostingRecord": {
+        "github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_costing_CostingRecord": {
             "type": "object",
             "properties": {
                 "current_page": {
@@ -3310,7 +3576,7 @@ const docTemplate = `{
                 "items": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/costing.CostingRecord"
+                        "$ref": "#/definitions/internal_module_costing.CostingRecord"
                     }
                 },
                 "limit": {
@@ -3324,7 +3590,7 @@ const docTemplate = `{
                 }
             }
         },
-        "httpkit.PagedResult-inventory_BoardSheet": {
+        "github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_inventory_BoardSheet": {
             "type": "object",
             "properties": {
                 "current_page": {
@@ -3333,7 +3599,7 @@ const docTemplate = `{
                 "items": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/inventory.BoardSheet"
+                        "$ref": "#/definitions/internal_module_inventory.BoardSheet"
                     }
                 },
                 "limit": {
@@ -3347,7 +3613,7 @@ const docTemplate = `{
                 }
             }
         },
-        "httpkit.PagedResult-inventory_InventoryLot": {
+        "github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_inventory_InventoryLot": {
             "type": "object",
             "properties": {
                 "current_page": {
@@ -3356,7 +3622,7 @@ const docTemplate = `{
                 "items": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/inventory.InventoryLot"
+                        "$ref": "#/definitions/internal_module_inventory.InventoryLot"
                     }
                 },
                 "limit": {
@@ -3370,7 +3636,7 @@ const docTemplate = `{
                 }
             }
         },
-        "httpkit.PagedResult-inventory_Remnant": {
+        "github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_inventory_Remnant": {
             "type": "object",
             "properties": {
                 "current_page": {
@@ -3379,7 +3645,7 @@ const docTemplate = `{
                 "items": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/inventory.Remnant"
+                        "$ref": "#/definitions/internal_module_inventory.Remnant"
                     }
                 },
                 "limit": {
@@ -3393,7 +3659,7 @@ const docTemplate = `{
                 }
             }
         },
-        "httpkit.PagedResult-order_PO": {
+        "github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_order_PO": {
             "type": "object",
             "properties": {
                 "current_page": {
@@ -3402,7 +3668,7 @@ const docTemplate = `{
                 "items": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/order.PO"
+                        "$ref": "#/definitions/internal_module_order.PO"
                     }
                 },
                 "limit": {
@@ -3416,7 +3682,7 @@ const docTemplate = `{
                 }
             }
         },
-        "httpkit.PagedResult-planning_Plan": {
+        "github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_planning_Plan": {
             "type": "object",
             "properties": {
                 "current_page": {
@@ -3425,7 +3691,7 @@ const docTemplate = `{
                 "items": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/planning.Plan"
+                        "$ref": "#/definitions/internal_module_planning.Plan"
                     }
                 },
                 "limit": {
@@ -3439,7 +3705,7 @@ const docTemplate = `{
                 }
             }
         },
-        "httpkit.PagedResult-production_WorkOrder": {
+        "github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_production_WorkOrder": {
             "type": "object",
             "properties": {
                 "current_page": {
@@ -3448,7 +3714,7 @@ const docTemplate = `{
                 "items": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/production.WorkOrder"
+                        "$ref": "#/definitions/internal_module_production.WorkOrder"
                     }
                 },
                 "limit": {
@@ -3462,14 +3728,515 @@ const docTemplate = `{
                 }
             }
         },
-        "inventory.BoardSheet": {
+        "internal_module_authn.LoginInput": {
+            "type": "object",
+            "properties": {
+                "password": {
+                    "type": "string"
+                },
+                "username": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_module_authn.LoginResult": {
+            "type": "object",
+            "properties": {
+                "expires_at": {
+                    "type": "string"
+                },
+                "role": {
+                    "type": "string"
+                },
+                "token": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_module_barcode.Barcode": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "dimensions": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "po_id": {
+                    "type": "string"
+                },
+                "produced_date": {
+                    "type": "string"
+                },
+                "production_plan_id": {
+                    "type": "string"
+                },
+                "sku_code": {
+                    "type": "string"
+                },
+                "sku_id": {
+                    "type": "string"
+                },
+                "sku_name": {
+                    "type": "string"
+                },
+                "work_order_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_module_barcode.GenerateBarcodeInput": {
+            "type": "object",
+            "properties": {
+                "dimensions": {
+                    "type": "string"
+                },
+                "po_id": {
+                    "type": "string"
+                },
+                "produced_date": {
+                    "type": "string"
+                },
+                "production_plan_id": {
+                    "type": "string"
+                },
+                "sku_code": {
+                    "type": "string"
+                },
+                "sku_id": {
+                    "type": "string"
+                },
+                "sku_name": {
+                    "type": "string"
+                },
+                "work_order_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_module_barcode.RecordScanInput": {
+            "type": "object",
+            "properties": {
+                "barcode_id": {
+                    "type": "string"
+                },
+                "checkpoint": {
+                    "$ref": "#/definitions/internal_module_barcode.ScanCheckpoint"
+                },
+                "scanned_by": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_module_barcode.ScanCheckpoint": {
+            "type": "string",
+            "enum": [
+                "CNC_COMPLETE",
+                "FINISHED_GOODS",
+                "SHIPPED"
+            ],
+            "x-enum-varnames": [
+                "CheckpointCNCComplete",
+                "CheckpointFinishedGoods",
+                "CheckpointShipped"
+            ]
+        },
+        "internal_module_barcode.ScanEvent": {
+            "type": "object",
+            "properties": {
+                "barcode_id": {
+                    "type": "string"
+                },
+                "checkpoint": {
+                    "$ref": "#/definitions/internal_module_barcode.ScanCheckpoint"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "scanned_at": {
+                    "type": "string"
+                },
+                "scanned_by": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_module_catalog.BOM": {
+            "type": "object",
+            "properties": {
+                "components": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_module_catalog.BOMComponent"
+                    }
+                },
+                "sku_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_module_catalog.BOMComponent": {
+            "type": "object",
+            "properties": {
+                "material_id": {
+                    "type": "string"
+                },
+                "material_type": {
+                    "$ref": "#/definitions/internal_module_catalog.MaterialType"
+                },
+                "quantity_per_unit": {
+                    "type": "number"
+                },
+                "unit": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_module_catalog.CreateMaterialInput": {
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string"
+                },
+                "type": {
+                    "$ref": "#/definitions/internal_module_catalog.MaterialType"
+                },
+                "unit": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_module_catalog.CreateSKUInput": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "type": "string"
+                },
+                "dimensions": {
+                    "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.Dimension"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "requires_metal": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "internal_module_catalog.Material": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "is_active": {
+                    "type": "boolean"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "type": {
+                    "$ref": "#/definitions/internal_module_catalog.MaterialType"
+                },
+                "unit": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_module_catalog.MaterialType": {
+            "type": "string",
+            "enum": [
+                "PLYWOOD",
+                "GLUE",
+                "METAL",
+                "OTHER"
+            ],
+            "x-enum-varnames": [
+                "MaterialTypePlywood",
+                "MaterialTypeGlue",
+                "MaterialTypeMetal",
+                "MaterialTypeOther"
+            ]
+        },
+        "internal_module_catalog.SKU": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "dimensions": {
+                    "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.Dimension"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "is_active": {
+                    "type": "boolean"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "requires_metal": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "internal_module_catalog.SetBOMInput": {
+            "type": "object",
+            "properties": {
+                "components": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_module_catalog.BOMComponent"
+                    }
+                },
+                "sku_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_module_costing.CostingRecord": {
+            "type": "object",
+            "properties": {
+                "auxiliary_cost": {
+                    "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.Money"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "finalized": {
+                    "type": "boolean"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "material_cost": {
+                    "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.Money"
+                },
+                "sku_id": {
+                    "type": "string"
+                },
+                "total_cost": {
+                    "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.Money"
+                },
+                "work_order_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_module_dashboard.ChartsOutput": {
+            "type": "object",
+            "properties": {
+                "cost_allocation": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_module_dashboard.CostAllocationItem"
+                    }
+                },
+                "material_usage": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_module_dashboard.MaterialUsagePoint"
+                    }
+                },
+                "remnant_trend_7d": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_module_dashboard.RemnantTrendPoint"
+                    }
+                }
+            }
+        },
+        "internal_module_dashboard.CostAllocationItem": {
+            "type": "object",
+            "properties": {
+                "cost": {
+                    "type": "integer"
+                },
+                "sku_code": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_module_dashboard.KPIOutput": {
+            "type": "object",
+            "properties": {
+                "active_work_orders": {
+                    "type": "integer"
+                },
+                "pending_costing": {
+                    "type": "integer"
+                },
+                "remnants": {
+                    "$ref": "#/definitions/internal_module_dashboard.RemnantKPIOutput"
+                },
+                "utilization_pct": {
+                    "type": "number"
+                }
+            }
+        },
+        "internal_module_dashboard.MaterialUsagePoint": {
+            "type": "object",
+            "properties": {
+                "ACCESSORY": {
+                    "type": "number"
+                },
+                "METAL": {
+                    "type": "number"
+                },
+                "PLYWOOD": {
+                    "type": "number"
+                },
+                "date": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_module_dashboard.OverviewOutput": {
+            "type": "object",
+            "properties": {
+                "charts": {
+                    "$ref": "#/definitions/internal_module_dashboard.ChartsOutput"
+                },
+                "kpi": {
+                    "$ref": "#/definitions/internal_module_dashboard.KPIOutput"
+                },
+                "recent_activity": {
+                    "$ref": "#/definitions/internal_module_dashboard.RecentActivityOutput"
+                }
+            }
+        },
+        "internal_module_dashboard.RecentActivityOutput": {
+            "type": "object",
+            "properties": {
+                "completed_work_orders": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_module_dashboard.RecentWorkOrderItem"
+                    }
+                },
+                "costing_finalizations": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_module_dashboard.RecentCostingFinalizationItem"
+                    }
+                },
+                "recent_cuts": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_module_dashboard.RecentCutItem"
+                    }
+                }
+            }
+        },
+        "internal_module_dashboard.RecentCostingFinalizationItem": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "sku_code": {
+                    "type": "string"
+                },
+                "total_cost": {
+                    "type": "integer"
+                },
+                "work_order_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_module_dashboard.RecentCutItem": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "sku_code": {
+                    "type": "string"
+                },
+                "sku_id": {
+                    "type": "string"
+                },
+                "work_order_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_module_dashboard.RecentWorkOrderItem": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "sku_code": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_module_dashboard.RemnantKPIOutput": {
+            "type": "object",
+            "properties": {
+                "allocated": {
+                    "type": "integer"
+                },
+                "available": {
+                    "type": "integer"
+                },
+                "consumed": {
+                    "type": "integer"
+                },
+                "total": {
+                    "type": "integer"
+                },
+                "waste": {
+                    "type": "integer"
+                }
+            }
+        },
+        "internal_module_dashboard.RemnantTrendPoint": {
+            "type": "object",
+            "properties": {
+                "allocated": {
+                    "type": "integer"
+                },
+                "available": {
+                    "type": "integer"
+                },
+                "date": {
+                    "type": "string"
+                },
+                "waste": {
+                    "type": "integer"
+                }
+            }
+        },
+        "internal_module_inventory.BoardSheet": {
             "type": "object",
             "properties": {
                 "cost_per_sheet": {
-                    "$ref": "#/definitions/domain.Money"
+                    "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.Money"
                 },
                 "dimensions": {
-                    "$ref": "#/definitions/domain.Dimension"
+                    "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.Dimension"
                 },
                 "grain_pattern": {
                     "type": "string"
@@ -3486,6 +4253,12 @@ const docTemplate = `{
                 "lot_id": {
                     "type": "string"
                 },
+                "material_id": {
+                    "type": "string"
+                },
+                "material_name": {
+                    "type": "string"
+                },
                 "quality_grade": {
                     "type": "string"
                 },
@@ -3497,7 +4270,7 @@ const docTemplate = `{
                 }
             }
         },
-        "inventory.CutResult": {
+        "internal_module_inventory.CutResult": {
             "type": "object",
             "properties": {
                 "cutting_record_id": {
@@ -3508,14 +4281,17 @@ const docTemplate = `{
                 }
             }
         },
-        "inventory.InventoryLot": {
+        "internal_module_inventory.InventoryLot": {
             "type": "object",
             "properties": {
                 "cost_per_sheet": {
-                    "$ref": "#/definitions/domain.Money"
+                    "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.Money"
                 },
                 "id": {
                     "type": "string"
+                },
+                "is_active": {
+                    "type": "boolean"
                 },
                 "material_id": {
                     "type": "string"
@@ -3531,14 +4307,14 @@ const docTemplate = `{
                 }
             }
         },
-        "inventory.ReceiveStockInput": {
+        "internal_module_inventory.ReceiveStockInput": {
             "type": "object",
             "properties": {
                 "cost_per_sheet": {
-                    "$ref": "#/definitions/domain.Money"
+                    "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.Money"
                 },
                 "dimensions": {
-                    "$ref": "#/definitions/domain.Dimension"
+                    "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.Dimension"
                 },
                 "material_id": {
                     "type": "string"
@@ -3551,7 +4327,7 @@ const docTemplate = `{
                 }
             }
         },
-        "inventory.RecordCutInput": {
+        "internal_module_inventory.RecordCutInput": {
             "type": "object",
             "properties": {
                 "bounding_box_length_mm": {
@@ -3562,7 +4338,7 @@ const docTemplate = `{
                     "type": "integer"
                 },
                 "remnant_dimension": {
-                    "$ref": "#/definitions/domain.Dimension"
+                    "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.Dimension"
                 },
                 "remnant_id": {
                     "type": "string"
@@ -3574,16 +4350,19 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "used_dimension": {
-                    "$ref": "#/definitions/domain.Dimension"
+                    "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.Dimension"
                 },
                 "work_order_id": {
                     "type": "string"
                 }
             }
         },
-        "inventory.Remnant": {
+        "internal_module_inventory.Remnant": {
             "type": "object",
             "properties": {
+                "allocated_at": {
+                    "type": "string"
+                },
                 "allocated_to_wo": {
                     "type": "string"
                 },
@@ -3600,7 +4379,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "dimensions": {
-                    "$ref": "#/definitions/domain.Dimension"
+                    "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.Dimension"
                 },
                 "grain_pattern": {
                     "type": "string"
@@ -3621,14 +4400,28 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "status": {
-                    "$ref": "#/definitions/domain.RemnantStatus"
+                    "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.RemnantStatus"
                 },
                 "supplier_code": {
                     "type": "string"
                 }
             }
         },
-        "inventory.StorageLocation": {
+        "internal_module_inventory.RemnantSuggestion": {
+            "type": "object",
+            "properties": {
+                "location": {
+                    "$ref": "#/definitions/internal_module_inventory.StorageLocation"
+                },
+                "rank": {
+                    "type": "integer"
+                },
+                "remnant": {
+                    "$ref": "#/definitions/internal_module_inventory.Remnant"
+                }
+            }
+        },
+        "internal_module_inventory.StorageLocation": {
             "type": "object",
             "properties": {
                 "barcode": {
@@ -3657,21 +4450,21 @@ const docTemplate = `{
                 }
             }
         },
-        "order.CreateLineItemInput": {
+        "internal_module_order.CreateLineItemInput": {
             "type": "object",
             "properties": {
                 "quantity": {
                     "type": "integer"
                 },
                 "selling_price": {
-                    "$ref": "#/definitions/domain.Money"
+                    "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.Money"
                 },
                 "sku_id": {
                     "type": "string"
                 }
             }
         },
-        "order.CreatePOInput": {
+        "internal_module_order.CreatePOInput": {
             "type": "object",
             "properties": {
                 "code": {
@@ -3683,12 +4476,12 @@ const docTemplate = `{
                 "line_items": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/order.CreateLineItemInput"
+                        "$ref": "#/definitions/internal_module_order.CreateLineItemInput"
                     }
                 }
             }
         },
-        "order.LineItem": {
+        "internal_module_order.LineItem": {
             "type": "object",
             "properties": {
                 "id": {
@@ -3701,14 +4494,14 @@ const docTemplate = `{
                     "type": "integer"
                 },
                 "selling_price": {
-                    "$ref": "#/definitions/domain.Money"
+                    "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.Money"
                 },
                 "sku_id": {
                     "type": "string"
                 }
             }
         },
-        "order.PO": {
+        "internal_module_order.PO": {
             "type": "object",
             "properties": {
                 "code": {
@@ -3723,15 +4516,18 @@ const docTemplate = `{
                 "id": {
                     "type": "string"
                 },
+                "is_active": {
+                    "type": "boolean"
+                },
                 "line_items": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/order.LineItem"
+                        "$ref": "#/definitions/internal_module_order.LineItem"
                     }
                 }
             }
         },
-        "planning.CreatePlanInput": {
+        "internal_module_planning.CreatePlanInput": {
             "type": "object",
             "properties": {
                 "deadline": {
@@ -3740,7 +4536,7 @@ const docTemplate = `{
                 "items": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/planning.PlanItemInput"
+                        "$ref": "#/definitions/internal_module_planning.PlanItemInput"
                     }
                 },
                 "po_id": {
@@ -3748,9 +4544,12 @@ const docTemplate = `{
                 }
             }
         },
-        "planning.Plan": {
+        "internal_module_planning.Plan": {
             "type": "object",
             "properties": {
+                "code": {
+                    "type": "string"
+                },
                 "created_at": {
                     "type": "string"
                 },
@@ -3763,18 +4562,18 @@ const docTemplate = `{
                 "items": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/planning.PlanItem"
+                        "$ref": "#/definitions/internal_module_planning.PlanItem"
                     }
                 },
                 "po_id": {
                     "type": "string"
                 },
                 "status": {
-                    "$ref": "#/definitions/domain.PlanStatus"
+                    "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.PlanStatus"
                 }
             }
         },
-        "planning.PlanItem": {
+        "internal_module_planning.PlanItem": {
             "type": "object",
             "properties": {
                 "id": {
@@ -3791,7 +4590,7 @@ const docTemplate = `{
                 }
             }
         },
-        "planning.PlanItemInput": {
+        "internal_module_planning.PlanItemInput": {
             "type": "object",
             "properties": {
                 "quantity": {
@@ -3802,7 +4601,18 @@ const docTemplate = `{
                 }
             }
         },
-        "production.ConsumptionRecord": {
+        "internal_module_production.AdvanceStatusInput": {
+            "type": "object",
+            "properties": {
+                "sheet_id": {
+                    "type": "string"
+                },
+                "status": {
+                    "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.WorkOrderStatus"
+                }
+            }
+        },
+        "internal_module_production.ConsumptionRecord": {
             "type": "object",
             "properties": {
                 "created_at": {
@@ -3828,7 +4638,7 @@ const docTemplate = `{
                 }
             }
         },
-        "production.CreateWOInput": {
+        "internal_module_production.CreateWOInput": {
             "type": "object",
             "properties": {
                 "plan_id": {
@@ -3842,7 +4652,7 @@ const docTemplate = `{
                 }
             }
         },
-        "production.RecordConsumptionInput": {
+        "internal_module_production.RecordConsumptionInput": {
             "type": "object",
             "properties": {
                 "material_id": {
@@ -3862,7 +4672,7 @@ const docTemplate = `{
                 }
             }
         },
-        "production.SuggestAssignmentResult": {
+        "internal_module_production.SuggestAssignmentResult": {
             "type": "object",
             "properties": {
                 "in_cutting_count": {
@@ -3873,7 +4683,7 @@ const docTemplate = `{
                 }
             }
         },
-        "production.WorkOrder": {
+        "internal_module_production.WorkOrder": {
             "type": "object",
             "properties": {
                 "assigned_at": {
@@ -3894,11 +4704,20 @@ const docTemplate = `{
                 "quantity": {
                     "type": "integer"
                 },
+                "sku_code": {
+                    "type": "string"
+                },
+                "sku_dimensions": {
+                    "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.Dimension"
+                },
                 "sku_id": {
                     "type": "string"
                 },
+                "sku_name": {
+                    "type": "string"
+                },
                 "status": {
-                    "$ref": "#/definitions/domain.WorkOrderStatus"
+                    "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.WorkOrderStatus"
                 }
             }
         }
