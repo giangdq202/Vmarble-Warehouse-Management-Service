@@ -20,11 +20,21 @@ func NewPGStore(pool *pgxpool.Pool) store {
 	return &pgStore{pool: pool}
 }
 
+// nextPlanCode draws the next value from the shared sequence and formats it as
+// KH-{year}-{seq padded to 3 digits}, e.g. KH-2026-001.
+func (s *pgStore) nextPlanCode(ctx context.Context, year int) (string, error) {
+	var seq int64
+	if err := s.pool.QueryRow(ctx, `SELECT nextval('production_plan_code_seq')`).Scan(&seq); err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("KH-%d-%03d", year, seq), nil
+}
+
 func (s *pgStore) insertPlan(ctx context.Context, p Plan) error {
 	_, err := s.pool.Exec(ctx,
-		`INSERT INTO production_plans (id, po_id, status, deadline, created_at)
-		 VALUES ($1, $2, $3, $4, $5)`,
-		p.ID, p.POID, p.Status, p.Deadline, p.CreatedAt,
+		`INSERT INTO production_plans (id, code, po_id, status, deadline, created_at)
+		 VALUES ($1, $2, $3, $4, $5, $6)`,
+		p.ID, p.Code, p.POID, p.Status, p.Deadline, p.CreatedAt,
 	)
 	return err
 }
@@ -48,7 +58,7 @@ func (s *pgStore) selectPlansPaged(ctx context.Context, p httpkit.PageParams, st
 	}
 
 	query := fmt.Sprintf(
-		`SELECT id, po_id, status, deadline, created_at
+		`SELECT id, code, po_id, status, deadline, created_at
 		 FROM production_plans
 		 WHERE ($1::text = '' OR status = $1)
 		 ORDER BY %s %s
@@ -64,7 +74,7 @@ func (s *pgStore) selectPlansPaged(ctx context.Context, p httpkit.PageParams, st
 	var plans []Plan
 	for rows.Next() {
 		var plan Plan
-		if err := rows.Scan(&plan.ID, &plan.POID, &plan.Status, &plan.Deadline, &plan.CreatedAt); err != nil {
+		if err := rows.Scan(&plan.ID, &plan.Code, &plan.POID, &plan.Status, &plan.Deadline, &plan.CreatedAt); err != nil {
 			return nil, 0, err
 		}
 		plans = append(plans, plan)
@@ -75,9 +85,9 @@ func (s *pgStore) selectPlansPaged(ctx context.Context, p httpkit.PageParams, st
 func (s *pgStore) selectPlanByID(ctx context.Context, id uuid.UUID) (Plan, error) {
 	var p Plan
 	err := s.pool.QueryRow(ctx,
-		`SELECT id, po_id, status, deadline, created_at FROM production_plans WHERE id = $1`,
+		`SELECT id, code, po_id, status, deadline, created_at FROM production_plans WHERE id = $1`,
 		id,
-	).Scan(&p.ID, &p.POID, &p.Status, &p.Deadline, &p.CreatedAt)
+	).Scan(&p.ID, &p.Code, &p.POID, &p.Status, &p.Deadline, &p.CreatedAt)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return Plan{}, domain.ErrNotFound

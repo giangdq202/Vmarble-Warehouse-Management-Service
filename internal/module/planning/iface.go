@@ -21,12 +21,13 @@ type PlanItemInput struct {
 }
 
 type Plan struct {
-	ID        uuid.UUID       `json:"id"`
-	POID      uuid.UUID       `json:"po_id"`
+	ID        uuid.UUID         `json:"id"`
+	Code      string            `json:"code"`
+	POID      uuid.UUID         `json:"po_id"`
 	Status    domain.PlanStatus `json:"status"`
-	Deadline  *time.Time      `json:"deadline,omitempty"`
-	Items     []PlanItem      `json:"items"`
-	CreatedAt time.Time       `json:"created_at"`
+	Deadline  *time.Time        `json:"deadline,omitempty"`
+	Items     []PlanItem        `json:"items"`
+	CreatedAt time.Time         `json:"created_at"`
 }
 
 type PlanItem struct {
