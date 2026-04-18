@@ -116,17 +116,28 @@ func (h *Handler) deleteLot(c *gin.Context) {
 // @Summary      List available board sheets (paginated)
 // @Tags         inventory
 // @Produce      json
-// @Param        page     query     int     false  "page number (default 1)"
-// @Param        limit    query     int     false  "items per page (default 10, max 100)"
-// @Param        sort_by  query     string  false  "sort column: length_mm|width_mm (default id)"
-// @Param        order    query     string  false  "asc or desc (default asc)"
+// @Param        material_id  query     string  false  "filter by material id (uuid)"
+// @Param        page         query     int     false  "page number (default 1)"
+// @Param        limit        query     int     false  "items per page (default 10, max 100)"
+// @Param        sort_by      query     string  false  "sort column: length_mm|width_mm (default id)"
+// @Param        order        query     string  false  "asc or desc (default asc)"
 // @Security     BearerAuth
 // @Success      200  {object}  httpkit.PagedResult[BoardSheet]
+// @Failure      400  {object}  map[string]string
 // @Failure      500  {object}  map[string]string
 // @Router       /api/v1/inventory/sheets [get]
 func (h *Handler) listSheets(c *gin.Context) {
+	var materialID *uuid.UUID
+	if midStr := c.Query("material_id"); midStr != "" {
+		parsed, err := uuid.Parse(midStr)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid material_id"})
+			return
+		}
+		materialID = &parsed
+	}
 	p := httpkit.BindPageParams(c)
-	result, err := h.svc.ListAvailableSheets(c.Request.Context(), p)
+	result, err := h.svc.ListAvailableSheets(c.Request.Context(), p, materialID)
 	if err != nil {
 		httpkit.Error(c, err)
 		return

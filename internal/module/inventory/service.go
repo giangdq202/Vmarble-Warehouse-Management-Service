@@ -80,8 +80,8 @@ func (s *service) PreAssignSheet(ctx context.Context, sheetID uuid.UUID, workOrd
 	return s.st.preAssignSheet(ctx, sheetID, workOrderID)
 }
 
-func (s *service) ListAvailableSheets(ctx context.Context, p httpkit.PageParams) (httpkit.PagedResult[BoardSheet], error) {
-	items, total, err := s.st.selectAvailableSheetsPaged(ctx, p)
+func (s *service) ListAvailableSheets(ctx context.Context, p httpkit.PageParams, materialID *uuid.UUID) (httpkit.PagedResult[BoardSheet], error) {
+	items, total, err := s.st.selectAvailableSheetsPaged(ctx, p, materialID)
 	if err != nil {
 		return httpkit.PagedResult[BoardSheet]{}, err
 	}
