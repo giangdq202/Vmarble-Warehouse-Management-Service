@@ -4,10 +4,16 @@
 services:
   postgres:
     image: postgres:17-alpine
+    command: ["postgres", "-c", "log_statement=all"]
     restart: unless-stopped
     ports:
       - "127.0.0.1:5432:5432"
       - "10.8.0.1:5432:5432"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "3"
     environment:
       POSTGRES_USER:     ${POSTGRES_USER:-vmarble}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
@@ -27,6 +33,11 @@ services:
     ports:
       - "127.0.0.1:8080:8080"
       - "10.8.0.1:8080:8080"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "3"
     env_file:
       - .env.staging
     depends_on:
