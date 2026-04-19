@@ -1,10 +1,12 @@
 package httpkit
 
 import (
+	"context"
 	"errors"
 	"log/slog"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/vmarble/warehouse-management-service/internal/domain"
@@ -104,14 +106,39 @@ func BindPageParams(c *gin.Context) PageParams {
 // @Produce      json
 // @Success      200  {object}  map[string]string
 // @Router       /healthz [get]
-func healthz(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{"status": "ok"})
+type dbPinger interface {
+	Ping(ctx context.Context) error
 }
 
-func NewRouter() *gin.Engine {
+func healthz(pinger dbPinger) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		pingCtx, cancel := context.WithTimeout(c.Request.Context(), 2*time.Second)
+		defer cancel()
+
+		payload := gin.H{
+			"client_ip":  c.ClientIP(),
+			"user_agent": c.Request.UserAgent(),
+			"method":     c.Request.Method,
+			"path":       c.Request.URL.Path,
+		}
+
+		if err := pinger.Ping(pingCtx); err != nil {
+			payload["status"] = "error"
+			payload["db"] = "disconnected"
+			c.JSON(http.StatusServiceUnavailable, payload)
+			return
+		}
+
+		payload["status"] = "ok"
+		payload["db"] = "connected"
+		c.JSON(http.StatusOK, payload)
+	}
+}
+
+func NewRouter(pinger dbPinger) *gin.Engine {
 	r := gin.Default()
 
-	r.GET("/healthz", healthz)
+	r.GET("/healthz", healthz(pinger))
 
 	return r
 }
