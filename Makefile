@@ -1,4 +1,4 @@
-.PHONY: dev run build test test-integration lint swagger migrate-up migrate-down migrate-create docker-up docker-down docker-rebuild
+.PHONY: dev run build test test-integration lint swagger migrate-up migrate-down migrate-create docker-build docker-up docker-down docker-rebuild
 
 # Load .env if it exists
 ifneq (,$(wildcard ./.env))
@@ -55,6 +55,9 @@ migrate-create:
 	GOOSE_DRIVER=postgres $(GOOSE) -dir migrations create $$name sql
 
 # ── Docker ───────────────────────────────────────────────────
+
+docker-build:
+	docker build -t $(APP_NAME):local .
 
 docker-up:
 	docker-compose up -d

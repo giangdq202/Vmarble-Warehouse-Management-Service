@@ -143,7 +143,7 @@ func main() {
 	}()
 
 	// ── Gin router ──────────────────────────────────────────
-	r := httpkit.NewRouter()
+	r := httpkit.NewRouter(pool)
 
 	// Swagger UI: /swagger/index.html
 	r.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
