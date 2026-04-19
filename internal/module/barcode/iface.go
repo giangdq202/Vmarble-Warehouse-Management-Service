@@ -9,10 +9,15 @@ import (
 
 type ScanCheckpoint string
 
+type LabelSize string
+
 const (
-	CheckpointCNCComplete    ScanCheckpoint = "CNC_COMPLETE"
+	CheckpointCNCComplete   ScanCheckpoint = "CNC_COMPLETE"
 	CheckpointFinishedGoods ScanCheckpoint = "FINISHED_GOODS"
 	CheckpointShipped       ScanCheckpoint = "SHIPPED"
+
+	LabelSize50x30  LabelSize = "50x30"
+	LabelSize100x70 LabelSize = "100x70"
 )
 
 type GenerateBarcodeInput struct {
@@ -40,17 +45,17 @@ type Barcode struct {
 }
 
 type RecordScanInput struct {
-	BarcodeID  uuid.UUID     `json:"barcode_id"`
+	BarcodeID  uuid.UUID      `json:"barcode_id"`
 	Checkpoint ScanCheckpoint `json:"checkpoint"`
-	ScannedBy  string        `json:"scanned_by"`
+	ScannedBy  string         `json:"scanned_by"`
 }
 
 type ScanEvent struct {
-	ID         uuid.UUID     `json:"id"`
-	BarcodeID  uuid.UUID     `json:"barcode_id"`
+	ID         uuid.UUID      `json:"id"`
+	BarcodeID  uuid.UUID      `json:"barcode_id"`
 	Checkpoint ScanCheckpoint `json:"checkpoint"`
-	ScannedBy  string        `json:"scanned_by"`
-	ScannedAt  time.Time     `json:"scanned_at"`
+	ScannedBy  string         `json:"scanned_by"`
+	ScannedAt  time.Time      `json:"scanned_at"`
 }
 
 type Service interface {
@@ -60,4 +65,5 @@ type Service interface {
 	RecordScan(ctx context.Context, in RecordScanInput) (ScanEvent, error)
 	ListScans(ctx context.Context, barcodeID uuid.UUID) ([]ScanEvent, error)
 	GenerateQRCode(ctx context.Context, barcodeID uuid.UUID) ([]byte, error)
+	GenerateLabelPDF(ctx context.Context, barcodeID uuid.UUID, size LabelSize) ([]byte, error)
 }

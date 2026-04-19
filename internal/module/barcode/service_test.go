@@ -234,9 +234,9 @@ func TestRecordScan_InvalidCheckpoint_ReturnsErrInvalidInput(t *testing.T) {
 	invalidCheckpoints := []ScanCheckpoint{
 		"",
 		"UNKNOWN",
-		"cnc_complete",   // wrong case
-		"CNC-COMPLETE",   // wrong separator
-		"FINISHED_GOOD",  // typo
+		"cnc_complete",  // wrong case
+		"CNC-COMPLETE",  // wrong separator
+		"FINISHED_GOOD", // typo
 	}
 
 	for _, cp := range invalidCheckpoints {
@@ -392,6 +392,67 @@ func TestGenerateQRCode_BarcodeNotFound_PropagatesError(t *testing.T) {
 	svc := NewService(st)
 
 	_, err := svc.GenerateQRCode(context.Background(), uuid.New())
+	if !errors.Is(err, domain.ErrNotFound) {
+		t.Errorf("expected ErrNotFound, got %v", err)
+	}
+}
+
+// ── TestGenerateLabelPDF ───────────────────────────────────────────────────────
+
+func TestGenerateLabelPDF_50x30_HappyPath_ReturnsPDFBytes(t *testing.T) {
+	id := uuid.New()
+	bc := storedBarcode(id)
+	bc.SKUCode = "SKU-001"
+	bc.Dimensions = "1200x600"
+	bc.POID = uuid.New()
+	bc.WorkOrderID = uuid.New()
+
+	st := &mockStore{selectBarcodeByIDResult: bc}
+	svc := NewService(st)
+
+	pdf, err := svc.GenerateLabelPDF(context.Background(), id, LabelSize50x30)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(pdf) < 5 || string(pdf[:5]) != "%PDF-" {
+		t.Fatalf("response is not a valid PDF header, got: %q", string(pdf[:5]))
+	}
+}
+
+func TestGenerateLabelPDF_100x70_HappyPath_ReturnsPDFBytes(t *testing.T) {
+	id := uuid.New()
+	bc := storedBarcode(id)
+	bc.SKUCode = "SKU-002"
+	bc.Dimensions = "2000x800"
+	bc.POID = uuid.New()
+	bc.WorkOrderID = uuid.New()
+
+	st := &mockStore{selectBarcodeByIDResult: bc}
+	svc := NewService(st)
+
+	pdf, err := svc.GenerateLabelPDF(context.Background(), id, LabelSize100x70)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(pdf) < 5 || string(pdf[:5]) != "%PDF-" {
+		t.Fatalf("response is not a valid PDF header, got: %q", string(pdf[:5]))
+	}
+}
+
+func TestGenerateLabelPDF_InvalidSize_ReturnsErrInvalidInput(t *testing.T) {
+	svc := NewService(&mockStore{})
+
+	_, err := svc.GenerateLabelPDF(context.Background(), uuid.New(), LabelSize("A4"))
+	if !errors.Is(err, domain.ErrInvalidInput) {
+		t.Errorf("expected ErrInvalidInput, got %v", err)
+	}
+}
+
+func TestGenerateLabelPDF_BarcodeNotFound_PropagatesError(t *testing.T) {
+	st := &mockStore{selectBarcodeByIDErr: domain.NewBizError(domain.ErrNotFound, "barcode not found")}
+	svc := NewService(st)
+
+	_, err := svc.GenerateLabelPDF(context.Background(), uuid.New(), LabelSize50x30)
 	if !errors.Is(err, domain.ErrNotFound) {
 		t.Errorf("expected ErrNotFound, got %v", err)
 	}
