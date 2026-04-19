@@ -4085,6 +4085,9 @@ const docTemplate = `{
                 "id": {
                     "type": "string"
                 },
+                "labor_cost": {
+                    "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.Money"
+                },
                 "material_cost": {
                     "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.Money"
                 },
