@@ -15,6 +15,7 @@ type CostingRecord struct {
 	SKUID         uuid.UUID    `json:"sku_id"`
 	MaterialCost  domain.Money `json:"material_cost"`
 	AuxiliaryCost domain.Money `json:"auxiliary_cost"`
+	LaborCost     domain.Money `json:"labor_cost"`
 	TotalCost     domain.Money `json:"total_cost"`
 	Finalized     bool         `json:"finalized"`
 	CreatedAt     time.Time    `json:"created_at"`

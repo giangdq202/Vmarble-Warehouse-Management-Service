@@ -175,6 +175,9 @@ func TestComputeCost_NoCuttingData_ReturnsMaterialCostZero(t *testing.T) {
 	if got.MaterialCost.Amount != 0 {
 		t.Errorf("MaterialCost.Amount = %d, want 0", got.MaterialCost.Amount)
 	}
+	if got.LaborCost.Amount != 0 {
+		t.Errorf("LaborCost.Amount = %d, want 0", got.LaborCost.Amount)
+	}
 	if got.TotalCost.Amount != auxCost.Amount {
 		t.Errorf("TotalCost.Amount = %d, want %d (auxiliary only)", got.TotalCost.Amount, auxCost.Amount)
 	}

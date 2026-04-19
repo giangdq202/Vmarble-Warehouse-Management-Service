@@ -26,12 +26,14 @@ func (s *pgStore) insertCostingRecord(ctx context.Context, r CostingRecord) erro
 			id, work_order_id, sku_id,
 			material_cost_amount, material_cost_currency,
 			auxiliary_cost_amount, auxiliary_cost_currency,
+			labor_cost_amount, labor_cost_currency,
 			total_cost_amount, total_cost_currency,
 			finalized, created_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
 		r.ID, r.WorkOrderID, r.SKUID,
 		r.MaterialCost.Amount, r.MaterialCost.Currency,
 		r.AuxiliaryCost.Amount, r.AuxiliaryCost.Currency,
+		r.LaborCost.Amount, r.LaborCost.Currency,
 		r.TotalCost.Amount, r.TotalCost.Currency,
 		r.Finalized, r.CreatedAt,
 	)
@@ -44,11 +46,13 @@ func (s *pgStore) updateCostingRecord(ctx context.Context, r CostingRecord) erro
 			sku_id = $2,
 			material_cost_amount = $3, material_cost_currency = $4,
 			auxiliary_cost_amount = $5, auxiliary_cost_currency = $6,
-			total_cost_amount = $7, total_cost_currency = $8
+			labor_cost_amount = $7, labor_cost_currency = $8,
+			total_cost_amount = $9, total_cost_currency = $10
 		WHERE work_order_id = $1 AND finalized = false`,
 		r.WorkOrderID, r.SKUID,
 		r.MaterialCost.Amount, r.MaterialCost.Currency,
 		r.AuxiliaryCost.Amount, r.AuxiliaryCost.Currency,
+		r.LaborCost.Amount, r.LaborCost.Currency,
 		r.TotalCost.Amount, r.TotalCost.Currency,
 	)
 	if err != nil {
@@ -78,6 +82,7 @@ func (s *pgStore) selectCostingRecordByWO(ctx context.Context, woID uuid.UUID) (
 const selectCostingCols = `id, work_order_id, sku_id,
 	material_cost_amount, material_cost_currency,
 	auxiliary_cost_amount, auxiliary_cost_currency,
+	labor_cost_amount, labor_cost_currency,
 	total_cost_amount, total_cost_currency,
 	finalized, created_at`
 
@@ -87,6 +92,7 @@ func scanCostingRecord(row interface{ Scan(...any) error }) (CostingRecord, erro
 		&r.ID, &r.WorkOrderID, &r.SKUID,
 		&r.MaterialCost.Amount, &r.MaterialCost.Currency,
 		&r.AuxiliaryCost.Amount, &r.AuxiliaryCost.Currency,
+		&r.LaborCost.Amount, &r.LaborCost.Currency,
 		&r.TotalCost.Amount, &r.TotalCost.Currency,
 		&r.Finalized, &r.CreatedAt,
 	)

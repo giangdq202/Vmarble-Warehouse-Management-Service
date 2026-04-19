@@ -49,13 +49,15 @@ func (s *service) ComputeCost(ctx context.Context, workOrderID uuid.UUID) (Costi
 		return CostingRecord{}, err
 	}
 
-	totalCost := materialCost.Add(auxiliaryCost)
+	laborCost := domain.VND(0)
+	totalCost := materialCost.Add(auxiliaryCost).Add(laborCost)
 
 	record := CostingRecord{
 		WorkOrderID:   workOrderID,
 		SKUID:         wo.SKUID,
 		MaterialCost:  materialCost,
 		AuxiliaryCost: auxiliaryCost,
+		LaborCost:     laborCost,
 		TotalCost:     totalCost,
 		Finalized:     false,
 		CreatedAt:     time.Now().UTC(),
