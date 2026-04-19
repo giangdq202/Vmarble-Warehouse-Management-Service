@@ -22,8 +22,9 @@ type LoginResult struct {
 
 // UserInfo is a lightweight view of a user for cross-module consumption.
 type UserInfo struct {
-	ID   uuid.UUID `json:"id"`
-	Role string    `json:"role"`
+	ID       uuid.UUID `json:"id"`
+	Username string    `json:"username"`
+	Role     string    `json:"role"`
 }
 
 // Service is the public contract for the authn module.

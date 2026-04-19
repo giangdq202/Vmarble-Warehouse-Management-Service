@@ -100,7 +100,11 @@ func main() {
 		&sheetAssignAdapter{svc: inventorySvc},
 		eventPublisher,
 	)
-	barcodeSvc := barcode.NewService(barcodeStore)
+	barcodeSvc := barcode.NewService(
+		barcodeStore,
+		&barcodeWOGatewayAdapter{svc: productionSvc},
+		&barcodeUserLookupAdapter{svc: authnSvc},
+	)
 
 	// Wire production into the advance adapter now that it exists.
 	woAdvance.svc = productionSvc
@@ -321,6 +325,39 @@ func (a *cutBarcodeAdapter) GenerateForCut(ctx context.Context, in inventory.Bar
 		out.RemnantBarcodeID = &remnant.ID
 	}
 	return out, nil
+}
+
+type barcodeWOGatewayAdapter struct {
+	svc production.Service
+}
+
+func (a *barcodeWOGatewayAdapter) GetWorkOrder(ctx context.Context, woID uuid.UUID) (barcode.WorkOrderRef, error) {
+	wo, err := a.svc.GetWorkOrder(ctx, woID)
+	if err != nil {
+		return barcode.WorkOrderRef{}, err
+	}
+	return barcode.WorkOrderRef{
+		ID:      wo.ID,
+		Status:  wo.Status,
+		SKUCode: wo.SKUCode,
+		SKUName: wo.SKUName,
+	}, nil
+}
+
+func (a *barcodeWOGatewayAdapter) AdvanceStatus(ctx context.Context, woID uuid.UUID, to domain.WorkOrderStatus) error {
+	return a.svc.AdvanceStatus(ctx, woID, production.AdvanceStatusInput{To: to})
+}
+
+type barcodeUserLookupAdapter struct {
+	svc authn.Service
+}
+
+func (a *barcodeUserLookupAdapter) GetUser(ctx context.Context, userID uuid.UUID) (barcode.UserRef, error) {
+	u, err := a.svc.GetUser(ctx, userID)
+	if err != nil {
+		return barcode.UserRef{}, err
+	}
+	return barcode.UserRef{ID: u.ID, Username: u.Username}, nil
 }
 
 type cuttingAdapter struct {

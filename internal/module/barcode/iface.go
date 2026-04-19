@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/vmarble/warehouse-management-service/internal/domain"
 )
 
 type ScanCheckpoint string
@@ -45,25 +46,54 @@ type Barcode struct {
 }
 
 type RecordScanInput struct {
-	BarcodeID  uuid.UUID      `json:"barcode_id"`
+	BarcodeID  uuid.UUID      `json:"-"`
 	Checkpoint ScanCheckpoint `json:"checkpoint"`
-	ScannedBy  string         `json:"scanned_by"`
+	Location   string         `json:"location,omitempty"`
+	Note       string         `json:"note,omitempty"`
+	ScannedBy  uuid.UUID      `json:"-"`
 }
 
 type ScanEvent struct {
 	ID         uuid.UUID      `json:"id"`
 	BarcodeID  uuid.UUID      `json:"barcode_id"`
 	Checkpoint ScanCheckpoint `json:"checkpoint"`
-	ScannedBy  string         `json:"scanned_by"`
+	ScannedBy  uuid.UUID      `json:"scanned_by"`
+	Location   string         `json:"location,omitempty"`
+	Note       string         `json:"note,omitempty"`
 	ScannedAt  time.Time      `json:"scanned_at"`
+}
+
+// ScanResult is the enriched response returned by RecordScan.
+type ScanResult struct {
+	ScanID         uuid.UUID       `json:"scan_id"`
+	BarcodeID      uuid.UUID       `json:"barcode_id"`
+	Checkpoint     ScanCheckpoint  `json:"checkpoint"`
+	ScannedBy      uuid.UUID       `json:"scanned_by"`
+	ScannedByName  string          `json:"scanned_by_name"`
+	ScannedAt      time.Time       `json:"scanned_at"`
+	NextCheckpoint *ScanCheckpoint `json:"next_checkpoint,omitempty"`
+	WorkOrder      WorkOrderScan   `json:"work_order"`
+}
+
+type WorkOrderScan struct {
+	ID        uuid.UUID              `json:"id"`
+	NewStatus domain.WorkOrderStatus `json:"new_status"`
+	SKUCode   string                 `json:"sku_code"`
+	SKUName   string                 `json:"sku_name"`
+}
+
+type BatchPrintInput struct {
+	BarcodeIDs []uuid.UUID `json:"barcode_ids"`
+	Size       LabelSize   `json:"size,omitempty"`
 }
 
 type Service interface {
 	GenerateBarcode(ctx context.Context, in GenerateBarcodeInput) (Barcode, error)
 	LookupBarcode(ctx context.Context, barcodeID uuid.UUID) (Barcode, error)
 	ListBarcodesByWorkOrder(ctx context.Context, workOrderID uuid.UUID) ([]Barcode, error)
-	RecordScan(ctx context.Context, in RecordScanInput) (ScanEvent, error)
+	RecordScan(ctx context.Context, in RecordScanInput) (ScanResult, error)
 	ListScans(ctx context.Context, barcodeID uuid.UUID) ([]ScanEvent, error)
 	GenerateQRCode(ctx context.Context, barcodeID uuid.UUID) ([]byte, error)
 	GenerateLabelPDF(ctx context.Context, barcodeID uuid.UUID, size LabelSize) ([]byte, error)
+	GenerateBatchLabelPDF(ctx context.Context, in BatchPrintInput) ([]byte, error)
 }

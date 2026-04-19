@@ -23,6 +23,7 @@ func (h *Handler) Register(rg *gin.RouterGroup) {
 	rg.GET("/barcodes/:id", h.lookup)
 	rg.GET("/barcodes/:id/qr", h.generateQR)
 	rg.GET("/barcodes/:id/label.pdf", h.generateLabelPDF)
+	rg.POST("/barcodes/batch-print", auth.RequireRole(auth.RoleWarehouse, auth.RoleCNC, auth.RoleCNCManager), h.generateBatchLabelPDF)
 	rg.POST("/barcodes/:id/scans", auth.RequireRole(auth.RoleCNC, auth.RoleWarehouse, auth.RoleForeman), h.recordScan)
 	rg.GET("/barcodes/:id/scans", h.listScans)
 }
@@ -172,8 +173,8 @@ func (h *Handler) generateLabelPDF(c *gin.Context) {
 // @Accept       json
 // @Produce      json
 // @Param        id    path      string          true  "barcode id (uuid)"
-// @Param        body  body      RecordScanInput  true  "payload"
-// @Success      201   {object}  ScanEvent
+// @Param        body  body      object  true  "payload"
+// @Success      201   {object}  ScanResult
 // @Failure      400   {object}  map[string]string
 // @Failure      409   {object}  map[string]string
 // @Security     BearerAuth
@@ -189,7 +190,18 @@ func (h *Handler) recordScan(c *gin.Context) {
 	if !httpkit.Bind(c, &in) {
 		return
 	}
+	identity, ok := auth.FromContext(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "missing auth identity"})
+		return
+	}
+	scannedBy, err := uuid.Parse(identity.UserID)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid auth identity"})
+		return
+	}
 	in.BarcodeID = id
+	in.ScannedBy = scannedBy
 	event, err := h.svc.RecordScan(c.Request.Context(), in)
 	if err != nil {
 		httpkit.Error(c, err)
@@ -222,4 +234,31 @@ func (h *Handler) listScans(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, events)
+}
+
+// generateBatchLabelPDF godoc
+//
+// @Summary      Generate printable batch PDF labels
+// @Tags         barcode
+// @Accept       json
+// @Produce      application/pdf
+// @Param        body  body      BatchPrintInput  true  "payload"
+// @Success      200   {file}    binary
+// @Failure      400   {object}  map[string]string
+// @Failure      404   {object}  map[string]string
+// @Security     BearerAuth
+// @Failure      401  {object}  map[string]string
+// @Router       /api/v1/barcodes/batch-print [post]
+func (h *Handler) generateBatchLabelPDF(c *gin.Context) {
+	var in BatchPrintInput
+	if !httpkit.Bind(c, &in) {
+		return
+	}
+	pdf, err := h.svc.GenerateBatchLabelPDF(c.Request.Context(), in)
+	if err != nil {
+		httpkit.Error(c, err)
+		return
+	}
+	c.Header("Content-Disposition", "inline; filename=barcode-label-batch.pdf")
+	c.Data(http.StatusOK, "application/pdf", pdf)
 }
