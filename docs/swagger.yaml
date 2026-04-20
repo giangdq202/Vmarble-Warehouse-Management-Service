@@ -185,12 +185,34 @@ definitions:
       total_pages:
         type: integer
     type: object
+  internal_module_authn.CreateUserInput:
+    properties:
+      email:
+        type: string
+      full_name:
+        type: string
+      password:
+        minLength: 6
+        type: string
+      role:
+        type: string
+      username:
+        minLength: 3
+        type: string
+    required:
+    - password
+    - role
+    - username
+    type: object
   internal_module_authn.LoginInput:
     properties:
       password:
         type: string
       username:
         type: string
+    required:
+    - password
+    - username
     type: object
   internal_module_authn.LoginResult:
     properties:
@@ -199,6 +221,44 @@ definitions:
       role:
         type: string
       token:
+        type: string
+    type: object
+  internal_module_authn.UpdatePasswordInput:
+    properties:
+      new_password:
+        minLength: 6
+        type: string
+    required:
+    - new_password
+    type: object
+  internal_module_authn.UpdateUserInput:
+    properties:
+      email:
+        type: string
+      full_name:
+        type: string
+      role:
+        type: string
+    required:
+    - role
+    type: object
+  internal_module_authn.UserDetail:
+    properties:
+      created_at:
+        type: string
+      email:
+        type: string
+      full_name:
+        type: string
+      id:
+        type: string
+      is_active:
+        type: boolean
+      role:
+        type: string
+      updated_at:
+        type: string
+      username:
         type: string
     type: object
   internal_module_barcode.Barcode:
@@ -224,6 +284,15 @@ definitions:
       work_order_id:
         type: string
     type: object
+  internal_module_barcode.BatchPrintInput:
+    properties:
+      barcode_ids:
+        items:
+          type: string
+        type: array
+      size:
+        $ref: '#/definitions/internal_module_barcode.LabelSize'
+    type: object
   internal_module_barcode.GenerateBarcodeInput:
     properties:
       dimensions:
@@ -243,13 +312,27 @@ definitions:
       work_order_id:
         type: string
     type: object
+  internal_module_barcode.LabelSize:
+    enum:
+    - 50x30
+    - 100x70
+    type: string
+    x-enum-varnames:
+    - LabelSize50x30
+    - LabelSize100x70
   internal_module_barcode.RecordScanInput:
     properties:
-      barcode_id:
-        type: string
       checkpoint:
         $ref: '#/definitions/internal_module_barcode.ScanCheckpoint'
-      scanned_by:
+      device_id:
+        type: string
+      device_name:
+        type: string
+      location:
+        type: string
+      note:
+        type: string
+      shift:
         type: string
     type: object
   internal_module_barcode.ScanCheckpoint:
@@ -268,11 +351,57 @@ definitions:
         type: string
       checkpoint:
         $ref: '#/definitions/internal_module_barcode.ScanCheckpoint'
+      device_id:
+        type: string
+      device_name:
+        type: string
       id:
+        type: string
+      location:
+        type: string
+      note:
         type: string
       scanned_at:
         type: string
       scanned_by:
+        type: string
+      shift:
+        type: string
+    type: object
+  internal_module_barcode.ScanResult:
+    properties:
+      barcode_id:
+        type: string
+      checkpoint:
+        $ref: '#/definitions/internal_module_barcode.ScanCheckpoint'
+      device_id:
+        type: string
+      device_name:
+        type: string
+      next_checkpoint:
+        $ref: '#/definitions/internal_module_barcode.ScanCheckpoint'
+      scan_id:
+        type: string
+      scanned_at:
+        type: string
+      scanned_by:
+        type: string
+      scanned_by_name:
+        type: string
+      shift:
+        type: string
+      work_order:
+        $ref: '#/definitions/internal_module_barcode.WorkOrderScan'
+    type: object
+  internal_module_barcode.WorkOrderScan:
+    properties:
+      id:
+        type: string
+      new_status:
+        $ref: '#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.WorkOrderStatus'
+      sku_code:
+        type: string
+      sku_name:
         type: string
     type: object
   internal_module_catalog.BOM:
@@ -570,6 +699,29 @@ definitions:
         type: string
       supplier_ref:
         type: string
+    type: object
+  internal_module_inventory.OverflowLevel:
+    enum:
+    - GREEN
+    - RED
+    type: string
+    x-enum-varnames:
+    - OverflowGreen
+    - OverflowRed
+  internal_module_inventory.OverflowStatus:
+    properties:
+      block_new_sheet_issue:
+        type: boolean
+      overflow_pct:
+        type: number
+      status:
+        $ref: '#/definitions/internal_module_inventory.OverflowLevel'
+      threshold_pct:
+        type: number
+      total_remnant_area_mm2:
+        type: integer
+      total_sheet_area_mm2:
+        type: integer
     type: object
   internal_module_inventory.ReceiveStockInput:
     properties:
@@ -886,6 +1038,134 @@ paths:
       summary: Login
       tags:
       - auth
+  /api/v1/admin/users:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/internal_module_authn.UserDetail'
+            type: array
+      security:
+      - BearerAuth: []
+      summary: List all users
+      tags:
+      - admin
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: payload
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_module_authn.CreateUserInput'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/internal_module_authn.UserDetail'
+      security:
+      - BearerAuth: []
+      summary: Create new user
+      tags:
+      - admin
+  /api/v1/admin/users/{id}:
+    delete:
+      parameters:
+      - description: user id (uuid)
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "204":
+          description: No Content
+      security:
+      - BearerAuth: []
+      summary: Deactivate user (soft delete)
+      tags:
+      - admin
+    get:
+      parameters:
+      - description: user id (uuid)
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_module_authn.UserDetail'
+      security:
+      - BearerAuth: []
+      summary: Get user detail
+      tags:
+      - admin
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: user id (uuid)
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: payload
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_module_authn.UpdateUserInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_module_authn.UserDetail'
+      security:
+      - BearerAuth: []
+      summary: Update user info
+      tags:
+      - admin
+  /api/v1/admin/users/{id}/password:
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: user id (uuid)
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: payload
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_module_authn.UpdatePasswordInput'
+      produces:
+      - application/json
+      responses:
+        "204":
+          description: No Content
+      security:
+      - BearerAuth: []
+      summary: Admin reset user password
+      tags:
+      - admin
   /api/v1/barcodes:
     get:
       parameters:
@@ -1133,7 +1413,7 @@ paths:
         "201":
           description: Created
           schema:
-            $ref: '#/definitions/internal_module_barcode.ScanEvent'
+            $ref: '#/definitions/internal_module_barcode.ScanResult'
         "400":
           description: Bad Request
           schema:
@@ -1152,9 +1432,56 @@ paths:
             additionalProperties:
               type: string
             type: object
+        "412":
+          description: Precondition Failed
+          schema:
+            additionalProperties:
+              type: string
+            type: object
       security:
       - BearerAuth: []
       summary: Record scan event
+      tags:
+      - barcode
+  /api/v1/barcodes/batch-print:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: payload
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_module_barcode.BatchPrintInput'
+      produces:
+      - application/pdf
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: file
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Generate printable batch PDF labels
       tags:
       - barcode
   /api/v1/costing:
@@ -1487,6 +1814,26 @@ paths:
       security:
       - BearerAuth: []
       summary: Deactivate inventory lot (soft delete)
+      tags:
+      - inventory
+  /api/v1/inventory/overflow-status:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_module_inventory.OverflowStatus'
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Get inventory overflow status
       tags:
       - inventory
   /api/v1/inventory/remnants:
@@ -3063,23 +3410,6 @@ paths:
       summary: List work orders assigned to the authenticated CNC operator
       tags:
       - production
-  /healthz:
-    get:
-      consumes:
-      - application/json
-      description: Liveness probe
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            additionalProperties:
-              type: string
-            type: object
-      summary: Health check
-      tags:
-      - system
 securityDefinitions:
   BearerAuth:
     description: 'Enter: Bearer <token>'

@@ -105,16 +105,16 @@ func (s *pgStore) selectBarcodesByIDsOrdered(ctx context.Context, ids []uuid.UUI
 
 func (s *pgStore) insertScanEvent(ctx context.Context, e ScanEvent) error {
 	_, err := s.pool.Exec(ctx,
-		`INSERT INTO scan_events (id, barcode_id, checkpoint, scanned_by, location, note, scanned_at)
-		 VALUES ($1, $2, $3, $4, NULLIF($5, ''), NULLIF($6, ''), $7)`,
-		e.ID, e.BarcodeID, e.Checkpoint, e.ScannedBy, e.Location, e.Note, e.ScannedAt,
+		`INSERT INTO scan_events (id, barcode_id, checkpoint, scanned_by, location, note, device_id, device_name, shift, scanned_at)
+		 VALUES ($1, $2, $3, $4, NULLIF($5, ''), NULLIF($6, ''), NULLIF($7, ''), NULLIF($8, ''), NULLIF($9, ''), $10)`,
+		e.ID, e.BarcodeID, e.Checkpoint, e.ScannedBy, e.Location, e.Note, e.DeviceID, e.DeviceName, e.Shift, e.ScannedAt,
 	)
 	return err
 }
 
 func (s *pgStore) selectScanEventsByBarcode(ctx context.Context, barcodeID uuid.UUID) ([]ScanEvent, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT id, barcode_id, checkpoint, scanned_by, location, note, scanned_at
+		`SELECT id, barcode_id, checkpoint, scanned_by, location, note, device_id, device_name, shift, scanned_at
 		 FROM scan_events WHERE barcode_id = $1 ORDER BY scanned_at`,
 		barcodeID,
 	)
@@ -126,11 +126,14 @@ func (s *pgStore) selectScanEventsByBarcode(ctx context.Context, barcodeID uuid.
 	var out []ScanEvent
 	for rows.Next() {
 		var (
-			e        ScanEvent
-			location *string
-			note     *string
+			e          ScanEvent
+			location   *string
+			note       *string
+			deviceID   *string
+			deviceName *string
+			shift      *string
 		)
-		if err := rows.Scan(&e.ID, &e.BarcodeID, &e.Checkpoint, &e.ScannedBy, &location, &note, &e.ScannedAt); err != nil {
+		if err := rows.Scan(&e.ID, &e.BarcodeID, &e.Checkpoint, &e.ScannedBy, &location, &note, &deviceID, &deviceName, &shift, &e.ScannedAt); err != nil {
 			return nil, err
 		}
 		if location != nil {
@@ -139,6 +142,15 @@ func (s *pgStore) selectScanEventsByBarcode(ctx context.Context, barcodeID uuid.
 		if note != nil {
 			e.Note = *note
 		}
+		if deviceID != nil {
+			e.DeviceID = *deviceID
+		}
+		if deviceName != nil {
+			e.DeviceName = *deviceName
+		}
+		if shift != nil {
+			e.Shift = *shift
+		}
 		out = append(out, e)
 	}
 	return out, rows.Err()
@@ -146,16 +158,19 @@ func (s *pgStore) selectScanEventsByBarcode(ctx context.Context, barcodeID uuid.
 
 func (s *pgStore) selectLastScanEventByBarcode(ctx context.Context, barcodeID uuid.UUID) (ScanEvent, error) {
 	var (
-		e        ScanEvent
-		location *string
-		note     *string
+		e          ScanEvent
+		location   *string
+		note       *string
+		deviceID   *string
+		deviceName *string
+		shift      *string
 	)
 	err := s.pool.QueryRow(ctx,
-		`SELECT id, barcode_id, checkpoint, scanned_by, location, note, scanned_at
+		`SELECT id, barcode_id, checkpoint, scanned_by, location, note, device_id, device_name, shift, scanned_at
 		 FROM scan_events WHERE barcode_id = $1
 		 ORDER BY scanned_at DESC, id DESC LIMIT 1`,
 		barcodeID,
-	).Scan(&e.ID, &e.BarcodeID, &e.Checkpoint, &e.ScannedBy, &location, &note, &e.ScannedAt)
+	).Scan(&e.ID, &e.BarcodeID, &e.Checkpoint, &e.ScannedBy, &location, &note, &deviceID, &deviceName, &shift, &e.ScannedAt)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ScanEvent{}, domain.NewBizError(domain.ErrNotFound, "scan event not found")
@@ -167,6 +182,15 @@ func (s *pgStore) selectLastScanEventByBarcode(ctx context.Context, barcodeID uu
 	}
 	if note != nil {
 		e.Note = *note
+	}
+	if deviceID != nil {
+		e.DeviceID = *deviceID
+	}
+	if deviceName != nil {
+		e.DeviceName = *deviceName
+	}
+	if shift != nil {
+		e.Shift = *shift
 	}
 	return e, nil
 }

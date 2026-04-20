@@ -244,7 +244,16 @@ func TestRecordScan_AllCheckpoints_Succeed(t *testing.T) {
 	wo := &mockWOGateway{status: domain.WOInCutting}
 	svc := NewService(st, wo)
 
-	in1 := RecordScanInput{BarcodeID: barcodeID, Checkpoint: CheckpointCNCComplete, ScannedBy: scannedBy}
+	in1 := RecordScanInput{
+		BarcodeID:  barcodeID,
+		Checkpoint: CheckpointCNCComplete,
+		ScannedBy:  scannedBy,
+		DeviceID:   "  CNC-01  ",
+		DeviceName: "  Kiosk A  ",
+		Shift:      "  Morning  ",
+		Location:   "  Zone 1  ",
+		Note:       "  first  ",
+	}
 	res1, err := svc.RecordScan(context.Background(), in1)
 	if err != nil {
 		t.Fatalf("checkpoint %s: unexpected error: %v", CheckpointCNCComplete, err)
@@ -257,6 +266,18 @@ func TestRecordScan_AllCheckpoints_Succeed(t *testing.T) {
 	}
 	if res1.ScannedBy != scannedBy {
 		t.Errorf("ScannedBy = %v, want %v", res1.ScannedBy, scannedBy)
+	}
+	if res1.DeviceID != "CNC-01" {
+		t.Errorf("DeviceID = %q, want %q", res1.DeviceID, "CNC-01")
+	}
+	if res1.DeviceName != "Kiosk A" {
+		t.Errorf("DeviceName = %q, want %q", res1.DeviceName, "Kiosk A")
+	}
+	if res1.Shift != "Morning" {
+		t.Errorf("Shift = %q, want %q", res1.Shift, "Morning")
+	}
+	if st.insertScanEventResult.DeviceID != "CNC-01" || st.insertScanEventResult.DeviceName != "Kiosk A" || st.insertScanEventResult.Shift != "Morning" {
+		t.Errorf("inserted metadata mismatch: %+v", st.insertScanEventResult)
 	}
 
 	st.selectLastScanEventResult = ScanEvent{BarcodeID: barcodeID, Checkpoint: CheckpointCNCComplete}
@@ -368,6 +389,59 @@ func TestRecordScan_InvalidCheckpoint_DoesNotQueryStore(t *testing.T) {
 	if !errors.Is(err, domain.ErrInvalidInput) {
 		t.Errorf("expected ErrInvalidInput before store call, got %v", err)
 	}
+}
+
+func TestRecordScan_MetadataValidation(t *testing.T) {
+	barcodeID := uuid.New()
+	st := &mockStore{selectBarcodeByIDResult: storedBarcode(barcodeID)}
+	svc := NewService(st)
+
+	t.Run("device_id_too_long", func(t *testing.T) {
+		_, err := svc.RecordScan(context.Background(), RecordScanInput{
+			BarcodeID:  barcodeID,
+			Checkpoint: CheckpointCNCComplete,
+			ScannedBy:  uuid.New(),
+			DeviceID:   string(bytes.Repeat([]byte{'a'}, 65)),
+		})
+		if !errors.Is(err, domain.ErrInvalidInput) {
+			t.Fatalf("expected ErrInvalidInput, got %v", err)
+		}
+		if st.insertScanEventCalled {
+			t.Fatal("insertScanEvent must not be called when validation fails")
+		}
+	})
+
+	t.Run("device_name_too_long", func(t *testing.T) {
+		st.insertScanEventCalled = false
+		_, err := svc.RecordScan(context.Background(), RecordScanInput{
+			BarcodeID:  barcodeID,
+			Checkpoint: CheckpointCNCComplete,
+			ScannedBy:  uuid.New(),
+			DeviceName: string(bytes.Repeat([]byte{'b'}, 121)),
+		})
+		if !errors.Is(err, domain.ErrInvalidInput) {
+			t.Fatalf("expected ErrInvalidInput, got %v", err)
+		}
+		if st.insertScanEventCalled {
+			t.Fatal("insertScanEvent must not be called when validation fails")
+		}
+	})
+
+	t.Run("shift_too_long", func(t *testing.T) {
+		st.insertScanEventCalled = false
+		_, err := svc.RecordScan(context.Background(), RecordScanInput{
+			BarcodeID:  barcodeID,
+			Checkpoint: CheckpointCNCComplete,
+			ScannedBy:  uuid.New(),
+			Shift:      string(bytes.Repeat([]byte{'c'}, 41)),
+		})
+		if !errors.Is(err, domain.ErrInvalidInput) {
+			t.Fatalf("expected ErrInvalidInput, got %v", err)
+		}
+		if st.insertScanEventCalled {
+			t.Fatal("insertScanEvent must not be called when validation fails")
+		}
+	})
 }
 
 type mockWOGateway struct {

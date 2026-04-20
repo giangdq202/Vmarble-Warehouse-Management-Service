@@ -50,6 +50,9 @@ type RecordScanInput struct {
 	Checkpoint ScanCheckpoint `json:"checkpoint"`
 	Location   string         `json:"location,omitempty"`
 	Note       string         `json:"note,omitempty"`
+	DeviceID   string         `json:"device_id,omitempty"`
+	DeviceName string         `json:"device_name,omitempty"`
+	Shift      string         `json:"shift,omitempty"`
 	ScannedBy  uuid.UUID      `json:"-"`
 }
 
@@ -60,6 +63,9 @@ type ScanEvent struct {
 	ScannedBy  uuid.UUID      `json:"scanned_by"`
 	Location   string         `json:"location,omitempty"`
 	Note       string         `json:"note,omitempty"`
+	DeviceID   string         `json:"device_id,omitempty"`
+	DeviceName string         `json:"device_name,omitempty"`
+	Shift      string         `json:"shift,omitempty"`
 	ScannedAt  time.Time      `json:"scanned_at"`
 }
 
@@ -70,6 +76,9 @@ type ScanResult struct {
 	Checkpoint     ScanCheckpoint  `json:"checkpoint"`
 	ScannedBy      uuid.UUID       `json:"scanned_by"`
 	ScannedByName  string          `json:"scanned_by_name"`
+	DeviceID       string          `json:"device_id,omitempty"`
+	DeviceName     string          `json:"device_name,omitempty"`
+	Shift          string          `json:"shift,omitempty"`
 	ScannedAt      time.Time       `json:"scanned_at"`
 	NextCheckpoint *ScanCheckpoint `json:"next_checkpoint,omitempty"`
 	WorkOrder      WorkOrderScan   `json:"work_order"`
