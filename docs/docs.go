@@ -68,6 +68,215 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/admin/users": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "List all users",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/internal_module_authn.UserDetail"
+                            }
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "Create new user",
+                "parameters": [
+                    {
+                        "description": "payload",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_module_authn.CreateUserInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/internal_module_authn.UserDetail"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/admin/users/{id}": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "Get user detail",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "user id (uuid)",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_module_authn.UserDetail"
+                        }
+                    }
+                }
+            },
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "Update user info",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "user id (uuid)",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "payload",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_module_authn.UpdateUserInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_module_authn.UserDetail"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "Deactivate user (soft delete)",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "user id (uuid)",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    }
+                }
+            }
+        },
+        "/api/v1/admin/users/{id}/password": {
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "Admin reset user password",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "user id (uuid)",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "payload",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_module_authn.UpdatePasswordInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    }
+                }
+            }
+        },
         "/api/v1/barcodes": {
             "get": {
                 "security": [
@@ -166,6 +375,71 @@ const docTemplate = `{
                     },
                     "401": {
                         "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/barcodes/batch-print": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/pdf"
+                ],
+                "tags": [
+                    "barcode"
+                ],
+                "summary": "Generate printable batch PDF labels",
+                "parameters": [
+                    {
+                        "description": "payload",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_module_barcode.BatchPrintInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "file"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -462,7 +736,7 @@ const docTemplate = `{
                     "201": {
                         "description": "Created",
                         "schema": {
-                            "$ref": "#/definitions/internal_module_barcode.ScanEvent"
+                            "$ref": "#/definitions/internal_module_barcode.ScanResult"
                         }
                     },
                     "400": {
@@ -485,6 +759,15 @@ const docTemplate = `{
                     },
                     "409": {
                         "description": "Conflict",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "412": {
+                        "description": "Precondition Failed",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -1011,6 +1294,39 @@ const docTemplate = `{
                     },
                     "404": {
                         "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/inventory/overflow-status": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "inventory"
+                ],
+                "summary": "Get inventory overflow status",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_module_inventory.OverflowStatus"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -3491,32 +3807,6 @@ const docTemplate = `{
                     }
                 }
             }
-        },
-        "/healthz": {
-            "get": {
-                "description": "Liveness probe",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "system"
-                ],
-                "summary": "Health check",
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    }
-                }
-            }
         }
     },
     "definitions": {
@@ -3794,8 +4084,39 @@ const docTemplate = `{
                 }
             }
         },
+        "internal_module_authn.CreateUserInput": {
+            "type": "object",
+            "required": [
+                "password",
+                "role",
+                "username"
+            ],
+            "properties": {
+                "email": {
+                    "type": "string"
+                },
+                "full_name": {
+                    "type": "string"
+                },
+                "password": {
+                    "type": "string",
+                    "minLength": 6
+                },
+                "role": {
+                    "type": "string"
+                },
+                "username": {
+                    "type": "string",
+                    "minLength": 3
+                }
+            }
+        },
         "internal_module_authn.LoginInput": {
             "type": "object",
+            "required": [
+                "password",
+                "username"
+            ],
             "properties": {
                 "password": {
                     "type": "string"
@@ -3815,6 +4136,64 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "token": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_module_authn.UpdatePasswordInput": {
+            "type": "object",
+            "required": [
+                "new_password"
+            ],
+            "properties": {
+                "new_password": {
+                    "type": "string",
+                    "minLength": 6
+                }
+            }
+        },
+        "internal_module_authn.UpdateUserInput": {
+            "type": "object",
+            "required": [
+                "role"
+            ],
+            "properties": {
+                "email": {
+                    "type": "string"
+                },
+                "full_name": {
+                    "type": "string"
+                },
+                "role": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_module_authn.UserDetail": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "email": {
+                    "type": "string"
+                },
+                "full_name": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "is_active": {
+                    "type": "boolean"
+                },
+                "role": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                },
+                "username": {
                     "type": "string"
                 }
             }
@@ -3854,6 +4233,20 @@ const docTemplate = `{
                 }
             }
         },
+        "internal_module_barcode.BatchPrintInput": {
+            "type": "object",
+            "properties": {
+                "barcode_ids": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "size": {
+                    "$ref": "#/definitions/internal_module_barcode.LabelSize"
+                }
+            }
+        },
         "internal_module_barcode.GenerateBarcodeInput": {
             "type": "object",
             "properties": {
@@ -3883,16 +4276,36 @@ const docTemplate = `{
                 }
             }
         },
+        "internal_module_barcode.LabelSize": {
+            "type": "string",
+            "enum": [
+                "50x30",
+                "100x70"
+            ],
+            "x-enum-varnames": [
+                "LabelSize50x30",
+                "LabelSize100x70"
+            ]
+        },
         "internal_module_barcode.RecordScanInput": {
             "type": "object",
             "properties": {
-                "barcode_id": {
-                    "type": "string"
-                },
                 "checkpoint": {
                     "$ref": "#/definitions/internal_module_barcode.ScanCheckpoint"
                 },
-                "scanned_by": {
+                "device_id": {
+                    "type": "string"
+                },
+                "device_name": {
+                    "type": "string"
+                },
+                "location": {
+                    "type": "string"
+                },
+                "note": {
+                    "type": "string"
+                },
+                "shift": {
                     "type": "string"
                 }
             }
@@ -3919,13 +4332,83 @@ const docTemplate = `{
                 "checkpoint": {
                     "$ref": "#/definitions/internal_module_barcode.ScanCheckpoint"
                 },
+                "device_id": {
+                    "type": "string"
+                },
+                "device_name": {
+                    "type": "string"
+                },
                 "id": {
+                    "type": "string"
+                },
+                "location": {
+                    "type": "string"
+                },
+                "note": {
                     "type": "string"
                 },
                 "scanned_at": {
                     "type": "string"
                 },
                 "scanned_by": {
+                    "type": "string"
+                },
+                "shift": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_module_barcode.ScanResult": {
+            "type": "object",
+            "properties": {
+                "barcode_id": {
+                    "type": "string"
+                },
+                "checkpoint": {
+                    "$ref": "#/definitions/internal_module_barcode.ScanCheckpoint"
+                },
+                "device_id": {
+                    "type": "string"
+                },
+                "device_name": {
+                    "type": "string"
+                },
+                "next_checkpoint": {
+                    "$ref": "#/definitions/internal_module_barcode.ScanCheckpoint"
+                },
+                "scan_id": {
+                    "type": "string"
+                },
+                "scanned_at": {
+                    "type": "string"
+                },
+                "scanned_by": {
+                    "type": "string"
+                },
+                "scanned_by_name": {
+                    "type": "string"
+                },
+                "shift": {
+                    "type": "string"
+                },
+                "work_order": {
+                    "$ref": "#/definitions/internal_module_barcode.WorkOrderScan"
+                }
+            }
+        },
+        "internal_module_barcode.WorkOrderScan": {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "string"
+                },
+                "new_status": {
+                    "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.WorkOrderStatus"
+                },
+                "sku_code": {
+                    "type": "string"
+                },
+                "sku_name": {
                     "type": "string"
                 }
             }
@@ -4379,6 +4862,40 @@ const docTemplate = `{
                 },
                 "supplier_ref": {
                     "type": "string"
+                }
+            }
+        },
+        "internal_module_inventory.OverflowLevel": {
+            "type": "string",
+            "enum": [
+                "GREEN",
+                "RED"
+            ],
+            "x-enum-varnames": [
+                "OverflowGreen",
+                "OverflowRed"
+            ]
+        },
+        "internal_module_inventory.OverflowStatus": {
+            "type": "object",
+            "properties": {
+                "block_new_sheet_issue": {
+                    "type": "boolean"
+                },
+                "overflow_pct": {
+                    "type": "number"
+                },
+                "status": {
+                    "$ref": "#/definitions/internal_module_inventory.OverflowLevel"
+                },
+                "threshold_pct": {
+                    "type": "number"
+                },
+                "total_remnant_area_mm2": {
+                    "type": "integer"
+                },
+                "total_sheet_area_mm2": {
+                    "type": "integer"
                 }
             }
         },

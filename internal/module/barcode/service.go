@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 	"unicode/utf8"
 
@@ -18,6 +19,10 @@ import (
 const (
 	qrSize      = 256  // pixels for /qr endpoint
 	labelQRSize = 1024 // pixels for print-ready labels
+
+	maxScanDeviceIDLen   = 64
+	maxScanDeviceNameLen = 120
+	maxScanShiftLen      = 40
 )
 
 // qrPayload is the JSON content encoded into the QR image.
@@ -95,6 +100,23 @@ func nextCheckpoint(c ScanCheckpoint) *ScanCheckpoint {
 	default:
 		return nil
 	}
+}
+
+func normalizeScanMeta(v string) string {
+	return strings.TrimSpace(v)
+}
+
+func validateScanMeta(in RecordScanInput) error {
+	if utf8.RuneCountInString(in.DeviceID) > maxScanDeviceIDLen {
+		return domain.NewBizError(domain.ErrInvalidInput, "device_id exceeds max length 64")
+	}
+	if utf8.RuneCountInString(in.DeviceName) > maxScanDeviceNameLen {
+		return domain.NewBizError(domain.ErrInvalidInput, "device_name exceeds max length 120")
+	}
+	if utf8.RuneCountInString(in.Shift) > maxScanShiftLen {
+		return domain.NewBizError(domain.ErrInvalidInput, "shift exceeds max length 40")
+	}
+	return nil
 }
 
 func resolveLabelLayout(size LabelSize) (labelLayout, error) {
@@ -214,6 +236,13 @@ func (s *service) RecordScan(ctx context.Context, in RecordScanInput) (ScanResul
 		return ScanResult{}, domain.NewBizError(domain.ErrInvalidInput, "invalid checkpoint")
 	}
 
+	in.DeviceID = normalizeScanMeta(in.DeviceID)
+	in.DeviceName = normalizeScanMeta(in.DeviceName)
+	in.Shift = normalizeScanMeta(in.Shift)
+	if err := validateScanMeta(in); err != nil {
+		return ScanResult{}, err
+	}
+
 	bc, err := s.st.selectBarcodeByID(ctx, in.BarcodeID)
 	if err != nil {
 		return ScanResult{}, err
@@ -251,6 +280,9 @@ func (s *service) RecordScan(ctx context.Context, in RecordScanInput) (ScanResul
 		ScannedBy:  in.ScannedBy,
 		Location:   in.Location,
 		Note:       in.Note,
+		DeviceID:   in.DeviceID,
+		DeviceName: in.DeviceName,
+		Shift:      in.Shift,
 		ScannedAt:  time.Now().UTC(),
 	}
 	if err := s.st.insertScanEvent(ctx, e); err != nil {
@@ -282,6 +314,9 @@ func (s *service) RecordScan(ctx context.Context, in RecordScanInput) (ScanResul
 		Checkpoint:     e.Checkpoint,
 		ScannedBy:      in.ScannedBy,
 		ScannedByName:  scannedByName,
+		DeviceID:       e.DeviceID,
+		DeviceName:     e.DeviceName,
+		Shift:          e.Shift,
 		ScannedAt:      e.ScannedAt,
 		NextCheckpoint: nextCheckpoint(e.Checkpoint),
 		WorkOrder: WorkOrderScan{

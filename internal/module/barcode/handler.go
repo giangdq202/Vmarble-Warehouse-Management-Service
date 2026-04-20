@@ -173,10 +173,11 @@ func (h *Handler) generateLabelPDF(c *gin.Context) {
 // @Accept       json
 // @Produce      json
 // @Param        id    path      string          true  "barcode id (uuid)"
-// @Param        body  body      object  true  "payload"
+// @Param        body  body      RecordScanInput  true  "payload"
 // @Success      201   {object}  ScanResult
 // @Failure      400   {object}  map[string]string
 // @Failure      409   {object}  map[string]string
+// @Failure      412   {object}  map[string]string
 // @Security     BearerAuth
 // @Failure      401  {object}  map[string]string
 // @Router       /api/v1/barcodes/{id}/scans [post]
