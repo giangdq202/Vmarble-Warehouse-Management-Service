@@ -10,10 +10,9 @@ services:
       - "127.0.0.1:5432:5432"
       - "10.8.0.1:5432:5432"
     logging:
-      driver: "json-file"
+      driver: "journald"
       options:
-        max-size: "100m"
-        max-file: "3"
+        tag: "vwms-staging-postgres"
     environment:
       POSTGRES_USER:     ${POSTGRES_USER:-vmarble}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
@@ -34,10 +33,9 @@ services:
       - "127.0.0.1:8080:8080"
       - "10.8.0.1:8080:8080"
     logging:
-      driver: "json-file"
+      driver: "journald"
       options:
-        max-size: "100m"
-        max-file: "3"
+        tag: "vwms-staging-app" # Cần sửa thủ công postgres thành tag riêng sau khi replace
     env_file:
       - .env.staging
     depends_on:
