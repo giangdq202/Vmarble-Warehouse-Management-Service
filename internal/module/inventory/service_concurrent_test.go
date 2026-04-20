@@ -72,11 +72,15 @@ func (s *concurrentMockStore) selectLots(_ context.Context) ([]InventoryLot, err
 func (s *concurrentMockStore) selectLotsPaged(_ context.Context, _ httpkit.PageParams) ([]InventoryLot, int, error) {
 	return nil, 0, nil
 }
-func (s *concurrentMockStore) deactivateLot(_ context.Context, _ uuid.UUID) error { return nil }
+func (s *concurrentMockStore) deactivateLot(_ context.Context, _ uuid.UUID) error   { return nil }
 func (s *concurrentMockStore) insertSheets(_ context.Context, _ []BoardSheet) error { return nil }
 
 func (s *concurrentMockStore) preAssignSheet(_ context.Context, _ uuid.UUID, _ uuid.UUID) error {
 	return nil
+}
+
+func (s *concurrentMockStore) selectOverflowAreas(_ context.Context) (int64, int64, error) {
+	return 0, 1, nil
 }
 
 func (s *concurrentMockStore) selectSheetByID(_ context.Context, id uuid.UUID) (BoardSheet, error) {
@@ -240,8 +244,8 @@ func TestConcurrentRecordCut_SameSheet(t *testing.T) {
 	svc := NewService(st, nil)
 
 	var (
-		wg      sync.WaitGroup
-		mu      sync.Mutex
+		wg        sync.WaitGroup
+		mu        sync.Mutex
 		successes int
 		failures  int
 	)
@@ -427,11 +431,11 @@ func TestConcurrentMarkRemnantWaste_SameRemnant(t *testing.T) {
 // an exclusive lock). This means both goroutines can pass the optimistic
 // guard when their snapshot reads both see AVAILABLE. The real serialisation
 // happens at the store/DB layer — the test therefore:
-//   1. Verifies no data race is detected by -race.
-//   2. Verifies the final state of the remnant is always valid (ALLOCATED or
-//      WASTE — never still AVAILABLE, never an unknown state).
-//   3. Verifies the final state is stable (both operations agree on the
-//      outcome stored in the mock).
+//  1. Verifies no data race is detected by -race.
+//  2. Verifies the final state of the remnant is always valid (ALLOCATED or
+//     WASTE — never still AVAILABLE, never an unknown state).
+//  3. Verifies the final state is stable (both operations agree on the
+//     outcome stored in the mock).
 func TestConcurrentAllocateAndWaste_SameRemnant(t *testing.T) {
 	const trials = 50 // run many times to increase race-detection coverage
 
@@ -485,4 +489,3 @@ func TestConcurrentAllocateAndWaste_SameRemnant(t *testing.T) {
 		}
 	}
 }
-

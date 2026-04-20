@@ -90,7 +90,12 @@ func main() {
 	// construction-time cycle (inventory → production → inventory).
 	woAdvance := &woAdvanceAdapter{}
 	barcodeGen := &cutBarcodeAdapter{planSvc: planningSvc}
-	inventorySvc := inventory.NewService(inventoryStore, woAdvance, barcodeGen)
+	inventorySvc := inventory.NewServiceWithOverflowThreshold(
+		inventoryStore,
+		woAdvance,
+		cfg.RemnantOverflowThresholdPct,
+		barcodeGen,
+	)
 
 	productionSvc := production.NewService(
 		productionStore,

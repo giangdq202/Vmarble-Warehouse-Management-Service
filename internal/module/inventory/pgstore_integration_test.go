@@ -58,6 +58,11 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
+// newSvcWithThreshold returns inventory service with explicit overflow threshold.
+func newSvcWithThreshold(pool *pgxpool.Pool, threshold float64) Service {
+	return NewServiceWithOverflowThreshold(NewPGStore(pool), nil, threshold)
+}
+
 // ── helpers ───────────────────────────────────────────────────────────────────
 
 // truncateInventory deletes inventory-module rows in FK-safe order.
@@ -92,8 +97,9 @@ func seedMaterial(t *testing.T, pool *pgxpool.Pool) uuid.UUID {
 }
 
 // newSvc returns an Service backed by the shared real DB.
+// It uses a lenient overflow threshold to keep non-overflow integration tests stable.
 func newSvc(pool *pgxpool.Pool) Service {
-	return NewService(NewPGStore(pool))
+	return NewServiceWithOverflowThreshold(NewPGStore(pool), nil, 100)
 }
 
 func ptrUUID(v uuid.UUID) *uuid.UUID { return &v }
@@ -133,7 +139,7 @@ func TestIntegration_ReceiveStock_CreatesLotAndSheets(t *testing.T) {
 		t.Errorf("lot.Quantity = %d, want 3", lot.Quantity)
 	}
 
-	sheetsResult, err := svc.ListAvailableSheets(context.Background(), httpkit.PageParams{Page: 1, Limit: 1000})
+	sheetsResult, err := svc.ListAvailableSheets(context.Background(), httpkit.PageParams{Page: 1, Limit: 1000}, nil)
 	sheets := sheetsResult.Items
 	if err != nil {
 		t.Fatalf("ListAvailableSheets: %v", err)
@@ -197,7 +203,7 @@ func TestIntegration_RecordCut_FromSheet_NoRemnant(t *testing.T) {
 		CostPerSheet: testCost,
 		Quantity:     1,
 	})
-	sheetsResult, _ := svc.ListAvailableSheets(context.Background(), httpkit.PageParams{Page: 1, Limit: 1000})
+	sheetsResult, _ := svc.ListAvailableSheets(context.Background(), httpkit.PageParams{Page: 1, Limit: 1000}, nil)
 	sheets := sheetsResult.Items
 	sheetID := sheets[0].ID
 	woID := uuid.New()
@@ -243,7 +249,7 @@ func TestIntegration_RecordCut_FromSheet_WithRemnant(t *testing.T) {
 		CostPerSheet: testCost,
 		Quantity:     1,
 	})
-	sheetsResult, _ := svc.ListAvailableSheets(context.Background(), httpkit.PageParams{Page: 1, Limit: 1000})
+	sheetsResult, _ := svc.ListAvailableSheets(context.Background(), httpkit.PageParams{Page: 1, Limit: 1000}, nil)
 	sheets := sheetsResult.Items
 	sheetID := sheets[0].ID
 	remnantDim := testDim800x400
@@ -298,7 +304,7 @@ func TestIntegration_RecordCut_FromRemnant_NestedLineage(t *testing.T) {
 		CostPerSheet: testCost,
 		Quantity:     1,
 	})
-	sheetsResult, _ := svc.ListAvailableSheets(context.Background(), httpkit.PageParams{Page: 1, Limit: 1000})
+	sheetsResult, _ := svc.ListAvailableSheets(context.Background(), httpkit.PageParams{Page: 1, Limit: 1000}, nil)
 	sheets := sheetsResult.Items
 	sheetID := sheets[0].ID
 
@@ -370,7 +376,7 @@ func TestIntegration_RecordCut_AreaConservation_Rejected(t *testing.T) {
 		CostPerSheet: testCost,
 		Quantity:     1,
 	})
-	sheetsResult, _ := svc.ListAvailableSheets(context.Background(), httpkit.PageParams{Page: 1, Limit: 1000})
+	sheetsResult, _ := svc.ListAvailableSheets(context.Background(), httpkit.PageParams{Page: 1, Limit: 1000}, nil)
 	sheets := sheetsResult.Items
 	sheetID := sheets[0].ID
 
@@ -406,7 +412,7 @@ func TestIntegration_AllocateRemnant_HappyPath(t *testing.T) {
 		CostPerSheet: testCost,
 		Quantity:     1,
 	})
-	sheetsResult, _ := svc.ListAvailableSheets(context.Background(), httpkit.PageParams{Page: 1, Limit: 1000})
+	sheetsResult, _ := svc.ListAvailableSheets(context.Background(), httpkit.PageParams{Page: 1, Limit: 1000}, nil)
 	sheets := sheetsResult.Items
 	rd := testDim1000x500
 	r, _ := svc.RecordCut(context.Background(), RecordCutInput{
@@ -442,7 +448,7 @@ func TestIntegration_AllocateRemnant_AlreadyAllocated_Rejected(t *testing.T) {
 		CostPerSheet: testCost,
 		Quantity:     1,
 	})
-	sheetsResult, _ := svc.ListAvailableSheets(context.Background(), httpkit.PageParams{Page: 1, Limit: 1000})
+	sheetsResult, _ := svc.ListAvailableSheets(context.Background(), httpkit.PageParams{Page: 1, Limit: 1000}, nil)
 	sheets := sheetsResult.Items
 	rd := testDim1000x500
 	r, _ := svc.RecordCut(context.Background(), RecordCutInput{
@@ -474,7 +480,7 @@ func TestIntegration_MarkRemnantWaste_FromAvailable(t *testing.T) {
 		CostPerSheet: testCost,
 		Quantity:     1,
 	})
-	sheetsResult, _ := svc.ListAvailableSheets(context.Background(), httpkit.PageParams{Page: 1, Limit: 1000})
+	sheetsResult, _ := svc.ListAvailableSheets(context.Background(), httpkit.PageParams{Page: 1, Limit: 1000}, nil)
 	sheets := sheetsResult.Items
 	rd := testDim1000x500
 	r, _ := svc.RecordCut(context.Background(), RecordCutInput{
@@ -520,7 +526,7 @@ func TestIntegration_ConcurrentRecordCut_SameSheet(t *testing.T) {
 		CostPerSheet: testCost,
 		Quantity:     1,
 	})
-	sheetsResult, _ := svc.ListAvailableSheets(context.Background(), httpkit.PageParams{Page: 1, Limit: 1000})
+	sheetsResult, _ := svc.ListAvailableSheets(context.Background(), httpkit.PageParams{Page: 1, Limit: 1000}, nil)
 	sheets := sheetsResult.Items
 	sheetID := sheets[0].ID
 
@@ -585,7 +591,7 @@ func TestIntegration_ConcurrentAllocateRemnant_SameRemnant(t *testing.T) {
 		CostPerSheet: testCost,
 		Quantity:     1,
 	})
-	sheetsResult, _ := svc.ListAvailableSheets(context.Background(), httpkit.PageParams{Page: 1, Limit: 1000})
+	sheetsResult, _ := svc.ListAvailableSheets(context.Background(), httpkit.PageParams{Page: 1, Limit: 1000}, nil)
 	sheets := sheetsResult.Items
 	rd := testDim1000x500
 	r, _ := svc.RecordCut(context.Background(), RecordCutInput{
@@ -754,7 +760,7 @@ func TestIntegration_ListAvailableSheets_Pagination_CorrectMetadata(t *testing.T
 	}
 
 	// Page 1, limit 4 → 2 pages.
-	p1, err := svc.ListAvailableSheets(context.Background(), httpkit.PageParams{Page: 1, Limit: 4})
+	p1, err := svc.ListAvailableSheets(context.Background(), httpkit.PageParams{Page: 1, Limit: 4}, nil)
 	if err != nil {
 		t.Fatalf("ListAvailableSheets page 1: %v", err)
 	}
@@ -769,7 +775,7 @@ func TestIntegration_ListAvailableSheets_Pagination_CorrectMetadata(t *testing.T
 	}
 
 	// Last page (2) has 2 items.
-	p2, err := svc.ListAvailableSheets(context.Background(), httpkit.PageParams{Page: 2, Limit: 4})
+	p2, err := svc.ListAvailableSheets(context.Background(), httpkit.PageParams{Page: 2, Limit: 4}, nil)
 	if err != nil {
 		t.Fatalf("ListAvailableSheets page 2: %v", err)
 	}
@@ -783,7 +789,7 @@ func TestIntegration_ListAvailableSheets_Empty_WhenNoneAvailable(t *testing.T) {
 	truncateInventory(t)
 	svc := newSvc(pool)
 
-	result, err := svc.ListAvailableSheets(context.Background(), httpkit.PageParams{Page: 1, Limit: 10})
+	result, err := svc.ListAvailableSheets(context.Background(), httpkit.PageParams{Page: 1, Limit: 10}, nil)
 	if err != nil {
 		t.Fatalf("ListAvailableSheets: %v", err)
 	}
@@ -825,7 +831,7 @@ func TestPGStore_InheritanceRoundtrip(t *testing.T) {
 	_ = lot
 
 	// 2. Fetch the sheet ID.
-	sheetsResult, err := svc.ListAvailableSheets(context.Background(), httpkit.PageParams{Page: 1, Limit: 1000})
+	sheetsResult, err := svc.ListAvailableSheets(context.Background(), httpkit.PageParams{Page: 1, Limit: 1000}, nil)
 	if err != nil {
 		t.Fatalf("ListAvailableSheets: %v", err)
 	}
@@ -917,7 +923,7 @@ func TestPGStore_NestedRemnantLineage(t *testing.T) {
 		CostPerSheet: testCost,
 		Quantity:     1,
 	})
-	sheetsResult, _ := svc.ListAvailableSheets(context.Background(), httpkit.PageParams{Page: 1, Limit: 1000})
+	sheetsResult, _ := svc.ListAvailableSheets(context.Background(), httpkit.PageParams{Page: 1, Limit: 1000}, nil)
 	sheetID := sheetsResult.Items[0].ID
 
 	// Level 1: sheet → remnant L1 (1000×500).
@@ -1046,7 +1052,7 @@ func TestPGStore_BoundingBoxSearch(t *testing.T) {
 		CostPerSheet: testCost,
 		Quantity:     1,
 	})
-	sheetsResult, _ := svc.ListAvailableSheets(context.Background(), httpkit.PageParams{Page: 1, Limit: 1000})
+	sheetsResult, _ := svc.ListAvailableSheets(context.Background(), httpkit.PageParams{Page: 1, Limit: 1000}, nil)
 	sheetID := sheetsResult.Items[0].ID
 
 	// Cut 1: produce remnant A (800×400) with bounding_box explicitly set to
@@ -1078,7 +1084,7 @@ func TestPGStore_BoundingBoxSearch(t *testing.T) {
 		CostPerSheet: testCost,
 		Quantity:     1,
 	})
-	sheetsResult2, _ := svc.ListAvailableSheets(context.Background(), httpkit.PageParams{Page: 1, Limit: 1000})
+	sheetsResult2, _ := svc.ListAvailableSheets(context.Background(), httpkit.PageParams{Page: 1, Limit: 1000}, nil)
 	// Pick the sheet that hasn't been issued yet.
 	var sheetID2 uuid.UUID
 	for _, sh := range sheetsResult2.Items {
@@ -1177,5 +1183,171 @@ func TestPGStore_BoundingBoxSearch(t *testing.T) {
 	}
 	if !foundBPaged {
 		t.Error("remnant B must appear in ListRemnants for min 700×350")
+	}
+}
+
+func TestIntegration_GetOverflowStatus_AggregatesByStatus(t *testing.T) {
+	pool := getPool(t)
+	truncateInventory(t)
+	matID := seedMaterial(t, pool)
+	svc := newSvcWithThreshold(pool, 15)
+
+	_, err := svc.ReceiveStock(context.Background(), ReceiveStockInput{
+		MaterialID:   matID,
+		Dimensions:   domain.Dimension{LengthMM: 100, WidthMM: 100},
+		CostPerSheet: testCost,
+		Quantity:     3,
+		SupplierRef:  "OVERFLOW-AGG",
+	})
+	if err != nil {
+		t.Fatalf("ReceiveStock: %v", err)
+	}
+
+	sheets, err := svc.ListAvailableSheets(context.Background(), httpkit.PageParams{Page: 1, Limit: 100}, nil)
+	if err != nil {
+		t.Fatalf("ListAvailableSheets: %v", err)
+	}
+	if len(sheets.Items) != 3 {
+		t.Fatalf("want 3 sheets, got %d", len(sheets.Items))
+	}
+
+	remA := domain.Dimension{LengthMM: 50, WidthMM: 20} // 1000
+	cutA, err := svc.RecordCut(context.Background(), RecordCutInput{
+		SheetID:          ptrUUID(sheets.Items[0].ID),
+		WorkOrderID:      uuid.New(),
+		SKUID:            uuid.New(),
+		UsedDimension:    domain.Dimension{LengthMM: 10, WidthMM: 10},
+		RemnantDimension: &remA,
+	})
+	if err != nil {
+		t.Fatalf("RecordCut A: %v", err)
+	}
+
+	remB := domain.Dimension{LengthMM: 10, WidthMM: 10} // 100
+	cutB, err := svc.RecordCut(context.Background(), RecordCutInput{
+		SheetID:          ptrUUID(sheets.Items[1].ID),
+		WorkOrderID:      uuid.New(),
+		SKUID:            uuid.New(),
+		UsedDimension:    domain.Dimension{LengthMM: 10, WidthMM: 10},
+		RemnantDimension: &remB,
+	})
+	if err != nil {
+		t.Fatalf("RecordCut B: %v", err)
+	}
+
+	if cutB.RemnantID == nil {
+		t.Fatal("expected remnant ID from cut B")
+	}
+	if err := svc.AllocateRemnant(context.Background(), *cutB.RemnantID, uuid.New()); err != nil {
+		t.Fatalf("AllocateRemnant B: %v", err)
+	}
+
+	if cutA.RemnantID == nil {
+		t.Fatal("expected remnant ID from cut A")
+	}
+	_, err = svc.RecordCut(context.Background(), RecordCutInput{
+		RemnantID:     cutA.RemnantID,
+		WorkOrderID:   uuid.New(),
+		SKUID:         uuid.New(),
+		UsedDimension: domain.Dimension{LengthMM: 10, WidthMM: 10},
+	})
+	if err != nil {
+		t.Fatalf("consume remnant A: %v", err)
+	}
+
+	status, err := svc.GetOverflowStatus(context.Background())
+	if err != nil {
+		t.Fatalf("GetOverflowStatus: %v", err)
+	}
+	if status.TotalRemnantAreaMM2 != 100 {
+		t.Errorf("TotalRemnantAreaMM2 = %d, want 100", status.TotalRemnantAreaMM2)
+	}
+	if status.TotalSheetAreaMM2 != 10000 {
+		t.Errorf("TotalSheetAreaMM2 = %d, want 10000", status.TotalSheetAreaMM2)
+	}
+	if status.Status != OverflowGreen {
+		t.Errorf("Status = %s, want GREEN", status.Status)
+	}
+}
+
+func TestIntegration_OverflowRed_BlocksSheetIssueAndAllowsRemnantCut(t *testing.T) {
+	pool := getPool(t)
+	truncateInventory(t)
+	matID := seedMaterial(t, pool)
+	svc := newSvcWithThreshold(pool, 15)
+
+	_, err := svc.ReceiveStock(context.Background(), ReceiveStockInput{
+		MaterialID:   matID,
+		Dimensions:   domain.Dimension{LengthMM: 100, WidthMM: 100},
+		CostPerSheet: testCost,
+		Quantity:     2,
+		SupplierRef:  "OVERFLOW-RED",
+	})
+	if err != nil {
+		t.Fatalf("ReceiveStock: %v", err)
+	}
+
+	sheets, err := svc.ListAvailableSheets(context.Background(), httpkit.PageParams{Page: 1, Limit: 100}, nil)
+	if err != nil {
+		t.Fatalf("ListAvailableSheets: %v", err)
+	}
+	if len(sheets.Items) != 2 {
+		t.Fatalf("want 2 sheets, got %d", len(sheets.Items))
+	}
+
+	remDim := domain.Dimension{LengthMM: 50, WidthMM: 40} // 2000 => 20%% over one 100x100 available sheet
+	cut, err := svc.RecordCut(context.Background(), RecordCutInput{
+		SheetID:          ptrUUID(sheets.Items[0].ID),
+		WorkOrderID:      uuid.New(),
+		SKUID:            uuid.New(),
+		UsedDimension:    domain.Dimension{LengthMM: 10, WidthMM: 10},
+		RemnantDimension: &remDim,
+	})
+	if err != nil {
+		t.Fatalf("seed RecordCut: %v", err)
+	}
+	if cut.RemnantID == nil {
+		t.Fatal("expected remnant ID from seed cut")
+	}
+
+	status, err := svc.GetOverflowStatus(context.Background())
+	if err != nil {
+		t.Fatalf("GetOverflowStatus: %v", err)
+	}
+	if status.Status != OverflowRed {
+		t.Fatalf("Status = %s, want RED", status.Status)
+	}
+
+	remaining, err := svc.ListAvailableSheets(context.Background(), httpkit.PageParams{Page: 1, Limit: 100}, nil)
+	if err != nil {
+		t.Fatalf("ListAvailableSheets(remaining): %v", err)
+	}
+	if len(remaining.Items) != 1 {
+		t.Fatalf("want 1 available remaining sheet, got %d", len(remaining.Items))
+	}
+	blockedSheetID := remaining.Items[0].ID
+
+	if err := svc.PreAssignSheet(context.Background(), blockedSheetID, uuid.New()); !errors.Is(err, domain.ErrPreconditionFailed) {
+		t.Fatalf("PreAssignSheet: want ErrPreconditionFailed, got %v", err)
+	}
+
+	_, err = svc.RecordCut(context.Background(), RecordCutInput{
+		SheetID:       ptrUUID(blockedSheetID),
+		WorkOrderID:   uuid.New(),
+		SKUID:         uuid.New(),
+		UsedDimension: domain.Dimension{LengthMM: 10, WidthMM: 10},
+	})
+	if !errors.Is(err, domain.ErrPreconditionFailed) {
+		t.Fatalf("RecordCut from sheet: want ErrPreconditionFailed, got %v", err)
+	}
+
+	_, err = svc.RecordCut(context.Background(), RecordCutInput{
+		RemnantID:     cut.RemnantID,
+		WorkOrderID:   uuid.New(),
+		SKUID:         uuid.New(),
+		UsedDimension: domain.Dimension{LengthMM: 10, WidthMM: 10},
+	})
+	if err != nil {
+		t.Fatalf("RecordCut from remnant should be allowed in RED, got %v", err)
 	}
 }
