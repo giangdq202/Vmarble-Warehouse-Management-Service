@@ -1,12 +1,20 @@
 package barcode
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
+	"image"
+	_ "image/png"
+	"math"
+	"regexp"
+	"strconv"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/liyue201/goqr"
 	"github.com/vmarble/warehouse-management-service/internal/domain"
 )
 
@@ -29,9 +37,18 @@ type mockStore struct {
 	selectBarcodesByWorkOrderResult []Barcode
 	selectBarcodesByWorkOrderErr    error
 
+	// selectBarcodesByIDsOrdered
+	selectBarcodesByIDsOrderedResult []Barcode
+	selectBarcodesByIDsOrderedErr    error
+	selectBarcodesByIDsOrderedArg    []uuid.UUID
+
 	// selectScanEventsByBarcode
 	selectScanEventsResult []ScanEvent
 	selectScanEventsErr    error
+
+	// selectLastScanEventByBarcode
+	selectLastScanEventResult ScanEvent
+	selectLastScanEventErr    error
 }
 
 func (m *mockStore) insertBarcode(_ context.Context, _ Barcode) error {
@@ -46,6 +63,11 @@ func (m *mockStore) selectBarcodesByWorkOrder(_ context.Context, _ uuid.UUID) ([
 	return m.selectBarcodesByWorkOrderResult, m.selectBarcodesByWorkOrderErr
 }
 
+func (m *mockStore) selectBarcodesByIDsOrdered(_ context.Context, ids []uuid.UUID) ([]Barcode, error) {
+	m.selectBarcodesByIDsOrderedArg = append([]uuid.UUID(nil), ids...)
+	return m.selectBarcodesByIDsOrderedResult, m.selectBarcodesByIDsOrderedErr
+}
+
 func (m *mockStore) insertScanEvent(_ context.Context, e ScanEvent) error {
 	m.insertScanEventCalled = true
 	m.insertScanEventResult = e
@@ -54,6 +76,10 @@ func (m *mockStore) insertScanEvent(_ context.Context, e ScanEvent) error {
 
 func (m *mockStore) selectScanEventsByBarcode(_ context.Context, _ uuid.UUID) ([]ScanEvent, error) {
 	return m.selectScanEventsResult, m.selectScanEventsErr
+}
+
+func (m *mockStore) selectLastScanEventByBarcode(_ context.Context, _ uuid.UUID) (ScanEvent, error) {
+	return m.selectLastScanEventResult, m.selectLastScanEventErr
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -77,6 +103,32 @@ func storedBarcode(id uuid.UUID) Barcode {
 		WorkOrderID: uuid.New(),
 		SKUCode:     "SKU-CHAIR-002",
 		CreatedAt:   time.Now().UTC(),
+	}
+}
+
+func parsePageSizeMMFromPDF(t *testing.T, pdf []byte) (float64, float64) {
+	t.Helper()
+	re := regexp.MustCompile(`/MediaBox\s*\[\s*0\s+0\s+([0-9]+(?:\.[0-9]+)?)\s+([0-9]+(?:\.[0-9]+)?)\s*\]`)
+	m := re.FindSubmatch(pdf)
+	if len(m) != 3 {
+		t.Fatalf("MediaBox not found in PDF")
+	}
+	wPt, err := strconv.ParseFloat(string(m[1]), 64)
+	if err != nil {
+		t.Fatalf("parse MediaBox width: %v", err)
+	}
+	hPt, err := strconv.ParseFloat(string(m[2]), 64)
+	if err != nil {
+		t.Fatalf("parse MediaBox height: %v", err)
+	}
+	const ptToMM = 25.4 / 72.0
+	return wPt * ptToMM, hPt * ptToMM
+}
+
+func assertCloseMM(t *testing.T, got, want float64) {
+	t.Helper()
+	if math.Abs(got-want) > 0.2 {
+		t.Fatalf("size mismatch: got %.3fmm, want %.3fmm", got, want)
 	}
 }
 
@@ -183,50 +235,54 @@ func TestLookupBarcode_NotFound_PropagatesError(t *testing.T) {
 // ── TestRecordScan ────────────────────────────────────────────────────────────
 
 func TestRecordScan_AllCheckpoints_Succeed(t *testing.T) {
-	checkpoints := []ScanCheckpoint{
-		CheckpointCNCComplete,
-		CheckpointFinishedGoods,
-		CheckpointShipped,
+	barcodeID := uuid.New()
+	scannedBy := uuid.New()
+	st := &mockStore{
+		selectBarcodeByIDResult: storedBarcode(barcodeID),
+		selectLastScanEventErr:  domain.NewBizError(domain.ErrNotFound, "scan event not found"),
+	}
+	wo := &mockWOGateway{status: domain.WOInCutting}
+	svc := NewService(st, wo)
+
+	in1 := RecordScanInput{BarcodeID: barcodeID, Checkpoint: CheckpointCNCComplete, ScannedBy: scannedBy}
+	res1, err := svc.RecordScan(context.Background(), in1)
+	if err != nil {
+		t.Fatalf("checkpoint %s: unexpected error: %v", CheckpointCNCComplete, err)
+	}
+	if res1.ScanID == uuid.Nil {
+		t.Error("ScanID must be set")
+	}
+	if res1.NextCheckpoint == nil || *res1.NextCheckpoint != CheckpointFinishedGoods {
+		t.Errorf("next checkpoint = %v, want %v", res1.NextCheckpoint, CheckpointFinishedGoods)
+	}
+	if res1.ScannedBy != scannedBy {
+		t.Errorf("ScannedBy = %v, want %v", res1.ScannedBy, scannedBy)
 	}
 
-	for _, cp := range checkpoints {
-		cp := cp
-		t.Run(string(cp), func(t *testing.T) {
-			barcodeID := uuid.New()
-			st := &mockStore{
-				selectBarcodeByIDResult: storedBarcode(barcodeID),
-			}
-			svc := NewService(st)
+	st.selectLastScanEventResult = ScanEvent{BarcodeID: barcodeID, Checkpoint: CheckpointCNCComplete}
+	st.selectLastScanEventErr = nil
+	wo.status = domain.WOInProcessing
+	in2 := RecordScanInput{BarcodeID: barcodeID, Checkpoint: CheckpointFinishedGoods, ScannedBy: scannedBy}
+	res2, err := svc.RecordScan(context.Background(), in2)
+	if err != nil {
+		t.Fatalf("checkpoint %s: unexpected error: %v", CheckpointFinishedGoods, err)
+	}
+	if res2.NextCheckpoint == nil || *res2.NextCheckpoint != CheckpointShipped {
+		t.Errorf("next checkpoint = %v, want %v", res2.NextCheckpoint, CheckpointShipped)
+	}
 
-			in := RecordScanInput{
-				BarcodeID:  barcodeID,
-				Checkpoint: cp,
-				ScannedBy:  "worker-01",
-			}
-			event, err := svc.RecordScan(context.Background(), in)
-			if err != nil {
-				t.Fatalf("checkpoint %s: unexpected error: %v", cp, err)
-			}
-
-			if event.ID == uuid.Nil {
-				t.Error("ScanEvent ID must be set")
-			}
-			if event.BarcodeID != barcodeID {
-				t.Errorf("BarcodeID = %v, want %v", event.BarcodeID, barcodeID)
-			}
-			if event.Checkpoint != cp {
-				t.Errorf("Checkpoint = %q, want %q", event.Checkpoint, cp)
-			}
-			if event.ScannedBy != "worker-01" {
-				t.Errorf("ScannedBy = %q, want %q", event.ScannedBy, "worker-01")
-			}
-			if event.ScannedAt.IsZero() {
-				t.Error("ScannedAt must be set")
-			}
-			if !st.insertScanEventCalled {
-				t.Error("insertScanEvent must be called")
-			}
-		})
+	st.selectLastScanEventResult = ScanEvent{BarcodeID: barcodeID, Checkpoint: CheckpointFinishedGoods}
+	wo.status = domain.WOCompleted
+	in3 := RecordScanInput{BarcodeID: barcodeID, Checkpoint: CheckpointShipped, ScannedBy: scannedBy}
+	res3, err := svc.RecordScan(context.Background(), in3)
+	if err != nil {
+		t.Fatalf("checkpoint %s: unexpected error: %v", CheckpointShipped, err)
+	}
+	if res3.NextCheckpoint != nil {
+		t.Errorf("next checkpoint = %v, want nil", res3.NextCheckpoint)
+	}
+	if !st.insertScanEventCalled {
+		t.Error("insertScanEvent must be called")
 	}
 }
 
@@ -246,7 +302,7 @@ func TestRecordScan_InvalidCheckpoint_ReturnsErrInvalidInput(t *testing.T) {
 			_, err := svc.RecordScan(context.Background(), RecordScanInput{
 				BarcodeID:  uuid.New(),
 				Checkpoint: cp,
-				ScannedBy:  "worker-01",
+				ScannedBy:  uuid.New(),
 			})
 
 			if !errors.Is(err, domain.ErrInvalidInput) {
@@ -265,7 +321,7 @@ func TestRecordScan_BarcodeNotFound_PropagatesError(t *testing.T) {
 	_, err := svc.RecordScan(context.Background(), RecordScanInput{
 		BarcodeID:  uuid.New(),
 		Checkpoint: CheckpointCNCComplete,
-		ScannedBy:  "worker-01",
+		ScannedBy:  uuid.New(),
 	})
 
 	if !errors.Is(err, domain.ErrNotFound) {
@@ -280,15 +336,16 @@ func TestRecordScan_StoreInsertError_Propagates(t *testing.T) {
 	dbErr := errors.New("insert scan event failed")
 	barcodeID := uuid.New()
 	st := &mockStore{
-		selectBarcodeByIDResult: storedBarcode(barcodeID),
-		insertScanEventErr:      dbErr,
+		selectBarcodeByIDResult:   storedBarcode(barcodeID),
+		selectLastScanEventResult: ScanEvent{BarcodeID: barcodeID, Checkpoint: CheckpointFinishedGoods},
+		insertScanEventErr:        dbErr,
 	}
-
-	svc := NewService(st)
+	wo := &mockWOGateway{status: domain.WOCompleted}
+	svc := NewService(st, wo)
 	_, err := svc.RecordScan(context.Background(), RecordScanInput{
 		BarcodeID:  barcodeID,
 		Checkpoint: CheckpointShipped,
-		ScannedBy:  "worker-02",
+		ScannedBy:  uuid.New(),
 	})
 
 	if !errors.Is(err, dbErr) {
@@ -299,19 +356,113 @@ func TestRecordScan_StoreInsertError_Propagates(t *testing.T) {
 // RecordScan must check checkpoint validity BEFORE querying the barcode store,
 // so an invalid checkpoint must never reach selectBarcodeByID.
 func TestRecordScan_InvalidCheckpoint_DoesNotQueryStore(t *testing.T) {
-	// If selectBarcodeByID were called, the mock would return its zero-value
-	// Barcode which has no error — so if we still get ErrInvalidInput we know
-	// the guard fired before the store call.
 	st := &mockStore{}
 
 	svc := NewService(st)
 	_, err := svc.RecordScan(context.Background(), RecordScanInput{
 		BarcodeID:  uuid.New(),
 		Checkpoint: "BOGUS",
+		ScannedBy:  uuid.New(),
 	})
 
 	if !errors.Is(err, domain.ErrInvalidInput) {
 		t.Errorf("expected ErrInvalidInput before store call, got %v", err)
+	}
+}
+
+type mockWOGateway struct {
+	status        domain.WorkOrderStatus
+	getErr        error
+	advanceCalled bool
+	advanceWOID   uuid.UUID
+	advanceTo     domain.WorkOrderStatus
+	advanceErr    error
+}
+
+func (m *mockWOGateway) GetWorkOrder(_ context.Context, woID uuid.UUID) (WorkOrderRef, error) {
+	if m.getErr != nil {
+		return WorkOrderRef{}, m.getErr
+	}
+	return WorkOrderRef{ID: woID, Status: m.status}, nil
+}
+
+func (m *mockWOGateway) AdvanceStatus(_ context.Context, woID uuid.UUID, to domain.WorkOrderStatus) error {
+	m.advanceCalled = true
+	m.advanceWOID = woID
+	m.advanceTo = to
+	return m.advanceErr
+}
+
+func TestRecordScan_OutOfOrder_ReturnsErrInvalidTransition(t *testing.T) {
+	barcodeID := uuid.New()
+	st := &mockStore{
+		selectBarcodeByIDResult:   storedBarcode(barcodeID),
+		selectLastScanEventResult: ScanEvent{BarcodeID: barcodeID, Checkpoint: CheckpointCNCComplete},
+	}
+	wo := &mockWOGateway{status: domain.WOCompleted}
+	svc := NewService(st, wo)
+
+	_, err := svc.RecordScan(context.Background(), RecordScanInput{
+		BarcodeID:  barcodeID,
+		Checkpoint: CheckpointShipped,
+		ScannedBy:  uuid.New(),
+	})
+	if !errors.Is(err, domain.ErrInvalidTransition) {
+		t.Fatalf("expected ErrInvalidTransition, got %v", err)
+	}
+	if st.insertScanEventCalled {
+		t.Fatal("insertScanEvent must not be called for out-of-order scan")
+	}
+}
+
+func TestRecordScan_CNCComplete_AutoAdvanceWorkOrder(t *testing.T) {
+	barcodeID := uuid.New()
+	bc := storedBarcode(barcodeID)
+	st := &mockStore{
+		selectBarcodeByIDResult: bc,
+		selectLastScanEventErr:  domain.NewBizError(domain.ErrNotFound, "scan event not found"),
+	}
+	wo := &mockWOGateway{status: domain.WOInCutting}
+	svc := NewService(st, wo)
+
+	res, err := svc.RecordScan(context.Background(), RecordScanInput{
+		BarcodeID:  barcodeID,
+		Checkpoint: CheckpointCNCComplete,
+		ScannedBy:  uuid.New(),
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !wo.advanceCalled {
+		t.Fatal("expected work order to be advanced")
+	}
+	if wo.advanceWOID != bc.WorkOrderID {
+		t.Fatalf("advance wo id = %v, want %v", wo.advanceWOID, bc.WorkOrderID)
+	}
+	if wo.advanceTo != domain.WOInProcessing {
+		t.Fatalf("advance target = %s, want %s", wo.advanceTo, domain.WOInProcessing)
+	}
+	if res.WorkOrder.NewStatus != domain.WOInProcessing {
+		t.Fatalf("new status = %s, want %s", res.WorkOrder.NewStatus, domain.WOInProcessing)
+	}
+}
+
+func TestRecordScan_RejectsWhenWorkOrderStatusMismatched(t *testing.T) {
+	barcodeID := uuid.New()
+	st := &mockStore{
+		selectBarcodeByIDResult:   storedBarcode(barcodeID),
+		selectLastScanEventResult: ScanEvent{BarcodeID: barcodeID, Checkpoint: CheckpointCNCComplete},
+	}
+	wo := &mockWOGateway{status: domain.WOCompleted}
+	svc := NewService(st, wo)
+
+	_, err := svc.RecordScan(context.Background(), RecordScanInput{
+		BarcodeID:  barcodeID,
+		Checkpoint: CheckpointFinishedGoods,
+		ScannedBy:  uuid.New(),
+	})
+	if !errors.Is(err, domain.ErrPreconditionFailed) {
+		t.Fatalf("expected ErrPreconditionFailed, got %v", err)
 	}
 }
 
@@ -381,9 +532,37 @@ func TestGenerateQRCode_HappyPath_ReturnsPNGBytes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	// PNG magic bytes: 0x89 0x50 0x4E 0x47
 	if len(png) < 4 || png[0] != 0x89 || png[1] != 0x50 || png[2] != 0x4E || png[3] != 0x47 {
 		t.Errorf("response is not a valid PNG (first bytes: %v)", png[:4])
+	}
+
+	img, _, err := image.Decode(bytes.NewReader(png))
+	if err != nil {
+		t.Fatalf("decode png: %v", err)
+	}
+	symbols, err := goqr.Recognize(img)
+	if err != nil {
+		t.Fatalf("recognize qr from png: %v", err)
+	}
+	if len(symbols) == 0 {
+		t.Fatal("no QR code recognized from generated PNG")
+	}
+
+	var payload qrPayload
+	if err := json.Unmarshal(symbols[0].Payload, &payload); err != nil {
+		t.Fatalf("unmarshal qr payload: %v", err)
+	}
+	if payload.ID != bc.ID.String() {
+		t.Errorf("payload.id = %q, want %q", payload.ID, bc.ID.String())
+	}
+	if payload.SKUCode != bc.SKUCode {
+		t.Errorf("payload.sku_code = %q, want %q", payload.SKUCode, bc.SKUCode)
+	}
+	if payload.Dimensions != bc.Dimensions {
+		t.Errorf("payload.dimensions = %q, want %q", payload.Dimensions, bc.Dimensions)
+	}
+	if payload.POID != bc.POID.String() {
+		t.Errorf("payload.po_id = %q, want %q", payload.POID, bc.POID.String())
 	}
 }
 
@@ -417,6 +596,10 @@ func TestGenerateLabelPDF_50x30_HappyPath_ReturnsPDFBytes(t *testing.T) {
 	if len(pdf) < 5 || string(pdf[:5]) != "%PDF-" {
 		t.Fatalf("response is not a valid PDF header, got: %q", string(pdf[:5]))
 	}
+
+	widthMM, heightMM := parsePageSizeMMFromPDF(t, pdf)
+	assertCloseMM(t, widthMM, 50)
+	assertCloseMM(t, heightMM, 30)
 }
 
 func TestGenerateLabelPDF_100x70_HappyPath_ReturnsPDFBytes(t *testing.T) {
@@ -437,6 +620,10 @@ func TestGenerateLabelPDF_100x70_HappyPath_ReturnsPDFBytes(t *testing.T) {
 	if len(pdf) < 5 || string(pdf[:5]) != "%PDF-" {
 		t.Fatalf("response is not a valid PDF header, got: %q", string(pdf[:5]))
 	}
+
+	widthMM, heightMM := parsePageSizeMMFromPDF(t, pdf)
+	assertCloseMM(t, widthMM, 100)
+	assertCloseMM(t, heightMM, 70)
 }
 
 func TestGenerateLabelPDF_InvalidSize_ReturnsErrInvalidInput(t *testing.T) {
@@ -455,5 +642,49 @@ func TestGenerateLabelPDF_BarcodeNotFound_PropagatesError(t *testing.T) {
 	_, err := svc.GenerateLabelPDF(context.Background(), uuid.New(), LabelSize50x30)
 	if !errors.Is(err, domain.ErrNotFound) {
 		t.Errorf("expected ErrNotFound, got %v", err)
+	}
+}
+
+func TestGenerateBatchLabelPDF_EmptyIDs_ReturnsErrInvalidInput(t *testing.T) {
+	svc := NewService(&mockStore{})
+	_, err := svc.GenerateBatchLabelPDF(context.Background(), BatchPrintInput{})
+	if !errors.Is(err, domain.ErrInvalidInput) {
+		t.Fatalf("expected ErrInvalidInput, got %v", err)
+	}
+}
+
+func TestGenerateBatchLabelPDF_HappyPath_ReturnsMultiPagePDF(t *testing.T) {
+	ids := make([]uuid.UUID, 10)
+	barcodes := make([]Barcode, 0, 10)
+	for i := 0; i < 10; i++ {
+		id := uuid.New()
+		ids[i] = id
+		bc := storedBarcode(id)
+		bc.POID = uuid.New()
+		bc.WorkOrderID = uuid.New()
+		bc.Dimensions = "1200x600"
+		bc.SKUCode = "SKU-" + strconv.Itoa(i+1)
+		barcodes = append(barcodes, bc)
+	}
+	st := &mockStore{selectBarcodesByIDsOrderedResult: barcodes}
+	svc := NewService(st)
+
+	pdf, err := svc.GenerateBatchLabelPDF(context.Background(), BatchPrintInput{BarcodeIDs: ids, Size: LabelSize50x30})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(pdf) < 5 || string(pdf[:5]) != "%PDF-" {
+		t.Fatalf("response is not a valid PDF header")
+	}
+	if count := bytes.Count(pdf, []byte("/Type /Page")); count < 10 {
+		t.Fatalf("page count too low: got %d, want at least 10", count)
+	}
+	if len(st.selectBarcodesByIDsOrderedArg) != len(ids) {
+		t.Fatalf("store received %d ids, want %d", len(st.selectBarcodesByIDsOrderedArg), len(ids))
+	}
+	for i := range ids {
+		if st.selectBarcodesByIDsOrderedArg[i] != ids[i] {
+			t.Fatalf("id order mismatch at %d: got %v, want %v", i, st.selectBarcodesByIDsOrderedArg[i], ids[i])
+		}
 	}
 }

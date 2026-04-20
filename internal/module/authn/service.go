@@ -62,5 +62,5 @@ func (s *service) GetUser(ctx context.Context, userID uuid.UUID) (UserInfo, erro
 	if err != nil {
 		return UserInfo{}, err
 	}
-	return UserInfo{ID: u.ID, Role: u.Role}, nil
+	return UserInfo{ID: u.ID, Username: u.Username, Role: u.Role}, nil
 }

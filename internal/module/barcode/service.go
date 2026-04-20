@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 	"unicode/utf8"
@@ -43,11 +44,22 @@ type labelLayout struct {
 }
 
 type service struct {
-	st store
+	st  store
+	wo  WorkOrderGateway
+	usr UserLookup
 }
 
-func NewService(st store) Service {
-	return &service{st: st}
+func NewService(st store, deps ...any) Service {
+	svc := &service{st: st}
+	for _, dep := range deps {
+		switch d := dep.(type) {
+		case WorkOrderGateway:
+			svc.wo = d
+		case UserLookup:
+			svc.usr = d
+		}
+	}
+	return svc
 }
 
 func validCheckpoint(c ScanCheckpoint) bool {
@@ -56,6 +68,32 @@ func validCheckpoint(c ScanCheckpoint) bool {
 		return true
 	default:
 		return false
+	}
+}
+
+func checkpointOrder(c ScanCheckpoint) int {
+	switch c {
+	case CheckpointCNCComplete:
+		return 1
+	case CheckpointFinishedGoods:
+		return 2
+	case CheckpointShipped:
+		return 3
+	default:
+		return 0
+	}
+}
+
+func nextCheckpoint(c ScanCheckpoint) *ScanCheckpoint {
+	switch c {
+	case CheckpointCNCComplete:
+		next := CheckpointFinishedGoods
+		return &next
+	case CheckpointFinishedGoods:
+		next := CheckpointShipped
+		return &next
+	default:
+		return nil
 	}
 }
 
@@ -168,13 +206,42 @@ func (s *service) ListBarcodesByWorkOrder(ctx context.Context, workOrderID uuid.
 	return s.st.selectBarcodesByWorkOrder(ctx, workOrderID)
 }
 
-func (s *service) RecordScan(ctx context.Context, in RecordScanInput) (ScanEvent, error) {
+func (s *service) RecordScan(ctx context.Context, in RecordScanInput) (ScanResult, error) {
+	if in.ScannedBy == uuid.Nil {
+		return ScanResult{}, domain.NewBizError(domain.ErrInvalidInput, "scanned_by is required")
+	}
 	if !validCheckpoint(in.Checkpoint) {
-		return ScanEvent{}, domain.NewBizError(domain.ErrInvalidInput, "invalid checkpoint")
+		return ScanResult{}, domain.NewBizError(domain.ErrInvalidInput, "invalid checkpoint")
 	}
 
-	if _, err := s.st.selectBarcodeByID(ctx, in.BarcodeID); err != nil {
-		return ScanEvent{}, err
+	bc, err := s.st.selectBarcodeByID(ctx, in.BarcodeID)
+	if err != nil {
+		return ScanResult{}, err
+	}
+
+	woStatus, hasWOStatus, err := s.resolveWorkOrderStatus(ctx, bc.WorkOrderID)
+	if err != nil {
+		return ScanResult{}, err
+	}
+	if hasWOStatus {
+		expected, _ := expectedWOStatusForCheckpoint(in.Checkpoint)
+		if woStatus != expected {
+			return ScanResult{}, domain.NewBizError(domain.ErrPreconditionFailed,
+				"work order status does not allow this checkpoint")
+		}
+	}
+
+	var last *ScanCheckpoint
+	lastEvent, err := s.st.selectLastScanEventByBarcode(ctx, in.BarcodeID)
+	if err != nil {
+		if !errors.Is(err, domain.ErrNotFound) {
+			return ScanResult{}, err
+		}
+	} else {
+		last = &lastEvent.Checkpoint
+	}
+	if !isCheckpointAllowed(last, in.Checkpoint) {
+		return ScanResult{}, domain.NewBizError(domain.ErrInvalidTransition, "checkpoint scanned out of order")
 	}
 
 	e := ScanEvent{
@@ -182,12 +249,59 @@ func (s *service) RecordScan(ctx context.Context, in RecordScanInput) (ScanEvent
 		BarcodeID:  in.BarcodeID,
 		Checkpoint: in.Checkpoint,
 		ScannedBy:  in.ScannedBy,
+		Location:   in.Location,
+		Note:       in.Note,
 		ScannedAt:  time.Now().UTC(),
 	}
 	if err := s.st.insertScanEvent(ctx, e); err != nil {
-		return ScanEvent{}, err
+		return ScanResult{}, err
 	}
-	return e, nil
+
+	newStatus := woStatus
+	if in.Checkpoint == CheckpointCNCComplete {
+		if s.wo == nil {
+			return ScanResult{}, domain.NewBizError(domain.ErrPreconditionFailed, "work order transition dependency is not configured")
+		}
+		if err := s.wo.AdvanceStatus(ctx, bc.WorkOrderID, domain.WOInProcessing); err != nil {
+			return ScanResult{}, err
+		}
+		newStatus = domain.WOInProcessing
+	}
+
+	scannedByName := in.ScannedBy.String()
+	if s.usr != nil {
+		u, err := s.usr.GetUser(ctx, in.ScannedBy)
+		if err == nil && u.Username != "" {
+			scannedByName = u.Username
+		}
+	}
+
+	return ScanResult{
+		ScanID:         e.ID,
+		BarcodeID:      e.BarcodeID,
+		Checkpoint:     e.Checkpoint,
+		ScannedBy:      in.ScannedBy,
+		ScannedByName:  scannedByName,
+		ScannedAt:      e.ScannedAt,
+		NextCheckpoint: nextCheckpoint(e.Checkpoint),
+		WorkOrder: WorkOrderScan{
+			ID:        bc.WorkOrderID,
+			NewStatus: newStatus,
+			SKUCode:   bc.SKUCode,
+			SKUName:   bc.SKUName,
+		},
+	}, nil
+}
+
+func (s *service) resolveWorkOrderStatus(ctx context.Context, workOrderID uuid.UUID) (domain.WorkOrderStatus, bool, error) {
+	if s.wo == nil {
+		return "", false, nil
+	}
+	w, err := s.wo.GetWorkOrder(ctx, workOrderID)
+	if err != nil {
+		return "", false, err
+	}
+	return w.Status, true, nil
 }
 
 func (s *service) ListScans(ctx context.Context, barcodeID uuid.UUID) ([]ScanEvent, error) {
@@ -209,6 +323,25 @@ func (s *service) GenerateQRCode(ctx context.Context, barcodeID uuid.UUID) ([]by
 		return nil, err
 	}
 	return encodeQRCode(raw, qrSize)
+}
+
+func renderLabelPage(pdf *gofpdf.Fpdf, layout labelLayout, bc Barcode, imageName string, qrPNG []byte) {
+	pdf.AddPageFormat("P", gofpdf.SizeType{Wd: layout.pageWidthMM, Ht: layout.pageHeightMM})
+	imgOpts := gofpdf.ImageOptions{ImageType: "PNG"}
+	pdf.RegisterImageOptionsReader(imageName, imgOpts, bytes.NewReader(qrPNG))
+	pdf.ImageOptions(imageName, layout.qrXMM, layout.qrYMM, layout.qrSizeMM, layout.qrSizeMM, false, imgOpts, 0, "")
+
+	pdf.SetFont("Arial", "B", layout.titleFontPt)
+	pdf.SetXY(layout.textXMM, layout.textYMM)
+	pdf.CellFormat(layout.textWidthMM, layout.lineHeightMM, clampRunes(bc.SKUCode, layout.skuMaxRunes), "", 1, "L", false, 0, "")
+
+	pdf.SetFont("Arial", "", layout.bodyFontPt)
+	pdf.SetX(layout.textXMM)
+	pdf.CellFormat(layout.textWidthMM, layout.lineHeightMM, "WO: "+shortUUID(bc.WorkOrderID), "", 1, "L", false, 0, "")
+	pdf.SetX(layout.textXMM)
+	pdf.CellFormat(layout.textWidthMM, layout.lineHeightMM, "PO: "+shortUUID(bc.POID), "", 1, "L", false, 0, "")
+	pdf.SetX(layout.textXMM)
+	pdf.CellFormat(layout.textWidthMM, layout.lineHeightMM, clampRunes("Dim: "+bc.Dimensions, layout.skuMaxRunes+8), "", 1, "L", false, 0, "")
 }
 
 func (s *service) GenerateLabelPDF(ctx context.Context, barcodeID uuid.UUID, size LabelSize) ([]byte, error) {
@@ -237,28 +370,55 @@ func (s *service) GenerateLabelPDF(ctx context.Context, barcodeID uuid.UUID, siz
 	})
 	pdf.SetMargins(0, 0, 0)
 	pdf.SetAutoPageBreak(false, 0)
-	pdf.AddPageFormat("P", gofpdf.SizeType{Wd: layout.pageWidthMM, Ht: layout.pageHeightMM})
-
-	imgOpts := gofpdf.ImageOptions{ImageType: "PNG"}
-	const imageName = "qr"
-	pdf.RegisterImageOptionsReader(imageName, imgOpts, bytes.NewReader(qrPNG))
-	pdf.ImageOptions(imageName, layout.qrXMM, layout.qrYMM, layout.qrSizeMM, layout.qrSizeMM, false, imgOpts, 0, "")
-
-	pdf.SetFont("Arial", "B", layout.titleFontPt)
-	pdf.SetXY(layout.textXMM, layout.textYMM)
-	pdf.CellFormat(layout.textWidthMM, layout.lineHeightMM, clampRunes(bc.SKUCode, layout.skuMaxRunes), "", 1, "L", false, 0, "")
-
-	pdf.SetFont("Arial", "", layout.bodyFontPt)
-	pdf.SetX(layout.textXMM)
-	pdf.CellFormat(layout.textWidthMM, layout.lineHeightMM, "WO: "+shortUUID(bc.WorkOrderID), "", 1, "L", false, 0, "")
-	pdf.SetX(layout.textXMM)
-	pdf.CellFormat(layout.textWidthMM, layout.lineHeightMM, "PO: "+shortUUID(bc.POID), "", 1, "L", false, 0, "")
-	pdf.SetX(layout.textXMM)
-	pdf.CellFormat(layout.textWidthMM, layout.lineHeightMM, clampRunes("Dim: "+bc.Dimensions, layout.skuMaxRunes+8), "", 1, "L", false, 0, "")
+	renderLabelPage(pdf, layout, bc, "qr", qrPNG)
 
 	var out bytes.Buffer
 	if err := pdf.Output(&out); err != nil {
 		return nil, fmt.Errorf("render label pdf: %w", err)
+	}
+	return out.Bytes(), nil
+}
+
+func (s *service) GenerateBatchLabelPDF(ctx context.Context, in BatchPrintInput) ([]byte, error) {
+	if len(in.BarcodeIDs) == 0 {
+		return nil, domain.NewBizError(domain.ErrInvalidInput, "barcode_ids is required")
+	}
+	size := in.Size
+	if size == "" {
+		size = LabelSize50x30
+	}
+	layout, err := resolveLabelLayout(size)
+	if err != nil {
+		return nil, err
+	}
+
+	barcodes, err := s.st.selectBarcodesByIDsOrdered(ctx, in.BarcodeIDs)
+	if err != nil {
+		return nil, err
+	}
+
+	pdf := gofpdf.NewCustom(&gofpdf.InitType{
+		UnitStr: "mm",
+		Size:    gofpdf.SizeType{Wd: layout.pageWidthMM, Ht: layout.pageHeightMM},
+	})
+	pdf.SetMargins(0, 0, 0)
+	pdf.SetAutoPageBreak(false, 0)
+
+	for i, bc := range barcodes {
+		raw, err := qrPayloadBytes(bc)
+		if err != nil {
+			return nil, err
+		}
+		qrPNG, err := encodeQRCode(raw, labelQRSize)
+		if err != nil {
+			return nil, err
+		}
+		renderLabelPage(pdf, layout, bc, fmt.Sprintf("qr-%d", i), qrPNG)
+	}
+
+	var out bytes.Buffer
+	if err := pdf.Output(&out); err != nil {
+		return nil, fmt.Errorf("render batch label pdf: %w", err)
 	}
 	return out.Bytes(), nil
 }
