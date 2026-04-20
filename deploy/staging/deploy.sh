@@ -62,6 +62,11 @@ done
 if $IS_HEALTHY; then
     log "✅ Deploy thành công: $NEW_IMAGE"
     echo "$NEW_IMAGE" > "$STATE_FILE"
+    
+    # Tự động dọn dẹp Docker sau khi deploy thành công (dọn images cũ, v.v.)
+    log "🧹 Đang dọn dẹp Docker rác ..."
+    docker system prune -af > /dev/null 2>&1 || true
+    
     exit 0
 fi
 
