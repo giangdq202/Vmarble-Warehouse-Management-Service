@@ -24,6 +24,7 @@ func (h *Handler) Register(rg *gin.RouterGroup) {
 	inv.POST("/lots", auth.RequireRole(auth.RoleWarehouse, auth.RoleAdmin), h.receiveStock)
 	inv.GET("/lots", h.listLots)
 	inv.DELETE("/lots/:id", auth.RequireRole(auth.RoleWarehouse, auth.RoleAdmin), h.deleteLot)
+	inv.GET("/overflow-status", h.getOverflowStatus)
 	inv.GET("/sheets", h.listSheets)
 	inv.GET("/sheets/:id", h.getSheet)
 	inv.GET("/sheets/:id/lineage", h.lineage)
@@ -143,6 +144,24 @@ func (h *Handler) listSheets(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, result)
+}
+
+// getOverflowStatus godoc
+//
+// @Summary      Get inventory overflow status
+// @Tags         inventory
+// @Produce      json
+// @Security     BearerAuth
+// @Success      200  {object}  OverflowStatus
+// @Failure      500  {object}  map[string]string
+// @Router       /api/v1/inventory/overflow-status [get]
+func (h *Handler) getOverflowStatus(c *gin.Context) {
+	status, err := h.svc.GetOverflowStatus(c.Request.Context())
+	if err != nil {
+		httpkit.Error(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, status)
 }
 
 // getSheet godoc

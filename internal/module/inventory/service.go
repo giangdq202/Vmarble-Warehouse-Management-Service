@@ -11,10 +11,13 @@ import (
 	"github.com/vmarble/warehouse-management-service/internal/platform/httpkit"
 )
 
+const defaultOverflowThresholdPct = 15.0
+
 type service struct {
-	st  store
-	woa WorkOrderAdvancer
-	bcg BarcodeGenerator
+	st                   store
+	woa                  WorkOrderAdvancer
+	bcg                  BarcodeGenerator
+	overflowThresholdPct float64
 }
 
 func NewService(st store, woa WorkOrderAdvancer, bcg ...BarcodeGenerator) Service {
@@ -22,7 +25,18 @@ func NewService(st store, woa WorkOrderAdvancer, bcg ...BarcodeGenerator) Servic
 	if len(bcg) > 0 {
 		generator = bcg[0]
 	}
-	return &service{st: st, woa: woa, bcg: generator}
+	return &service{st: st, woa: woa, bcg: generator, overflowThresholdPct: defaultOverflowThresholdPct}
+}
+
+func NewServiceWithOverflowThreshold(st store, woa WorkOrderAdvancer, thresholdPct float64, bcg ...BarcodeGenerator) Service {
+	var generator BarcodeGenerator
+	if len(bcg) > 0 {
+		generator = bcg[0]
+	}
+	if thresholdPct <= 0 || thresholdPct > 100 {
+		thresholdPct = defaultOverflowThresholdPct
+	}
+	return &service{st: st, woa: woa, bcg: generator, overflowThresholdPct: thresholdPct}
 }
 
 func (s *service) ReceiveStock(ctx context.Context, in ReceiveStockInput) (InventoryLot, error) {
@@ -82,6 +96,14 @@ func (s *service) GetSheet(ctx context.Context, sheetID uuid.UUID) (BoardSheet, 
 }
 
 func (s *service) PreAssignSheet(ctx context.Context, sheetID uuid.UUID, workOrderID uuid.UUID) error {
+	overflow, err := s.GetOverflowStatus(ctx)
+	if err != nil {
+		return err
+	}
+	if overflow.BlockNewSheetIssue {
+		return domain.NewBizError(domain.ErrPreconditionFailed,
+			"cannot issue new sheet while overflow status is RED")
+	}
 	return s.st.preAssignSheet(ctx, sheetID, workOrderID)
 }
 
@@ -91,6 +113,34 @@ func (s *service) ListAvailableSheets(ctx context.Context, p httpkit.PageParams,
 		return httpkit.PagedResult[BoardSheet]{}, err
 	}
 	return httpkit.NewPagedResult(items, total, p), nil
+}
+
+func (s *service) GetOverflowStatus(ctx context.Context) (OverflowStatus, error) {
+	totalRemnantAreaMM2, totalSheetAreaMM2, err := s.st.selectOverflowAreas(ctx)
+	if err != nil {
+		return OverflowStatus{}, err
+	}
+
+	overflowPct := 0.0
+	if totalSheetAreaMM2 > 0 {
+		overflowPct = float64(totalRemnantAreaMM2) * 100 / float64(totalSheetAreaMM2)
+	} else if totalRemnantAreaMM2 > 0 {
+		overflowPct = 100
+	}
+
+	status := OverflowGreen
+	if overflowPct > s.overflowThresholdPct {
+		status = OverflowRed
+	}
+
+	return OverflowStatus{
+		Status:              status,
+		OverflowPct:         overflowPct,
+		ThresholdPct:        s.overflowThresholdPct,
+		BlockNewSheetIssue:  status == OverflowRed,
+		TotalRemnantAreaMM2: totalRemnantAreaMM2,
+		TotalSheetAreaMM2:   totalSheetAreaMM2,
+	}, nil
 }
 
 func (s *service) RecordCut(ctx context.Context, in RecordCutInput) (CutResult, error) {
@@ -115,6 +165,15 @@ func (s *service) RecordCut(ctx context.Context, in RecordCutInput) (CutResult, 
 	var inheritQualityGrade *string
 
 	if in.SheetID != nil {
+		overflow, err := s.GetOverflowStatus(ctx)
+		if err != nil {
+			return CutResult{}, err
+		}
+		if overflow.BlockNewSheetIssue {
+			return CutResult{}, domain.NewBizError(domain.ErrPreconditionFailed,
+				"cannot issue new sheet while overflow status is RED")
+		}
+
 		sheet, err := s.st.selectSheetByID(ctx, *in.SheetID)
 		if err != nil {
 			return CutResult{}, err

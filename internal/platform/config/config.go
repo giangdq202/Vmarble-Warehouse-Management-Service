@@ -20,6 +20,11 @@ type Config struct {
 	// RemnantAllocCheckInterval controls how often the background task scans
 	// for expired allocations. Configured via REMNANT_ALLOC_CHECK_INTERVAL.
 	RemnantAllocCheckInterval time.Duration `env:"REMNANT_ALLOC_CHECK_INTERVAL" envDefault:"1h"`
+
+	// RemnantOverflowThresholdPct is the RED threshold for overflow status.
+	// Configured via REMNANT_OVERFLOW_THRESHOLD_PCT. Values <=0 or >100 are
+	// normalized to module default in inventory.NewServiceWithOverflowThreshold.
+	RemnantOverflowThresholdPct float64 `env:"REMNANT_OVERFLOW_THRESHOLD_PCT" envDefault:"15"`
 }
 
 func Load() (Config, error) {

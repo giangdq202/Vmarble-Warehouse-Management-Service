@@ -259,6 +259,30 @@ func (s *pgStore) updateSheetStatus(ctx context.Context, id uuid.UUID, status st
 	return nil
 }
 
+func (s *pgStore) selectOverflowAreas(ctx context.Context) (int64, int64, error) {
+	var totalRemnantAreaMM2 int64
+	err := s.pool.QueryRow(ctx,
+		`SELECT COALESCE(SUM(CAST(length_mm AS bigint) * CAST(width_mm AS bigint)), 0)
+		 FROM remnants
+		 WHERE status IN ('AVAILABLE', 'ALLOCATED')`,
+	).Scan(&totalRemnantAreaMM2)
+	if err != nil {
+		return 0, 0, err
+	}
+
+	var totalSheetAreaMM2 int64
+	err = s.pool.QueryRow(ctx,
+		`SELECT COALESCE(SUM(CAST(length_mm AS bigint) * CAST(width_mm AS bigint)), 0)
+		 FROM board_sheets
+		 WHERE status = 'AVAILABLE'`,
+	).Scan(&totalSheetAreaMM2)
+	if err != nil {
+		return 0, 0, err
+	}
+
+	return totalRemnantAreaMM2, totalSheetAreaMM2, nil
+}
+
 func (s *pgStore) preAssignSheet(ctx context.Context, sheetID uuid.UUID, workOrderID uuid.UUID) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {

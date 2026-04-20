@@ -125,6 +125,22 @@ type SuggestRemnantsInput struct {
 	Limit             int // defaults to 3; clamped to [1, 10]
 }
 
+type OverflowLevel string
+
+const (
+	OverflowGreen OverflowLevel = "GREEN"
+	OverflowRed   OverflowLevel = "RED"
+)
+
+type OverflowStatus struct {
+	Status             OverflowLevel `json:"status"`
+	OverflowPct        float64       `json:"overflow_pct"`
+	ThresholdPct       float64       `json:"threshold_pct"`
+	BlockNewSheetIssue bool          `json:"block_new_sheet_issue"`
+	TotalRemnantAreaMM2 int64        `json:"total_remnant_area_mm2"`
+	TotalSheetAreaMM2  int64         `json:"total_sheet_area_mm2"`
+}
+
 type Service interface {
 	ReceiveStock(ctx context.Context, in ReceiveStockInput) (InventoryLot, error)
 	ListLots(ctx context.Context, p httpkit.PageParams) (httpkit.PagedResult[InventoryLot], error)
@@ -133,6 +149,7 @@ type Service interface {
 	GetSheet(ctx context.Context, sheetID uuid.UUID) (BoardSheet, error)
 	// ListAvailableSheets returns AVAILABLE sheets, optionally filtered by materialID.
 	ListAvailableSheets(ctx context.Context, p httpkit.PageParams, materialID *uuid.UUID) (httpkit.PagedResult[BoardSheet], error)
+	GetOverflowStatus(ctx context.Context) (OverflowStatus, error)
 	// PreAssignSheet stamps issued_to_work_order_id on a board sheet that is still
 	// AVAILABLE, reserving it for a work order before cutting begins.
 	// Returns ErrPreconditionFailed if the sheet is not AVAILABLE.

@@ -104,6 +104,14 @@ type mockStore struct {
 	selectTopRemnantSuggestionsResult []RemnantSuggestion
 	selectTopRemnantSuggestionsErr    error
 
+	// selectOverflowAreas
+	selectOverflowRemnantArea int64
+	selectOverflowSheetArea   int64
+	selectOverflowAreasErr    error
+
+	// preAssignSheet call tracking
+	preAssignSheetCalled bool
+
 	// selectStorageLocationByBarcode
 	selectStorageLocationByBarcodeErr error
 }
@@ -136,6 +144,7 @@ func (m *mockStore) updateSheetStatus(_ context.Context, _ uuid.UUID, _ string, 
 	return m.updateSheetStatusErr
 }
 func (m *mockStore) preAssignSheet(_ context.Context, _ uuid.UUID, _ uuid.UUID) error {
+	m.preAssignSheetCalled = true
 	return m.preAssignSheetErr
 }
 func (m *mockStore) releaseExpiredAllocations(_ context.Context, _ time.Time) (int64, error) {
@@ -184,6 +193,10 @@ func (m *mockStore) updateRemnantBinLocation(_ context.Context, _ uuid.UUID, _ u
 }
 func (m *mockStore) selectStorageLocationByBarcode(_ context.Context, _ string) (StorageLocation, error) {
 	return StorageLocation{}, m.selectStorageLocationByBarcodeErr
+}
+
+func (m *mockStore) selectOverflowAreas(_ context.Context) (int64, int64, error) {
+	return m.selectOverflowRemnantArea, m.selectOverflowSheetArea, m.selectOverflowAreasErr
 }
 
 // ── helpers ──────────────────────────────────────────────────────────────────
@@ -308,7 +321,8 @@ func TestRecordCut_FromSheet_NoRemnant(t *testing.T) {
 	skuID := uuid.New()
 
 	st := &mockStore{
-		selectSheetByIDResult: availableSheet(sheetID),
+		selectSheetByIDResult:   availableSheet(sheetID),
+		selectOverflowSheetArea: 1,
 	}
 	svc := NewService(st, nil)
 
@@ -361,7 +375,8 @@ func TestRecordCut_FromSheet_WithRemnant(t *testing.T) {
 	skuID := uuid.New()
 
 	st := &mockStore{
-		selectSheetByIDResult: availableSheet(sheetID),
+		selectSheetByIDResult:   availableSheet(sheetID),
+		selectOverflowSheetArea: 1,
 	}
 	svc := NewService(st, nil)
 
@@ -3340,20 +3355,158 @@ func TestGetRemnant_NotFound_ReturnsError(t *testing.T) {
 }
 
 func TestPreAssignSheet_HappyPath(t *testing.T) {
-	st := &mockStore{preAssignSheetErr: nil}
+	st := &mockStore{preAssignSheetErr: nil, selectOverflowSheetArea: 1}
 	svc := NewService(st, nil)
 	if err := svc.PreAssignSheet(context.Background(), uuid.New(), uuid.New()); err != nil {
 		t.Errorf("unexpected error: %v", err)
+	}
+	if !st.preAssignSheetCalled {
+		t.Error("expected preAssignSheet to be called")
 	}
 }
 
 func TestPreAssignSheet_StoreError_Propagates(t *testing.T) {
 	storeErr := errors.New("sheet not available")
-	st := &mockStore{preAssignSheetErr: storeErr}
+	st := &mockStore{preAssignSheetErr: storeErr, selectOverflowSheetArea: 1}
 	svc := NewService(st, nil)
 	err := svc.PreAssignSheet(context.Background(), uuid.New(), uuid.New())
 	if !errors.Is(err, storeErr) {
 		t.Errorf("want store error, got %v", err)
+	}
+}
+
+func TestPreAssignSheet_RedOverflow_BlocksIssue(t *testing.T) {
+	st := &mockStore{selectOverflowRemnantArea: 200, selectOverflowSheetArea: 100}
+	svc := NewServiceWithOverflowThreshold(st, nil, 15)
+	if err := svc.PreAssignSheet(context.Background(), uuid.New(), uuid.New()); !errors.Is(err, domain.ErrPreconditionFailed) {
+		t.Errorf("want ErrPreconditionFailed, got %v", err)
+	}
+	if st.preAssignSheetCalled {
+		t.Error("preAssignSheet should not be called when overflow is RED")
+	}
+}
+
+func TestRecordCut_FromSheet_RedOverflow_BlocksIssue(t *testing.T) {
+	sheetID := uuid.New()
+	st := &mockStore{
+		selectSheetByIDResult:     availableSheet(sheetID),
+		selectOverflowRemnantArea: 200,
+		selectOverflowSheetArea:   100,
+	}
+	svc := NewServiceWithOverflowThreshold(st, nil, 15)
+
+	_, err := svc.RecordCut(context.Background(), RecordCutInput{
+		SheetID:       ptr(sheetID),
+		WorkOrderID:   uuid.New(),
+		SKUID:         uuid.New(),
+		UsedDimension: dim100x100,
+	})
+	if !errors.Is(err, domain.ErrPreconditionFailed) {
+		t.Errorf("want ErrPreconditionFailed, got %v", err)
+	}
+	if st.recordCutAtomicallyCalled {
+		t.Error("recordCutAtomically should not be called when overflow is RED")
+	}
+}
+
+func TestRecordCut_FromRemnant_RedOverflow_StillAllowed(t *testing.T) {
+	boardID := uuid.New()
+	remnantID := uuid.New()
+	st := &mockStore{
+		selectRemnantByIDResult:   availableRemnant(remnantID, boardID),
+		selectOverflowRemnantArea: 200,
+		selectOverflowSheetArea:   100,
+	}
+	svc := NewServiceWithOverflowThreshold(st, nil, 15)
+
+	_, err := svc.RecordCut(context.Background(), RecordCutInput{
+		RemnantID:     ptr(remnantID),
+		WorkOrderID:   uuid.New(),
+		SKUID:         uuid.New(),
+		UsedDimension: dim100x100,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !st.recordCutAtomicallyCalled {
+		t.Fatal("recordCutAtomically was not called")
+	}
+}
+
+func TestGetOverflowStatus_BelowThreshold_Green(t *testing.T) {
+	st := &mockStore{selectOverflowRemnantArea: 10, selectOverflowSheetArea: 100}
+	svc := NewServiceWithOverflowThreshold(st, nil, 15)
+
+	got, err := svc.GetOverflowStatus(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got.Status != OverflowGreen {
+		t.Errorf("status = %s, want GREEN", got.Status)
+	}
+	if got.BlockNewSheetIssue {
+		t.Error("BlockNewSheetIssue must be false in GREEN")
+	}
+}
+
+func TestGetOverflowStatus_AtThreshold_Green(t *testing.T) {
+	st := &mockStore{selectOverflowRemnantArea: 15, selectOverflowSheetArea: 100}
+	svc := NewServiceWithOverflowThreshold(st, nil, 15)
+
+	got, err := svc.GetOverflowStatus(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got.Status != OverflowGreen {
+		t.Errorf("status = %s, want GREEN", got.Status)
+	}
+}
+
+func TestGetOverflowStatus_AboveThreshold_Red(t *testing.T) {
+	st := &mockStore{selectOverflowRemnantArea: 16, selectOverflowSheetArea: 100}
+	svc := NewServiceWithOverflowThreshold(st, nil, 15)
+
+	got, err := svc.GetOverflowStatus(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got.Status != OverflowRed {
+		t.Errorf("status = %s, want RED", got.Status)
+	}
+	if !got.BlockNewSheetIssue {
+		t.Error("BlockNewSheetIssue must be true in RED")
+	}
+}
+
+func TestGetOverflowStatus_DenominatorZeroWithRemnant_Red(t *testing.T) {
+	st := &mockStore{selectOverflowRemnantArea: 1, selectOverflowSheetArea: 0}
+	svc := NewServiceWithOverflowThreshold(st, nil, 15)
+
+	got, err := svc.GetOverflowStatus(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got.Status != OverflowRed {
+		t.Errorf("status = %s, want RED", got.Status)
+	}
+	if got.OverflowPct != 100 {
+		t.Errorf("overflow_pct = %v, want 100", got.OverflowPct)
+	}
+}
+
+func TestGetOverflowStatus_DenominatorZeroNoRemnant_Green(t *testing.T) {
+	st := &mockStore{selectOverflowRemnantArea: 0, selectOverflowSheetArea: 0}
+	svc := NewServiceWithOverflowThreshold(st, nil, 15)
+
+	got, err := svc.GetOverflowStatus(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got.Status != OverflowGreen {
+		t.Errorf("status = %s, want GREEN", got.Status)
+	}
+	if got.OverflowPct != 0 {
+		t.Errorf("overflow_pct = %v, want 0", got.OverflowPct)
 	}
 }
 
