@@ -165,6 +165,9 @@ func main() {
 	api := r.Group("/api/v1")
 	api.Use(auth.Middleware(cfg.AuthSecret))
 
+	authnHandler := authn.NewHandler(authnSvc)
+	authnHandler.RegisterAdmin(api.Group("/admin"))
+
 	catalog.NewHandler(catalogSvc).Register(api)
 	order.NewHandler(orderSvc).Register(api)
 	planning.NewHandler(planningSvc).Register(api)
