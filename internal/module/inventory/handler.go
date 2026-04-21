@@ -37,6 +37,15 @@ func (h *Handler) Register(rg *gin.RouterGroup) {
 	inv.POST("/remnants/:id/waste", auth.RequireRole(auth.RoleWarehouse, auth.RoleAdmin), h.markWaste)
 	inv.POST("/remnants/:id/stock", auth.RequireRole(auth.RoleWarehouse), h.stockRemnant)
 
+	inv.POST("/transfers", auth.RequireRole(auth.RoleWarehouse, auth.RoleAdmin), h.transfer)
+	inv.GET("/audit-log/:entity_type/:entity_id", h.listAuditLog)
+	inv.POST("/cycle-counts", auth.RequireRole(auth.RoleWarehouse, auth.RoleAdmin), h.createCycleCount)
+	inv.GET("/cycle-counts/:id", h.getCycleCount)
+	inv.POST("/cycle-counts/:id/lines", auth.RequireRole(auth.RoleWarehouse, auth.RoleAdmin), h.addCycleCountLine)
+	inv.GET("/cycle-counts/:id/lines", h.listCycleCountLines)
+	inv.POST("/cycle-counts/:id/post", auth.RequireRole(auth.RoleWarehouse, auth.RoleAdmin), h.postCycleCount)
+	inv.POST("/cycle-counts/:id/cancel", auth.RequireRole(auth.RoleWarehouse, auth.RoleAdmin), h.cancelCycleCount)
+
 	rg.GET("/storage-locations", h.listStorageLocations)
 }
 
@@ -467,4 +476,259 @@ func (h *Handler) stockRemnant(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"status": "stocked"})
+}
+
+// transfer godoc
+//
+// @Summary      Transfer inventory item to a new bin location
+// @Tags         inventory
+// @Accept       json
+// @Produce      json
+// @Param        body  body      TransferInput  true  "payload"
+// @Security     BearerAuth
+// @Success      201   {object}  TransferResult
+// @Failure      400   {object}  map[string]string
+// @Failure      404   {object}  map[string]string
+// @Failure      412   {object}  map[string]string
+// @Router       /api/v1/inventory/transfers [post]
+func (h *Handler) transfer(c *gin.Context) {
+	var in TransferInput
+	if !httpkit.Bind(c, &in) {
+		return
+	}
+	identity, ok := auth.FromContext(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "missing auth identity"})
+		return
+	}
+	actorID, err := uuid.Parse(identity.UserID)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid auth identity"})
+		return
+	}
+	in.ActorID = actorID
+	result, err := h.svc.Transfer(c.Request.Context(), in)
+	if err != nil {
+		httpkit.Error(c, err)
+		return
+	}
+	c.JSON(http.StatusCreated, result)
+}
+
+// listAuditLog godoc
+//
+// @Summary      List audit log entries for an inventory entity
+// @Tags         inventory
+// @Produce      json
+// @Param        entity_type  path      string  true  "entity type: REMNANT or BOARD_SHEET"
+// @Param        entity_id    path      string  true  "entity id (uuid)"
+// @Security     BearerAuth
+// @Success      200  {array}   AuditLogEntry
+// @Failure      400  {object}  map[string]string
+// @Router       /api/v1/inventory/audit-log/{entity_type}/{entity_id} [get]
+func (h *Handler) listAuditLog(c *gin.Context) {
+	entityType := c.Param("entity_type")
+	entityID, err := uuid.Parse(c.Param("entity_id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid entity_id"})
+		return
+	}
+	entries, err := h.svc.ListAuditLog(c.Request.Context(), entityID, entityType)
+	if err != nil {
+		httpkit.Error(c, err)
+		return
+	}
+	if entries == nil {
+		entries = []AuditLogEntry{}
+	}
+	c.JSON(http.StatusOK, entries)
+}
+
+// createCycleCount godoc
+//
+// @Summary      Create a cycle count session
+// @Tags         inventory
+// @Accept       json
+// @Produce      json
+// @Param        body  body      CreateCycleCountInput  true  "payload"
+// @Security     BearerAuth
+// @Success      201   {object}  CycleCountSession
+// @Failure      400   {object}  map[string]string
+// @Router       /api/v1/inventory/cycle-counts [post]
+func (h *Handler) createCycleCount(c *gin.Context) {
+	var in CreateCycleCountInput
+	if !httpkit.Bind(c, &in) {
+		return
+	}
+	identity, ok := auth.FromContext(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "missing auth identity"})
+		return
+	}
+	actorID, err := uuid.Parse(identity.UserID)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid auth identity"})
+		return
+	}
+	in.ActorID = actorID
+	sess, err := h.svc.CreateCycleCountSession(c.Request.Context(), in)
+	if err != nil {
+		httpkit.Error(c, err)
+		return
+	}
+	c.JSON(http.StatusCreated, sess)
+}
+
+// getCycleCount godoc
+//
+// @Summary      Get a cycle count session by ID
+// @Tags         inventory
+// @Produce      json
+// @Param        id   path      string  true  "session id (uuid)"
+// @Security     BearerAuth
+// @Success      200  {object}  CycleCountSession
+// @Failure      404  {object}  map[string]string
+// @Router       /api/v1/inventory/cycle-counts/{id} [get]
+func (h *Handler) getCycleCount(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+	sess, err := h.svc.GetCycleCountSession(c.Request.Context(), id)
+	if err != nil {
+		httpkit.Error(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, sess)
+}
+
+// addCycleCountLine godoc
+//
+// @Summary      Add a count line to a cycle count session
+// @Tags         inventory
+// @Accept       json
+// @Produce      json
+// @Param        id    path      string           true  "session id (uuid)"
+// @Param        body  body      AddCountLineInput  true  "payload"
+// @Security     BearerAuth
+// @Success      201   {object}  CycleCountLine
+// @Failure      400   {object}  map[string]string
+// @Failure      409   {object}  map[string]string
+// @Router       /api/v1/inventory/cycle-counts/{id}/lines [post]
+func (h *Handler) addCycleCountLine(c *gin.Context) {
+	sessionID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+	var in AddCountLineInput
+	if !httpkit.Bind(c, &in) {
+		return
+	}
+	in.SessionID = sessionID
+	line, err := h.svc.AddCycleCountLine(c.Request.Context(), in)
+	if err != nil {
+		httpkit.Error(c, err)
+		return
+	}
+	c.JSON(http.StatusCreated, line)
+}
+
+// listCycleCountLines godoc
+//
+// @Summary      List count lines for a cycle count session
+// @Tags         inventory
+// @Produce      json
+// @Param        id   path      string  true  "session id (uuid)"
+// @Security     BearerAuth
+// @Success      200  {array}   CycleCountLine
+// @Failure      404  {object}  map[string]string
+// @Router       /api/v1/inventory/cycle-counts/{id}/lines [get]
+func (h *Handler) listCycleCountLines(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+	lines, err := h.svc.ListCycleCountLines(c.Request.Context(), id)
+	if err != nil {
+		httpkit.Error(c, err)
+		return
+	}
+	if lines == nil {
+		lines = []CycleCountLine{}
+	}
+	c.JSON(http.StatusOK, lines)
+}
+
+// postCycleCount godoc
+//
+// @Summary      Post a cycle count session (apply adjustments)
+// @Tags         inventory
+// @Produce      json
+// @Param        id   path      string  true  "session id (uuid)"
+// @Security     BearerAuth
+// @Success      200  {object}  map[string]string
+// @Failure      404  {object}  map[string]string
+// @Failure      409  {object}  map[string]string
+// @Router       /api/v1/inventory/cycle-counts/{id}/post [post]
+func (h *Handler) postCycleCount(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+	identity, ok := auth.FromContext(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "missing auth identity"})
+		return
+	}
+	actorID, err := uuid.Parse(identity.UserID)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid auth identity"})
+		return
+	}
+	if err := h.svc.PostCycleCount(c.Request.Context(), PostCycleCountInput{
+		SessionID: id,
+		ActorID:   actorID,
+	}); err != nil {
+		httpkit.Error(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"status": "posted"})
+}
+
+// cancelCycleCount godoc
+//
+// @Summary      Cancel a cycle count session
+// @Tags         inventory
+// @Produce      json
+// @Param        id   path      string  true  "session id (uuid)"
+// @Security     BearerAuth
+// @Success      200  {object}  map[string]string
+// @Failure      404  {object}  map[string]string
+// @Failure      409  {object}  map[string]string
+// @Router       /api/v1/inventory/cycle-counts/{id}/cancel [post]
+func (h *Handler) cancelCycleCount(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+	identity, ok := auth.FromContext(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "missing auth identity"})
+		return
+	}
+	actorID, err := uuid.Parse(identity.UserID)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid auth identity"})
+		return
+	}
+	if err := h.svc.CancelCycleCountSession(c.Request.Context(), id, actorID); err != nil {
+		httpkit.Error(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"status": "cancelled"})
 }

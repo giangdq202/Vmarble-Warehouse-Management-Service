@@ -5,6 +5,7 @@
 .env.*
 !.env.example
 !deploy/staging/.env.staging.example
+.claude/settings.json
 
 bin/
 tmp/

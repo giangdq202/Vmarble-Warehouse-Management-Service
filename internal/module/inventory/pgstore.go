@@ -149,20 +149,27 @@ const sheetCols = `
 	COALESCE(m.name, '')                                                   AS material_name,
 	bs.length_mm, bs.width_mm, bs.cost_amount, bs.cost_currency,
 	bs.status, bs.issued_to_wo_id,
-	bs.supplier_code, bs.lot_batch, bs.grain_pattern, bs.quality_grade
+	bs.supplier_code, bs.lot_batch, bs.grain_pattern, bs.quality_grade,
+	bs.bin_location_id
 FROM board_sheets bs
 LEFT JOIN inventory_lots il ON il.id = bs.lot_id
 LEFT JOIN materials m ON m.id = il.material_id`
 
 func scanSheet(row interface{ Scan(...any) error }) (BoardSheet, error) {
 	var sh BoardSheet
+	var binLocationID uuid.NullUUID
 	err := row.Scan(
 		&sh.ID, &sh.LotID, &sh.MaterialID, &sh.MaterialName,
 		&sh.Dimensions.LengthMM, &sh.Dimensions.WidthMM,
 		&sh.CostPerSheet.Amount, &sh.CostPerSheet.Currency,
 		&sh.Status, &sh.IssuedToWorkOrderID,
 		&sh.SupplierCode, &sh.LotBatch, &sh.GrainPattern, &sh.QualityGrade,
+		&binLocationID,
 	)
+	if binLocationID.Valid {
+		v := binLocationID.UUID
+		sh.BinLocationID = &v
+	}
 	return sh, err
 }
 
@@ -910,4 +917,281 @@ func nullInt32Ptr(v sql.NullInt32) *int {
 	}
 	n := int(v.Int32)
 	return &n
+}
+
+func (s *pgStore) updateSheetBinLocation(ctx context.Context, sheetID uuid.UUID, locationID uuid.UUID) error {
+	tag, err := s.pool.Exec(ctx,
+		`UPDATE board_sheets SET bin_location_id = $1 WHERE id = $2`,
+		locationID, sheetID)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return domain.NewBizError(domain.ErrNotFound, "board sheet not found")
+	}
+	return nil
+}
+
+func (s *pgStore) insertAuditLog(ctx context.Context, entry AuditLogEntry) error {
+	_, err := s.pool.Exec(ctx,
+		`INSERT INTO inventory_audit_log
+		    (id, entity_type, entity_id, action, actor_id, from_location, to_location,
+		     from_status, to_status, reason, session_id, created_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+		entry.ID, entry.EntityType, entry.EntityID, entry.Action, entry.ActorID,
+		entry.FromLocation, entry.ToLocation,
+		entry.FromStatus, entry.ToStatus,
+		entry.Reason, entry.SessionID, entry.CreatedAt,
+	)
+	return err
+}
+
+func (s *pgStore) selectAuditLogByEntity(ctx context.Context, entityID uuid.UUID, entityType string) ([]AuditLogEntry, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT id, entity_type, entity_id, action, actor_id,
+		        from_location, to_location, from_status, to_status, reason, session_id, created_at
+		 FROM inventory_audit_log
+		 WHERE entity_id = $1 AND entity_type = $2
+		 ORDER BY created_at DESC`,
+		entityID, entityType,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []AuditLogEntry
+	for rows.Next() {
+		e, err := scanAuditLogEntry(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
+func scanAuditLogEntry(row interface{ Scan(...any) error }) (AuditLogEntry, error) {
+	var e AuditLogEntry
+	var fromLoc, toLoc uuid.NullUUID
+	var fromStatus, toStatus, reason sql.NullString
+	var sessionID uuid.NullUUID
+	err := row.Scan(
+		&e.ID, &e.EntityType, &e.EntityID, &e.Action, &e.ActorID,
+		&fromLoc, &toLoc, &fromStatus, &toStatus, &reason, &sessionID, &e.CreatedAt,
+	)
+	if err != nil {
+		return AuditLogEntry{}, err
+	}
+	if fromLoc.Valid {
+		v := fromLoc.UUID
+		e.FromLocation = &v
+	}
+	if toLoc.Valid {
+		v := toLoc.UUID
+		e.ToLocation = &v
+	}
+	if fromStatus.Valid {
+		e.FromStatus = &fromStatus.String
+	}
+	if toStatus.Valid {
+		e.ToStatus = &toStatus.String
+	}
+	if reason.Valid {
+		e.Reason = &reason.String
+	}
+	if sessionID.Valid {
+		v := sessionID.UUID
+		e.SessionID = &v
+	}
+	return e, nil
+}
+
+func (s *pgStore) insertCycleCountSession(ctx context.Context, sess CycleCountSession) error {
+	_, err := s.pool.Exec(ctx,
+		`INSERT INTO cycle_count_sessions (id, zone, status, created_by, created_at)
+		 VALUES ($1, NULLIF($2,''), $3, $4, $5)`,
+		sess.ID, sess.Zone, sess.Status, sess.CreatedBy, sess.CreatedAt,
+	)
+	return err
+}
+
+func (s *pgStore) selectCycleCountSessionByID(ctx context.Context, id uuid.UUID) (CycleCountSession, error) {
+	var sess CycleCountSession
+	var zone sql.NullString
+	var postedBy uuid.NullUUID
+	var postedAt sql.NullTime
+	err := s.pool.QueryRow(ctx,
+		`SELECT id, COALESCE(zone,''), status, created_by, posted_by, created_at, posted_at
+		 FROM cycle_count_sessions WHERE id = $1`,
+		id,
+	).Scan(&sess.ID, &zone, &sess.Status, &sess.CreatedBy, &postedBy, &sess.CreatedAt, &postedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return CycleCountSession{}, domain.NewBizError(domain.ErrNotFound, "cycle count session not found")
+	}
+	if err != nil {
+		return CycleCountSession{}, err
+	}
+	if zone.Valid {
+		sess.Zone = zone.String
+	}
+	if postedBy.Valid {
+		v := postedBy.UUID
+		sess.PostedBy = &v
+	}
+	if postedAt.Valid {
+		t := postedAt.Time
+		sess.PostedAt = &t
+	}
+	return sess, nil
+}
+
+func (s *pgStore) updateCycleCountSessionStatus(ctx context.Context, id uuid.UUID, status string, postedBy *uuid.UUID) error {
+	tag, err := s.pool.Exec(ctx,
+		`UPDATE cycle_count_sessions
+		 SET status = $1, posted_by = $2, posted_at = CASE WHEN $1 = 'POSTED' THEN NOW() ELSE NULL END
+		 WHERE id = $3`,
+		status, postedBy, id,
+	)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return domain.NewBizError(domain.ErrNotFound, "cycle count session not found")
+	}
+	return nil
+}
+
+func (s *pgStore) insertCycleCountLine(ctx context.Context, l CycleCountLine) error {
+	_, err := s.pool.Exec(ctx,
+		`INSERT INTO cycle_count_lines
+		    (id, session_id, entity_type, entity_id, counted_status, counted_location_id, reason, created_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+		l.ID, l.SessionID, l.EntityType, l.EntityID,
+		l.CountedStatus, l.CountedLocationID, l.Reason, l.CreatedAt,
+	)
+	if err != nil {
+		if isPGUniqueViolation(err) {
+			return domain.NewBizError(domain.ErrPreconditionFailed, "entity already counted in this session")
+		}
+		return err
+	}
+	return nil
+}
+
+func (s *pgStore) selectCycleCountLinesBySession(ctx context.Context, sessionID uuid.UUID) ([]CycleCountLine, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT id, session_id, entity_type, entity_id, counted_status, counted_location_id, reason, created_at
+		 FROM cycle_count_lines WHERE session_id = $1 ORDER BY created_at`,
+		sessionID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []CycleCountLine
+	for rows.Next() {
+		var l CycleCountLine
+		var locID uuid.NullUUID
+		if err := rows.Scan(&l.ID, &l.SessionID, &l.EntityType, &l.EntityID,
+			&l.CountedStatus, &locID, &l.Reason, &l.CreatedAt); err != nil {
+			return nil, err
+		}
+		if locID.Valid {
+			v := locID.UUID
+			l.CountedLocationID = &v
+		}
+		out = append(out, l)
+	}
+	return out, rows.Err()
+}
+
+func (s *pgStore) postCycleCountAtomically(ctx context.Context, op cycleCountPostOp) error {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin transaction: %w", err)
+	}
+	defer func() {
+		if err != nil {
+			_ = tx.Rollback(ctx)
+		}
+	}()
+
+	var lockedStatus string
+	lockErr := tx.QueryRow(ctx,
+		`SELECT status FROM cycle_count_sessions WHERE id = $1 FOR UPDATE`,
+		op.SessionID).Scan(&lockedStatus)
+	if errors.Is(lockErr, pgx.ErrNoRows) {
+		err = domain.NewBizError(domain.ErrNotFound, "cycle count session not found")
+		return err
+	}
+	if lockErr != nil {
+		err = fmt.Errorf("lock cycle count session: %w", lockErr)
+		return err
+	}
+	if lockedStatus != "OPEN" {
+		err = domain.NewBizError(domain.ErrInvalidTransition,
+			"cycle count session is not OPEN")
+		return err
+	}
+
+	for i := range op.Adjustments {
+		adj := &op.Adjustments[i]
+		if adj.EntityType == "REMNANT" {
+			if _, execErr := tx.Exec(ctx,
+				`UPDATE remnants SET status = $1, bin_location_id = $2 WHERE id = $3`,
+				adj.NewStatus, adj.NewLocationID, adj.EntityID,
+			); execErr != nil {
+				err = fmt.Errorf("adjust remnant %s: %w", adj.EntityID, execErr)
+				return err
+			}
+		} else {
+			if _, execErr := tx.Exec(ctx,
+				`UPDATE board_sheets SET status = $1, bin_location_id = $2 WHERE id = $3`,
+				adj.NewStatus, adj.NewLocationID, adj.EntityID,
+			); execErr != nil {
+				err = fmt.Errorf("adjust board_sheet %s: %w", adj.EntityID, execErr)
+				return err
+			}
+		}
+
+		e := adj.AuditEntry
+		if _, execErr := tx.Exec(ctx,
+			`INSERT INTO inventory_audit_log
+			    (id, entity_type, entity_id, action, actor_id, from_location, to_location,
+			     from_status, to_status, reason, session_id, created_at)
+			 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+			e.ID, e.EntityType, e.EntityID, e.Action, e.ActorID,
+			e.FromLocation, e.ToLocation,
+			e.FromStatus, e.ToStatus,
+			e.Reason, e.SessionID, e.CreatedAt,
+		); execErr != nil {
+			err = fmt.Errorf("insert audit log: %w", execErr)
+			return err
+		}
+	}
+
+	if _, execErr := tx.Exec(ctx,
+		`UPDATE cycle_count_sessions
+		 SET status = 'POSTED', posted_by = $1, posted_at = NOW()
+		 WHERE id = $2`,
+		op.PostedBy, op.SessionID,
+	); execErr != nil {
+		err = fmt.Errorf("update session status: %w", execErr)
+		return err
+	}
+
+	if err = tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit transaction: %w", err)
+	}
+	return nil
+}
+
+func isPGUniqueViolation(err error) bool {
+	var pgErr interface{ SQLState() string }
+	if errors.As(err, &pgErr) {
+		return pgErr.SQLState() == "23505"
+	}
+	return false
 }

@@ -3,6 +3,7 @@ package inventory
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"time"
 
@@ -432,4 +433,271 @@ func (s *service) ReleaseExpiredAllocations(ctx context.Context, before time.Tim
 		return 0, err
 	}
 	return int(n), nil
+}
+
+const (
+	entityTypeRemnant    = "REMNANT"
+	entityTypeBoardSheet = "BOARD_SHEET"
+	auditActionTransfer  = "TRANSFER"
+	auditActionAdjust    = "ADJUSTMENT"
+)
+
+func (s *service) Transfer(ctx context.Context, in TransferInput) (TransferResult, error) {
+	if in.EntityType != entityTypeRemnant && in.EntityType != entityTypeBoardSheet {
+		return TransferResult{}, domain.NewBizError(domain.ErrInvalidInput,
+			"entity_type must be REMNANT or BOARD_SHEET")
+	}
+
+	targetLoc, err := s.st.selectStorageLocationByBarcode(ctx, in.TargetBarcode)
+	if err != nil {
+		return TransferResult{}, err
+	}
+	if !targetLoc.IsActive {
+		return TransferResult{}, domain.NewBizError(domain.ErrInvalidInput, "target location is not active")
+	}
+
+	var fromLocationID *uuid.UUID
+	switch in.EntityType {
+	case entityTypeRemnant:
+		remnant, err := s.st.selectRemnantByID(ctx, in.EntityID)
+		if err != nil {
+			return TransferResult{}, err
+		}
+		if remnant.Status != domain.RemnantAvailable && remnant.Status != domain.RemnantAllocated {
+			return TransferResult{}, domain.NewBizError(domain.ErrInvalidInput,
+				"remnant must be AVAILABLE or ALLOCATED to transfer")
+		}
+		fromLocationID = remnant.BinLocationID
+		if err := s.st.updateRemnantBinLocation(ctx, in.EntityID, targetLoc.ID); err != nil {
+			return TransferResult{}, err
+		}
+	case entityTypeBoardSheet:
+		sheet, err := s.st.selectSheetByID(ctx, in.EntityID)
+		if err != nil {
+			return TransferResult{}, err
+		}
+		if sheet.Status != "AVAILABLE" {
+			return TransferResult{}, domain.NewBizError(domain.ErrInvalidInput,
+				"board sheet must be AVAILABLE to transfer")
+		}
+		fromLocationID = sheet.BinLocationID
+		if err := s.st.updateSheetBinLocation(ctx, in.EntityID, targetLoc.ID); err != nil {
+			return TransferResult{}, err
+		}
+	}
+
+	entry := AuditLogEntry{
+		ID:           uuid.New(),
+		EntityType:   in.EntityType,
+		EntityID:     in.EntityID,
+		Action:       auditActionTransfer,
+		ActorID:      in.ActorID,
+		FromLocation: fromLocationID,
+		ToLocation:   &targetLoc.ID,
+		CreatedAt:    now(),
+	}
+	if err := s.st.insertAuditLog(ctx, entry); err != nil {
+		slog.Warn("inventory: Transfer audit log failed", "entity_id", in.EntityID, "err", err)
+	}
+
+	return TransferResult{
+		EntityType:   in.EntityType,
+		EntityID:     in.EntityID,
+		FromLocation: fromLocationID,
+		ToLocation:   targetLoc.ID,
+		AuditLogID:   entry.ID,
+	}, nil
+}
+
+func (s *service) ListAuditLog(ctx context.Context, entityID uuid.UUID, entityType string) ([]AuditLogEntry, error) {
+	if entityType != entityTypeRemnant && entityType != entityTypeBoardSheet {
+		return nil, domain.NewBizError(domain.ErrInvalidInput,
+			"entity_type must be REMNANT or BOARD_SHEET")
+	}
+	return s.st.selectAuditLogByEntity(ctx, entityID, entityType)
+}
+
+func (s *service) CreateCycleCountSession(ctx context.Context, in CreateCycleCountInput) (CycleCountSession, error) {
+	sess := CycleCountSession{
+		ID:        uuid.New(),
+		Zone:      in.Zone,
+		Status:    "OPEN",
+		CreatedBy: in.ActorID,
+		CreatedAt: now(),
+	}
+	if err := s.st.insertCycleCountSession(ctx, sess); err != nil {
+		return CycleCountSession{}, err
+	}
+	return sess, nil
+}
+
+func (s *service) GetCycleCountSession(ctx context.Context, sessionID uuid.UUID) (CycleCountSession, error) {
+	return s.st.selectCycleCountSessionByID(ctx, sessionID)
+}
+
+func (s *service) AddCycleCountLine(ctx context.Context, in AddCountLineInput) (CycleCountLine, error) {
+	sess, err := s.st.selectCycleCountSessionByID(ctx, in.SessionID)
+	if err != nil {
+		return CycleCountLine{}, err
+	}
+	if sess.Status != "OPEN" {
+		return CycleCountLine{}, domain.NewBizError(domain.ErrInvalidTransition,
+			"cycle count session is not OPEN")
+	}
+
+	if in.EntityType != entityTypeRemnant && in.EntityType != entityTypeBoardSheet {
+		return CycleCountLine{}, domain.NewBizError(domain.ErrInvalidInput,
+			"entity_type must be REMNANT or BOARD_SHEET")
+	}
+	if in.Reason == "" {
+		return CycleCountLine{}, domain.NewBizError(domain.ErrInvalidInput, "reason is required")
+	}
+	if len([]rune(in.Reason)) > 255 {
+		return CycleCountLine{}, domain.NewBizError(domain.ErrInvalidInput, "reason exceeds max length 255")
+	}
+
+	switch in.EntityType {
+	case entityTypeRemnant:
+		validRemnantStatuses := map[string]bool{
+			string(domain.RemnantAvailable): true,
+			string(domain.RemnantAllocated): true,
+			string(domain.RemnantConsumed):  true,
+			string(domain.RemnantWaste):     true,
+		}
+		if !validRemnantStatuses[in.CountedStatus] {
+			return CycleCountLine{}, domain.NewBizError(domain.ErrInvalidInput,
+				"counted_status is not a valid remnant status")
+		}
+		if _, err := s.st.selectRemnantByID(ctx, in.EntityID); err != nil {
+			return CycleCountLine{}, err
+		}
+	case entityTypeBoardSheet:
+		if in.CountedStatus != "AVAILABLE" && in.CountedStatus != "ISSUED" {
+			return CycleCountLine{}, domain.NewBizError(domain.ErrInvalidInput,
+				"counted_status for BOARD_SHEET must be AVAILABLE or ISSUED")
+		}
+		if _, err := s.st.selectSheetByID(ctx, in.EntityID); err != nil {
+			return CycleCountLine{}, err
+		}
+	}
+
+	line := CycleCountLine{
+		ID:                uuid.New(),
+		SessionID:         in.SessionID,
+		EntityType:        in.EntityType,
+		EntityID:          in.EntityID,
+		CountedStatus:     in.CountedStatus,
+		CountedLocationID: in.CountedLocationID,
+		Reason:            in.Reason,
+		CreatedAt:         now(),
+	}
+	if err := s.st.insertCycleCountLine(ctx, line); err != nil {
+		return CycleCountLine{}, err
+	}
+	return line, nil
+}
+
+func (s *service) ListCycleCountLines(ctx context.Context, sessionID uuid.UUID) ([]CycleCountLine, error) {
+	return s.st.selectCycleCountLinesBySession(ctx, sessionID)
+}
+
+func (s *service) PostCycleCount(ctx context.Context, in PostCycleCountInput) error {
+	sess, err := s.st.selectCycleCountSessionByID(ctx, in.SessionID)
+	if err != nil {
+		return err
+	}
+	if sess.Status != "OPEN" {
+		return domain.NewBizError(domain.ErrInvalidTransition, "cycle count session is not OPEN")
+	}
+
+	lines, err := s.st.selectCycleCountLinesBySession(ctx, in.SessionID)
+	if err != nil {
+		return err
+	}
+
+	var adjustments []cycleCountAdjustment
+	for _, line := range lines {
+		var currentStatus string
+		var currentLocID *uuid.UUID
+
+		if line.EntityType == entityTypeRemnant {
+			remnant, err := s.st.selectRemnantByID(ctx, line.EntityID)
+			if err != nil {
+				return fmt.Errorf("load remnant %s: %w", line.EntityID, err)
+			}
+			currentStatus = string(remnant.Status)
+			currentLocID = remnant.BinLocationID
+		} else {
+			sheet, err := s.st.selectSheetByID(ctx, line.EntityID)
+			if err != nil {
+				return fmt.Errorf("load sheet %s: %w", line.EntityID, err)
+			}
+			currentStatus = sheet.Status
+			currentLocID = sheet.BinLocationID
+		}
+
+		statusChanged := currentStatus != line.CountedStatus
+		locChanged := !uuidPtrEqual(currentLocID, line.CountedLocationID)
+
+		if !statusChanged && !locChanged {
+			continue
+		}
+
+		reason := line.Reason
+		entry := AuditLogEntry{
+			ID:           uuid.New(),
+			EntityType:   line.EntityType,
+			EntityID:     line.EntityID,
+			Action:       auditActionAdjust,
+			ActorID:      in.ActorID,
+			FromLocation: currentLocID,
+			ToLocation:   line.CountedLocationID,
+			FromStatus:   &currentStatus,
+			ToStatus:     &line.CountedStatus,
+			Reason:       &reason,
+			SessionID:    &in.SessionID,
+			CreatedAt:    now(),
+		}
+
+		adjustments = append(adjustments, cycleCountAdjustment{
+			EntityType:    line.EntityType,
+			EntityID:      line.EntityID,
+			OldLocationID: currentLocID,
+			NewLocationID: line.CountedLocationID,
+			OldStatus:     currentStatus,
+			NewStatus:     line.CountedStatus,
+			AuditEntry:    entry,
+		})
+	}
+
+	return s.st.postCycleCountAtomically(ctx, cycleCountPostOp{
+		SessionID:   in.SessionID,
+		PostedBy:    in.ActorID,
+		Adjustments: adjustments,
+	})
+}
+
+func (s *service) CancelCycleCountSession(ctx context.Context, sessionID uuid.UUID, actorID uuid.UUID) error {
+	sess, err := s.st.selectCycleCountSessionByID(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	if sess.Status != "OPEN" {
+		return domain.NewBizError(domain.ErrInvalidTransition, "cycle count session is not OPEN")
+	}
+	return s.st.updateCycleCountSessionStatus(ctx, sessionID, "CANCELLED", nil)
+}
+
+func uuidPtrEqual(a, b *uuid.UUID) bool {
+	if a == nil && b == nil {
+		return true
+	}
+	if a == nil || b == nil {
+		return false
+	}
+	return *a == *b
+}
+
+func now() time.Time {
+	return time.Now().UTC()
 }
