@@ -40,6 +40,7 @@ type BoardSheet struct {
 	LotBatch            *string          `json:"lot_batch,omitempty"`
 	GrainPattern        *string          `json:"grain_pattern,omitempty"`
 	QualityGrade        *string          `json:"quality_grade,omitempty"`
+	BinLocationID       *uuid.UUID       `json:"bin_location_id,omitempty"`
 }
 
 type RecordCutInput struct {
@@ -133,12 +134,90 @@ const (
 )
 
 type OverflowStatus struct {
-	Status             OverflowLevel `json:"status"`
-	OverflowPct        float64       `json:"overflow_pct"`
-	ThresholdPct       float64       `json:"threshold_pct"`
-	BlockNewSheetIssue bool          `json:"block_new_sheet_issue"`
-	TotalRemnantAreaMM2 int64        `json:"total_remnant_area_mm2"`
-	TotalSheetAreaMM2  int64         `json:"total_sheet_area_mm2"`
+	Status              OverflowLevel `json:"status"`
+	OverflowPct         float64       `json:"overflow_pct"`
+	ThresholdPct        float64       `json:"threshold_pct"`
+	BlockNewSheetIssue  bool          `json:"block_new_sheet_issue"`
+	TotalRemnantAreaMM2 int64         `json:"total_remnant_area_mm2"`
+	TotalSheetAreaMM2   int64         `json:"total_sheet_area_mm2"`
+}
+
+// TransferInput carries a request to move a Remnant or BoardSheet to a new bin location.
+type TransferInput struct {
+	EntityType    string    `json:"entity_type"`
+	EntityID      uuid.UUID `json:"entity_id"`
+	TargetBarcode string    `json:"target_location_barcode"`
+	ActorID       uuid.UUID `json:"-"`
+}
+
+// TransferResult is the response after a successful stock transfer.
+type TransferResult struct {
+	EntityType   string     `json:"entity_type"`
+	EntityID     uuid.UUID  `json:"entity_id"`
+	FromLocation *uuid.UUID `json:"from_location,omitempty"`
+	ToLocation   uuid.UUID  `json:"to_location"`
+	AuditLogID   uuid.UUID  `json:"audit_log_id"`
+}
+
+// AuditLogEntry records a single inventory change event (transfer or cycle count adjustment).
+type AuditLogEntry struct {
+	ID           uuid.UUID  `json:"id"`
+	EntityType   string     `json:"entity_type"`
+	EntityID     uuid.UUID  `json:"entity_id"`
+	Action       string     `json:"action"`
+	ActorID      uuid.UUID  `json:"actor_id"`
+	FromLocation *uuid.UUID `json:"from_location,omitempty"`
+	ToLocation   *uuid.UUID `json:"to_location,omitempty"`
+	FromStatus   *string    `json:"from_status,omitempty"`
+	ToStatus     *string    `json:"to_status,omitempty"`
+	Reason       *string    `json:"reason,omitempty"`
+	SessionID    *uuid.UUID `json:"session_id,omitempty"`
+	CreatedAt    time.Time  `json:"created_at"`
+}
+
+// CreateCycleCountInput carries a request to open a new cycle count session.
+type CreateCycleCountInput struct {
+	Zone    string    `json:"zone,omitempty"`
+	ActorID uuid.UUID `json:"-"`
+}
+
+// CycleCountSession represents a cycle count session with its lifecycle status.
+type CycleCountSession struct {
+	ID        uuid.UUID  `json:"id"`
+	Zone      string     `json:"zone,omitempty"`
+	Status    string     `json:"status"`
+	CreatedBy uuid.UUID  `json:"created_by"`
+	PostedBy  *uuid.UUID `json:"posted_by,omitempty"`
+	CreatedAt time.Time  `json:"created_at"`
+	PostedAt  *time.Time `json:"posted_at,omitempty"`
+}
+
+// AddCountLineInput carries a single physical count observation for a session.
+type AddCountLineInput struct {
+	SessionID         uuid.UUID  `json:"-"`
+	EntityType        string     `json:"entity_type"`
+	EntityID          uuid.UUID  `json:"entity_id"`
+	CountedStatus     string     `json:"counted_status"`
+	CountedLocationID *uuid.UUID `json:"counted_location_id,omitempty"`
+	Reason            string     `json:"reason"`
+}
+
+// CycleCountLine represents one counted item within a cycle count session.
+type CycleCountLine struct {
+	ID                uuid.UUID  `json:"id"`
+	SessionID         uuid.UUID  `json:"session_id"`
+	EntityType        string     `json:"entity_type"`
+	EntityID          uuid.UUID  `json:"entity_id"`
+	CountedStatus     string     `json:"counted_status"`
+	CountedLocationID *uuid.UUID `json:"counted_location_id,omitempty"`
+	Reason            string     `json:"reason"`
+	CreatedAt         time.Time  `json:"created_at"`
+}
+
+// PostCycleCountInput carries identifiers for posting a cycle count session.
+type PostCycleCountInput struct {
+	SessionID uuid.UUID `json:"-"`
+	ActorID   uuid.UUID `json:"-"`
 }
 
 type Service interface {
@@ -187,4 +266,22 @@ type Service interface {
 
 	// ListStorageLocations returns all active storage locations.
 	ListStorageLocations(ctx context.Context) ([]StorageLocation, error)
+
+	// Transfer moves a Remnant or BoardSheet to a new bin location and writes an audit log entry.
+	Transfer(ctx context.Context, in TransferInput) (TransferResult, error)
+	// ListAuditLog returns audit log entries for a given entity ordered by created_at DESC.
+	ListAuditLog(ctx context.Context, entityID uuid.UUID, entityType string) ([]AuditLogEntry, error)
+
+	// CreateCycleCountSession opens a new OPEN cycle count session.
+	CreateCycleCountSession(ctx context.Context, in CreateCycleCountInput) (CycleCountSession, error)
+	// GetCycleCountSession returns a session by ID.
+	GetCycleCountSession(ctx context.Context, sessionID uuid.UUID) (CycleCountSession, error)
+	// AddCycleCountLine adds a physical count observation to an OPEN session.
+	AddCycleCountLine(ctx context.Context, in AddCountLineInput) (CycleCountLine, error)
+	// ListCycleCountLines returns all lines in a session.
+	ListCycleCountLines(ctx context.Context, sessionID uuid.UUID) ([]CycleCountLine, error)
+	// PostCycleCount applies adjustments from an OPEN session and transitions it to POSTED.
+	PostCycleCount(ctx context.Context, in PostCycleCountInput) error
+	// CancelCycleCountSession cancels an OPEN session without applying any changes.
+	CancelCycleCountSession(ctx context.Context, sessionID uuid.UUID, actorID uuid.UUID) error
 }

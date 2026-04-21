@@ -645,8 +645,50 @@ definitions:
       waste:
         type: integer
     type: object
+  internal_module_inventory.AddCountLineInput:
+    properties:
+      counted_location_id:
+        type: string
+      counted_status:
+        type: string
+      entity_id:
+        type: string
+      entity_type:
+        type: string
+      reason:
+        type: string
+    type: object
+  internal_module_inventory.AuditLogEntry:
+    properties:
+      action:
+        type: string
+      actor_id:
+        type: string
+      created_at:
+        type: string
+      entity_id:
+        type: string
+      entity_type:
+        type: string
+      from_location:
+        type: string
+      from_status:
+        type: string
+      id:
+        type: string
+      reason:
+        type: string
+      session_id:
+        type: string
+      to_location:
+        type: string
+      to_status:
+        type: string
+    type: object
   internal_module_inventory.BoardSheet:
     properties:
+      bin_location_id:
+        type: string
       cost_per_sheet:
         $ref: '#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.Money'
       dimensions:
@@ -672,6 +714,11 @@ definitions:
       supplier_code:
         type: string
     type: object
+  internal_module_inventory.CreateCycleCountInput:
+    properties:
+      zone:
+        type: string
+    type: object
   internal_module_inventory.CutResult:
     properties:
       barcode_ids:
@@ -681,6 +728,42 @@ definitions:
       cutting_record_id:
         type: string
       remnant_id:
+        type: string
+    type: object
+  internal_module_inventory.CycleCountLine:
+    properties:
+      counted_location_id:
+        type: string
+      counted_status:
+        type: string
+      created_at:
+        type: string
+      entity_id:
+        type: string
+      entity_type:
+        type: string
+      id:
+        type: string
+      reason:
+        type: string
+      session_id:
+        type: string
+    type: object
+  internal_module_inventory.CycleCountSession:
+    properties:
+      created_at:
+        type: string
+      created_by:
+        type: string
+      id:
+        type: string
+      posted_at:
+        type: string
+      posted_by:
+        type: string
+      status:
+        type: string
+      zone:
         type: string
     type: object
   internal_module_inventory.InventoryLot:
@@ -820,6 +903,28 @@ definitions:
       shelf:
         type: string
       zone:
+        type: string
+    type: object
+  internal_module_inventory.TransferInput:
+    properties:
+      entity_id:
+        type: string
+      entity_type:
+        type: string
+      target_location_barcode:
+        type: string
+    type: object
+  internal_module_inventory.TransferResult:
+    properties:
+      audit_log_id:
+        type: string
+      entity_id:
+        type: string
+      entity_type:
+        type: string
+      from_location:
+        type: string
+      to_location:
         type: string
     type: object
   internal_module_order.CreateLineItemInput:
@@ -1682,6 +1787,39 @@ paths:
       summary: Get dashboard overview
       tags:
       - dashboard
+  /api/v1/inventory/audit-log/{entity_type}/{entity_id}:
+    get:
+      parameters:
+      - description: 'entity type: REMNANT or BOARD_SHEET'
+        in: path
+        name: entity_type
+        required: true
+        type: string
+      - description: entity id (uuid)
+        in: path
+        name: entity_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/internal_module_inventory.AuditLogEntry'
+            type: array
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: List audit log entries for an inventory entity
+      tags:
+      - inventory
   /api/v1/inventory/cuts:
     post:
       consumes:
@@ -1715,6 +1853,196 @@ paths:
       security:
       - BearerAuth: []
       summary: Record cutting operation
+      tags:
+      - inventory
+  /api/v1/inventory/cycle-counts:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: payload
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_module_inventory.CreateCycleCountInput'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/internal_module_inventory.CycleCountSession'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Create a cycle count session
+      tags:
+      - inventory
+  /api/v1/inventory/cycle-counts/{id}:
+    get:
+      parameters:
+      - description: session id (uuid)
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_module_inventory.CycleCountSession'
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Get a cycle count session by ID
+      tags:
+      - inventory
+  /api/v1/inventory/cycle-counts/{id}/cancel:
+    post:
+      parameters:
+      - description: session id (uuid)
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "409":
+          description: Conflict
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Cancel a cycle count session
+      tags:
+      - inventory
+  /api/v1/inventory/cycle-counts/{id}/lines:
+    get:
+      parameters:
+      - description: session id (uuid)
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/internal_module_inventory.CycleCountLine'
+            type: array
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: List count lines for a cycle count session
+      tags:
+      - inventory
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: session id (uuid)
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: payload
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_module_inventory.AddCountLineInput'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/internal_module_inventory.CycleCountLine'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "409":
+          description: Conflict
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Add a count line to a cycle count session
+      tags:
+      - inventory
+  /api/v1/inventory/cycle-counts/{id}/post:
+    post:
+      parameters:
+      - description: session id (uuid)
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "409":
+          description: Conflict
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Post a cycle count session (apply adjustments)
       tags:
       - inventory
   /api/v1/inventory/lots:
@@ -2219,6 +2547,47 @@ paths:
       security:
       - BearerAuth: []
       summary: Get remnant lineage by sheet
+      tags:
+      - inventory
+  /api/v1/inventory/transfers:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: payload
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_module_inventory.TransferInput'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/internal_module_inventory.TransferResult'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "412":
+          description: Precondition Failed
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Transfer inventory item to a new bin location
       tags:
       - inventory
   /api/v1/materials:

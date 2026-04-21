@@ -113,7 +113,43 @@ type mockStore struct {
 	preAssignSheetCalled bool
 
 	// selectStorageLocationByBarcode
-	selectStorageLocationByBarcodeErr error
+	selectStorageLocationByBarcodeResult StorageLocation
+	selectStorageLocationByBarcodeErr    error
+
+	// updateSheetBinLocation
+	updateSheetBinLocationErr error
+
+	// insertAuditLog
+	insertAuditLogCalled bool
+	insertAuditLogEntry  AuditLogEntry
+	insertAuditLogErr    error
+
+	// selectAuditLogByEntity
+	selectAuditLogByEntityResult []AuditLogEntry
+	selectAuditLogByEntityErr    error
+
+	// insertCycleCountSession
+	insertCycleCountSessionErr error
+
+	// selectCycleCountSessionByID
+	selectCycleCountSessionByIDResult CycleCountSession
+	selectCycleCountSessionByIDErr    error
+
+	// updateCycleCountSessionStatus
+	updateCycleCountSessionStatusErr error
+
+	// insertCycleCountLine
+	insertCycleCountLineCalled bool
+	insertCycleCountLineErr    error
+
+	// selectCycleCountLinesBySession
+	selectCycleCountLinesBySessionResult []CycleCountLine
+	selectCycleCountLinesBySessionErr    error
+
+	// postCycleCountAtomically
+	postCycleCountAtomicallyCalled bool
+	postCycleCountAtomicallyOp     cycleCountPostOp
+	postCycleCountAtomicallyErr    error
 }
 
 func (m *mockStore) insertLot(_ context.Context, _ InventoryLot) error {
@@ -192,11 +228,52 @@ func (m *mockStore) updateRemnantBinLocation(_ context.Context, _ uuid.UUID, _ u
 	return nil
 }
 func (m *mockStore) selectStorageLocationByBarcode(_ context.Context, _ string) (StorageLocation, error) {
-	return StorageLocation{}, m.selectStorageLocationByBarcodeErr
+	return m.selectStorageLocationByBarcodeResult, m.selectStorageLocationByBarcodeErr
 }
 
 func (m *mockStore) selectOverflowAreas(_ context.Context) (int64, int64, error) {
 	return m.selectOverflowRemnantArea, m.selectOverflowSheetArea, m.selectOverflowAreasErr
+}
+
+func (m *mockStore) updateSheetBinLocation(_ context.Context, _ uuid.UUID, _ uuid.UUID) error {
+	return m.updateSheetBinLocationErr
+}
+
+func (m *mockStore) insertAuditLog(_ context.Context, entry AuditLogEntry) error {
+	m.insertAuditLogCalled = true
+	m.insertAuditLogEntry = entry
+	return m.insertAuditLogErr
+}
+
+func (m *mockStore) selectAuditLogByEntity(_ context.Context, _ uuid.UUID, _ string) ([]AuditLogEntry, error) {
+	return m.selectAuditLogByEntityResult, m.selectAuditLogByEntityErr
+}
+
+func (m *mockStore) insertCycleCountSession(_ context.Context, _ CycleCountSession) error {
+	return m.insertCycleCountSessionErr
+}
+
+func (m *mockStore) selectCycleCountSessionByID(_ context.Context, _ uuid.UUID) (CycleCountSession, error) {
+	return m.selectCycleCountSessionByIDResult, m.selectCycleCountSessionByIDErr
+}
+
+func (m *mockStore) updateCycleCountSessionStatus(_ context.Context, _ uuid.UUID, _ string, _ *uuid.UUID) error {
+	return m.updateCycleCountSessionStatusErr
+}
+
+func (m *mockStore) insertCycleCountLine(_ context.Context, _ CycleCountLine) error {
+	m.insertCycleCountLineCalled = true
+	return m.insertCycleCountLineErr
+}
+
+func (m *mockStore) selectCycleCountLinesBySession(_ context.Context, _ uuid.UUID) ([]CycleCountLine, error) {
+	return m.selectCycleCountLinesBySessionResult, m.selectCycleCountLinesBySessionErr
+}
+
+func (m *mockStore) postCycleCountAtomically(_ context.Context, op cycleCountPostOp) error {
+	m.postCycleCountAtomicallyCalled = true
+	m.postCycleCountAtomicallyOp = op
+	return m.postCycleCountAtomicallyErr
 }
 
 // ── helpers ──────────────────────────────────────────────────────────────────
@@ -3527,5 +3604,267 @@ func TestStockRemnant_LocationNotFound_ReturnsError(t *testing.T) {
 	err := svc.StockRemnant(context.Background(), uuid.New(), "bad-barcode")
 	if !errors.Is(err, domain.ErrNotFound) {
 		t.Errorf("want ErrNotFound, got %v", err)
+	}
+}
+
+// ── Transfer tests ────────────────────────────────────────────────────────────
+
+func TestTransfer_Remnant_Success(t *testing.T) {
+	remnantID := uuid.New()
+	locationID := uuid.New()
+	actorID := uuid.New()
+	st := &mockStore{
+		selectRemnantByIDResult: Remnant{
+			ID:     remnantID,
+			Status: "AVAILABLE",
+		},
+		selectStorageLocationByBarcodeResult: StorageLocation{
+			ID:       locationID,
+			Barcode:  "A-R1-S1",
+			IsActive: true,
+		},
+	}
+	svc := NewService(st, nil)
+	result, err := svc.Transfer(context.Background(), TransferInput{
+		EntityType:    entityTypeRemnant,
+		EntityID:      remnantID,
+		TargetBarcode: "A-R1-S1",
+		ActorID:       actorID,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.ToLocation != locationID {
+		t.Errorf("expected ToLocation %v, got %v", locationID, result.ToLocation)
+	}
+	if !st.insertAuditLogCalled {
+		t.Error("expected audit log to be inserted")
+	}
+	if st.insertAuditLogEntry.Action != auditActionTransfer {
+		t.Errorf("expected action %q, got %q", auditActionTransfer, st.insertAuditLogEntry.Action)
+	}
+}
+
+func TestTransfer_BoardSheet_Success(t *testing.T) {
+	sheetID := uuid.New()
+	locationID := uuid.New()
+	actorID := uuid.New()
+	st := &mockStore{
+		selectSheetByIDResult: BoardSheet{
+			ID:     sheetID,
+			Status: "AVAILABLE",
+		},
+		selectStorageLocationByBarcodeResult: StorageLocation{
+			ID:       locationID,
+			Barcode:  "B-R1-S1",
+			IsActive: true,
+		},
+	}
+	svc := NewService(st, nil)
+	result, err := svc.Transfer(context.Background(), TransferInput{
+		EntityType:    entityTypeBoardSheet,
+		EntityID:      sheetID,
+		TargetBarcode: "B-R1-S1",
+		ActorID:       actorID,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.EntityType != entityTypeBoardSheet {
+		t.Errorf("expected entity type %q, got %q", entityTypeBoardSheet, result.EntityType)
+	}
+	if result.ToLocation != locationID {
+		t.Errorf("expected ToLocation %v, got %v", locationID, result.ToLocation)
+	}
+}
+
+func TestTransfer_InvalidEntityType_ReturnsError(t *testing.T) {
+	st := &mockStore{}
+	svc := NewService(st, nil)
+	_, err := svc.Transfer(context.Background(), TransferInput{
+		EntityType:    "INVALID",
+		EntityID:      uuid.New(),
+		TargetBarcode: "A-R1-S1",
+		ActorID:       uuid.New(),
+	})
+	if !errors.Is(err, domain.ErrInvalidInput) {
+		t.Errorf("want ErrInvalidInput, got %v", err)
+	}
+}
+
+func TestTransfer_RemnantNotAvailable_ReturnsError(t *testing.T) {
+	st := &mockStore{
+		selectRemnantByIDResult: Remnant{
+			ID:     uuid.New(),
+			Status: "CONSUMED",
+		},
+		selectStorageLocationByBarcodeResult: StorageLocation{
+			ID:       uuid.New(),
+			IsActive: true,
+		},
+	}
+	svc := NewService(st, nil)
+	_, err := svc.Transfer(context.Background(), TransferInput{
+		EntityType:    entityTypeRemnant,
+		EntityID:      uuid.New(),
+		TargetBarcode: "A-R1-S1",
+		ActorID:       uuid.New(),
+	})
+	if !errors.Is(err, domain.ErrInvalidInput) {
+		t.Errorf("want ErrInvalidInput, got %v", err)
+	}
+}
+
+// ── CycleCount tests ──────────────────────────────────────────────────────────
+
+func TestCreateCycleCountSession_Success(t *testing.T) {
+	actorID := uuid.New()
+	st := &mockStore{}
+	svc := NewService(st, nil)
+	sess, err := svc.CreateCycleCountSession(context.Background(), CreateCycleCountInput{
+		Zone:    "A",
+		ActorID: actorID,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if sess.Status != "OPEN" {
+		t.Errorf("expected status OPEN, got %s", sess.Status)
+	}
+	if sess.CreatedBy != actorID {
+		t.Errorf("expected created_by %v, got %v", actorID, sess.CreatedBy)
+	}
+	if sess.Zone != "A" {
+		t.Errorf("expected zone A, got %s", sess.Zone)
+	}
+}
+
+func TestAddCycleCountLine_SessionNotOpen_ReturnsError(t *testing.T) {
+	sessionID := uuid.New()
+	st := &mockStore{
+		selectCycleCountSessionByIDResult: CycleCountSession{
+			ID:     sessionID,
+			Status: "POSTED",
+		},
+	}
+	svc := NewService(st, nil)
+	_, err := svc.AddCycleCountLine(context.Background(), AddCountLineInput{
+		SessionID:     sessionID,
+		EntityType:    entityTypeRemnant,
+		EntityID:      uuid.New(),
+		CountedStatus: "AVAILABLE",
+		Reason:        "physical count",
+	})
+	if !errors.Is(err, domain.ErrInvalidTransition) {
+		t.Errorf("want ErrInvalidTransition, got %v", err)
+	}
+	if st.insertCycleCountLineCalled {
+		t.Error("insertCycleCountLine should not be called when session is not OPEN")
+	}
+}
+
+func TestAddCycleCountLine_EmptyReason_ReturnsError(t *testing.T) {
+	sessionID := uuid.New()
+	st := &mockStore{
+		selectCycleCountSessionByIDResult: CycleCountSession{
+			ID:     sessionID,
+			Status: "OPEN",
+		},
+	}
+	svc := NewService(st, nil)
+	_, err := svc.AddCycleCountLine(context.Background(), AddCountLineInput{
+		SessionID:     sessionID,
+		EntityType:    entityTypeRemnant,
+		EntityID:      uuid.New(),
+		CountedStatus: "AVAILABLE",
+		Reason:        "",
+	})
+	if !errors.Is(err, domain.ErrInvalidInput) {
+		t.Errorf("want ErrInvalidInput, got %v", err)
+	}
+}
+
+func TestAddCycleCountLine_InvalidEntityType_ReturnsError(t *testing.T) {
+	sessionID := uuid.New()
+	st := &mockStore{
+		selectCycleCountSessionByIDResult: CycleCountSession{
+			ID:     sessionID,
+			Status: "OPEN",
+		},
+	}
+	svc := NewService(st, nil)
+	_, err := svc.AddCycleCountLine(context.Background(), AddCountLineInput{
+		SessionID:     sessionID,
+		EntityType:    "LOT",
+		EntityID:      uuid.New(),
+		CountedStatus: "AVAILABLE",
+		Reason:        "physical count",
+	})
+	if !errors.Is(err, domain.ErrInvalidInput) {
+		t.Errorf("want ErrInvalidInput, got %v", err)
+	}
+}
+
+func TestPostCycleCount_SessionNotOpen_ReturnsError(t *testing.T) {
+	sessionID := uuid.New()
+	actorID := uuid.New()
+	st := &mockStore{
+		selectCycleCountSessionByIDResult: CycleCountSession{
+			ID:     sessionID,
+			Status: "CANCELLED",
+		},
+	}
+	svc := NewService(st, nil)
+	err := svc.PostCycleCount(context.Background(), PostCycleCountInput{
+		SessionID: sessionID,
+		ActorID:   actorID,
+	})
+	if !errors.Is(err, domain.ErrInvalidTransition) {
+		t.Errorf("want ErrInvalidTransition, got %v", err)
+	}
+	if st.postCycleCountAtomicallyCalled {
+		t.Error("postCycleCountAtomically should not be called when session is not OPEN")
+	}
+}
+
+func TestPostCycleCount_NoLines_CallsAtomicWithEmptyAdjustments(t *testing.T) {
+	sessionID := uuid.New()
+	actorID := uuid.New()
+	st := &mockStore{
+		selectCycleCountSessionByIDResult: CycleCountSession{
+			ID:     sessionID,
+			Status: "OPEN",
+		},
+		selectCycleCountLinesBySessionResult: nil,
+	}
+	svc := NewService(st, nil)
+	err := svc.PostCycleCount(context.Background(), PostCycleCountInput{
+		SessionID: sessionID,
+		ActorID:   actorID,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !st.postCycleCountAtomicallyCalled {
+		t.Error("expected postCycleCountAtomically to be called")
+	}
+	if len(st.postCycleCountAtomicallyOp.Adjustments) != 0 {
+		t.Errorf("expected 0 adjustments, got %d", len(st.postCycleCountAtomicallyOp.Adjustments))
+	}
+}
+
+func TestCancelCycleCountSession_SessionNotOpen_ReturnsError(t *testing.T) {
+	sessionID := uuid.New()
+	actorID := uuid.New()
+	st := &mockStore{
+		selectCycleCountSessionByIDResult: CycleCountSession{
+			ID:     sessionID,
+			Status: "POSTED",
+		},
+	}
+	svc := NewService(st, nil)
+	err := svc.CancelCycleCountSession(context.Background(), sessionID, actorID)
+	if !errors.Is(err, domain.ErrInvalidTransition) {
+		t.Errorf("want ErrInvalidTransition, got %v", err)
 	}
 }

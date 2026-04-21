@@ -213,6 +213,33 @@ func (s *concurrentMockStore) updateRemnantBinLocation(_ context.Context, _ uuid
 func (s *concurrentMockStore) selectStorageLocationByBarcode(_ context.Context, _ string) (StorageLocation, error) {
 	return StorageLocation{}, nil
 }
+func (s *concurrentMockStore) updateSheetBinLocation(_ context.Context, _ uuid.UUID, _ uuid.UUID) error {
+	return nil
+}
+func (s *concurrentMockStore) insertAuditLog(_ context.Context, _ AuditLogEntry) error {
+	return nil
+}
+func (s *concurrentMockStore) selectAuditLogByEntity(_ context.Context, _ uuid.UUID, _ string) ([]AuditLogEntry, error) {
+	return nil, nil
+}
+func (s *concurrentMockStore) insertCycleCountSession(_ context.Context, _ CycleCountSession) error {
+	return nil
+}
+func (s *concurrentMockStore) selectCycleCountSessionByID(_ context.Context, _ uuid.UUID) (CycleCountSession, error) {
+	return CycleCountSession{}, nil
+}
+func (s *concurrentMockStore) updateCycleCountSessionStatus(_ context.Context, _ uuid.UUID, _ string, _ *uuid.UUID) error {
+	return nil
+}
+func (s *concurrentMockStore) insertCycleCountLine(_ context.Context, _ CycleCountLine) error {
+	return nil
+}
+func (s *concurrentMockStore) selectCycleCountLinesBySession(_ context.Context, _ uuid.UUID) ([]CycleCountLine, error) {
+	return nil, nil
+}
+func (s *concurrentMockStore) postCycleCountAtomically(_ context.Context, _ cycleCountPostOp) error {
+	return nil
+}
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 

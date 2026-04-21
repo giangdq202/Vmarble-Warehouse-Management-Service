@@ -43,11 +43,34 @@ type store interface {
 	// updateRemnantBinLocation sets bin_location_id on the remnant row.
 	updateRemnantBinLocation(ctx context.Context, remnantID uuid.UUID, locationID uuid.UUID) error
 
+	// updateSheetBinLocation sets bin_location_id on the board sheet row.
+	updateSheetBinLocation(ctx context.Context, sheetID uuid.UUID, locationID uuid.UUID) error
+
 	// selectActiveStorageLocations returns all storage locations where is_active = true.
 	selectActiveStorageLocations(ctx context.Context) ([]StorageLocation, error)
 	// selectStorageLocationByBarcode returns the storage location whose barcode
 	// field matches exactly (case-sensitive). Returns ErrNotFound if no match.
 	selectStorageLocationByBarcode(ctx context.Context, barcode string) (StorageLocation, error)
+
+	// insertAuditLog persists an inventory change audit event.
+	insertAuditLog(ctx context.Context, entry AuditLogEntry) error
+	// selectAuditLogByEntity returns audit entries for the given entity, newest first.
+	selectAuditLogByEntity(ctx context.Context, entityID uuid.UUID, entityType string) ([]AuditLogEntry, error)
+
+	// insertCycleCountSession persists a new cycle count session row.
+	insertCycleCountSession(ctx context.Context, s CycleCountSession) error
+	// selectCycleCountSessionByID returns the session or ErrNotFound.
+	selectCycleCountSessionByID(ctx context.Context, id uuid.UUID) (CycleCountSession, error)
+	// updateCycleCountSessionStatus transitions the session status and optionally sets posted_by.
+	updateCycleCountSessionStatus(ctx context.Context, id uuid.UUID, status string, postedBy *uuid.UUID) error
+	// insertCycleCountLine adds a counted line to a session.
+	// Returns ErrPreconditionFailed on duplicate (session_id, entity_type, entity_id).
+	insertCycleCountLine(ctx context.Context, l CycleCountLine) error
+	// selectCycleCountLinesBySession returns all lines for a session ordered by created_at.
+	selectCycleCountLinesBySession(ctx context.Context, sessionID uuid.UUID) ([]CycleCountLine, error)
+	// postCycleCountAtomically applies all adjustments and transitions the session to POSTED
+	// inside a single transaction, using FOR UPDATE on the session row.
+	postCycleCountAtomically(ctx context.Context, op cycleCountPostOp) error
 
 	// recordCutAtomically executes all cut-related writes inside a single DB
 	// transaction. It acquires a row-level lock (SELECT … FOR UPDATE) on the
@@ -110,4 +133,22 @@ type CuttingRecord struct {
 	UsedLengthMM    int        `json:"used_length_mm"`
 	UsedWidthMM     int        `json:"used_width_mm"`
 	CreatedAt       time.Time  `json:"created_at"`
+}
+
+// cycleCountPostOp carries all adjustments to apply when posting a cycle count session.
+type cycleCountPostOp struct {
+	SessionID   uuid.UUID
+	PostedBy    uuid.UUID
+	Adjustments []cycleCountAdjustment
+}
+
+// cycleCountAdjustment describes one entity change produced by a cycle count line diff.
+type cycleCountAdjustment struct {
+	EntityType    string
+	EntityID      uuid.UUID
+	OldLocationID *uuid.UUID
+	NewLocationID *uuid.UUID
+	OldStatus     string
+	NewStatus     string
+	AuditEntry    AuditLogEntry
 }
