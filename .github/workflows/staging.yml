@@ -226,7 +226,7 @@ jobs:
           host:     ${{ secrets.STAGING_HOST }}
           username: root
           password: ${{ secrets.STAGING_SSH_PASSWORD }}
-          port:     22
+          port:     ${{ secrets.STAGING_SSH_PORT }}
           timeout:  180s
           envs:     FULL_IMAGE,GHCR_USER,GHCR_TOKEN
           script: |
