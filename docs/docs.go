@@ -906,6 +906,148 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/costing/{workOrderID}/adjustments": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "costing"
+                ],
+                "summary": "List costing adjustments for a work order",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "work order id (uuid)",
+                        "name": "workOrderID",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/internal_module_costing.CostingAdjustment"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "costing"
+                ],
+                "summary": "Create a costing adjustment for a finalized work order",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "work order id (uuid)",
+                        "name": "workOrderID",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "adjustment payload",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_module_costing.CreateAdjustmentInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/internal_module_costing.CostingAdjustment"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "412": {
+                        "description": "Precondition Failed",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/costing/{workOrderID}/compute": {
             "post": {
                 "security": [
@@ -4973,6 +5115,38 @@ const docTemplate = `{
                 }
             }
         },
+        "internal_module_costing.CostingAdjustment": {
+            "type": "object",
+            "properties": {
+                "costing_record_id": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "created_by": {
+                    "type": "string"
+                },
+                "delta_auxiliary": {
+                    "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.Money"
+                },
+                "delta_labor": {
+                    "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.Money"
+                },
+                "delta_material": {
+                    "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.Money"
+                },
+                "delta_total": {
+                    "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.Money"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "reason": {
+                    "type": "string"
+                }
+            }
+        },
         "internal_module_costing.CostingRecord": {
             "type": "object",
             "properties": {
@@ -4984,6 +5158,12 @@ const docTemplate = `{
                 },
                 "finalized": {
                     "type": "boolean"
+                },
+                "finalized_at": {
+                    "type": "string"
+                },
+                "finalized_by": {
+                    "type": "string"
                 },
                 "id": {
                     "type": "string"
@@ -5001,6 +5181,23 @@ const docTemplate = `{
                     "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.Money"
                 },
                 "work_order_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_module_costing.CreateAdjustmentInput": {
+            "type": "object",
+            "properties": {
+                "delta_auxiliary": {
+                    "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.Money"
+                },
+                "delta_labor": {
+                    "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.Money"
+                },
+                "delta_material": {
+                    "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.Money"
+                },
+                "reason": {
                     "type": "string"
                 }
             }

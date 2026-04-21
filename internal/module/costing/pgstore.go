@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -84,18 +85,22 @@ const selectCostingCols = `id, work_order_id, sku_id,
 	auxiliary_cost_amount, auxiliary_cost_currency,
 	labor_cost_amount, labor_cost_currency,
 	total_cost_amount, total_cost_currency,
-	finalized, created_at`
+	finalized, finalized_at, finalized_by, created_at`
 
 func scanCostingRecord(row interface{ Scan(...any) error }) (CostingRecord, error) {
 	var r CostingRecord
+	var finalizedAt *time.Time
+	var finalizedBy *uuid.UUID
 	err := row.Scan(
 		&r.ID, &r.WorkOrderID, &r.SKUID,
 		&r.MaterialCost.Amount, &r.MaterialCost.Currency,
 		&r.AuxiliaryCost.Amount, &r.AuxiliaryCost.Currency,
 		&r.LaborCost.Amount, &r.LaborCost.Currency,
 		&r.TotalCost.Amount, &r.TotalCost.Currency,
-		&r.Finalized, &r.CreatedAt,
+		&r.Finalized, &finalizedAt, &finalizedBy, &r.CreatedAt,
 	)
+	r.FinalizedAt = finalizedAt
+	r.FinalizedBy = finalizedBy
 	return r, err
 }
 
@@ -138,10 +143,11 @@ func (s *pgStore) selectCostingRecordsPaged(ctx context.Context, p httpkit.PageP
 	return out, total, rows.Err()
 }
 
-func (s *pgStore) finalizeCostingRecord(ctx context.Context, woID uuid.UUID) error {
+func (s *pgStore) finalizeCostingRecord(ctx context.Context, woID uuid.UUID, actorID uuid.UUID) error {
 	result, err := s.pool.Exec(ctx,
-		`UPDATE costing_records SET finalized = true WHERE work_order_id = $1 AND finalized = false`,
-		woID,
+		`UPDATE costing_records SET finalized = true, finalized_at = NOW(), finalized_by = $2
+		 WHERE work_order_id = $1 AND finalized = false`,
+		woID, actorID,
 	)
 	if err != nil {
 		return err
@@ -157,4 +163,60 @@ func (s *pgStore) finalizeCostingRecord(ctx context.Context, woID uuid.UUID) err
 		return domain.ErrNotFound
 	}
 	return nil
+}
+
+func (s *pgStore) insertCostingAdjustment(ctx context.Context, a CostingAdjustment) error {
+	_, err := s.pool.Exec(ctx,
+		`INSERT INTO costing_adjustments (
+			id, costing_record_id, reason,
+			delta_material_amount, delta_material_currency,
+			delta_auxiliary_amount, delta_auxiliary_currency,
+			delta_labor_amount, delta_labor_currency,
+			delta_total_amount, delta_total_currency,
+			created_by, created_at
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+		a.ID, a.CostingRecordID, a.Reason,
+		a.DeltaMaterial.Amount, a.DeltaMaterial.Currency,
+		a.DeltaAuxiliary.Amount, a.DeltaAuxiliary.Currency,
+		a.DeltaLabor.Amount, a.DeltaLabor.Currency,
+		a.DeltaTotal.Amount, a.DeltaTotal.Currency,
+		a.CreatedBy, a.CreatedAt,
+	)
+	return err
+}
+
+func (s *pgStore) selectAdjustmentsByRecord(ctx context.Context, costingRecordID uuid.UUID) ([]CostingAdjustment, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT id, costing_record_id, reason,
+			delta_material_amount, delta_material_currency,
+			delta_auxiliary_amount, delta_auxiliary_currency,
+			delta_labor_amount, delta_labor_currency,
+			delta_total_amount, delta_total_currency,
+			created_by, created_at
+		 FROM costing_adjustments
+		 WHERE costing_record_id = $1
+		 ORDER BY created_at`,
+		costingRecordID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []CostingAdjustment
+	for rows.Next() {
+		var a CostingAdjustment
+		if err := rows.Scan(
+			&a.ID, &a.CostingRecordID, &a.Reason,
+			&a.DeltaMaterial.Amount, &a.DeltaMaterial.Currency,
+			&a.DeltaAuxiliary.Amount, &a.DeltaAuxiliary.Currency,
+			&a.DeltaLabor.Amount, &a.DeltaLabor.Currency,
+			&a.DeltaTotal.Amount, &a.DeltaTotal.Currency,
+			&a.CreatedBy, &a.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		out = append(out, a)
+	}
+	return out, rows.Err()
 }

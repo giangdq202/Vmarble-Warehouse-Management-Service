@@ -22,6 +22,8 @@ func (h *Handler) Register(rg *gin.RouterGroup) {
 	rg.POST("/costing/:workOrderID/finalize", auth.RequireRole(auth.RoleAccountant, auth.RoleAdmin), h.finalize)
 	rg.GET("/costing/:workOrderID", auth.RequireRole(auth.RoleAccountant, auth.RolePlanner, auth.RoleAdmin), h.get)
 	rg.GET("/costing", auth.RequireRole(auth.RoleAccountant, auth.RoleAdmin), h.list)
+	rg.POST("/costing/:workOrderID/adjustments", auth.RequireRole(auth.RoleAccountant, auth.RoleAdmin), h.createAdjustment)
+	rg.GET("/costing/:workOrderID/adjustments", auth.RequireRole(auth.RoleAccountant, auth.RolePlanner, auth.RoleAdmin), h.listAdjustments)
 }
 
 // computeCost godoc
@@ -69,11 +71,92 @@ func (h *Handler) finalize(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid workOrderID"})
 		return
 	}
-	if err := h.svc.FinalizeCost(c.Request.Context(), woID); err != nil {
+	identity, ok := auth.FromContext(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "missing auth identity"})
+		return
+	}
+	actorID, err := uuid.Parse(identity.UserID)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid auth identity"})
+		return
+	}
+	if err := h.svc.FinalizeCost(c.Request.Context(), woID, actorID); err != nil {
 		httpkit.Error(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"status": "finalized"})
+}
+
+// createAdjustment godoc
+//
+// @Summary      Create a costing adjustment for a finalized work order
+// @Tags         costing
+// @Accept       json
+// @Produce      json
+// @Param        workOrderID  path      string                true  "work order id (uuid)"
+// @Param        body         body      CreateAdjustmentInput true  "adjustment payload"
+// @Success      201          {object}  CostingAdjustment
+// @Failure      400          {object}  map[string]string
+// @Failure      404          {object}  map[string]string
+// @Failure      412          {object}  map[string]string
+// @Security     BearerAuth
+// @Failure      401  {object}  map[string]string
+// @Router       /api/v1/costing/{workOrderID}/adjustments [post]
+func (h *Handler) createAdjustment(c *gin.Context) {
+	woID, err := uuid.Parse(c.Param("workOrderID"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid workOrderID"})
+		return
+	}
+	var in CreateAdjustmentInput
+	if !httpkit.Bind(c, &in) {
+		return
+	}
+	identity, ok := auth.FromContext(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "missing auth identity"})
+		return
+	}
+	createdBy, err := uuid.Parse(identity.UserID)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid auth identity"})
+		return
+	}
+	in.WorkOrderID = woID
+	in.CreatedBy = createdBy
+	adj, err := h.svc.CreateAdjustment(c.Request.Context(), in)
+	if err != nil {
+		httpkit.Error(c, err)
+		return
+	}
+	c.JSON(http.StatusCreated, adj)
+}
+
+// listAdjustments godoc
+//
+// @Summary      List costing adjustments for a work order
+// @Tags         costing
+// @Produce      json
+// @Param        workOrderID  path      string  true  "work order id (uuid)"
+// @Success      200          {array}   CostingAdjustment
+// @Failure      400          {object}  map[string]string
+// @Failure      404          {object}  map[string]string
+// @Security     BearerAuth
+// @Failure      401  {object}  map[string]string
+// @Router       /api/v1/costing/{workOrderID}/adjustments [get]
+func (h *Handler) listAdjustments(c *gin.Context) {
+	woID, err := uuid.Parse(c.Param("workOrderID"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid workOrderID"})
+		return
+	}
+	adjs, err := h.svc.ListAdjustments(c.Request.Context(), woID)
+	if err != nil {
+		httpkit.Error(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, adjs)
 }
 
 // getCostingRecord godoc

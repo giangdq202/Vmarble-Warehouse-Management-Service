@@ -34,6 +34,14 @@ type mockStore struct {
 	// selectCostingRecords
 	listResult []CostingRecord
 	listErr    error
+
+	// insertCostingAdjustment
+	insertAdjCalled bool
+	insertAdjErr    error
+
+	// selectAdjustmentsByRecord
+	selectAdjResult []CostingAdjustment
+	selectAdjErr    error
 }
 
 func (m *mockStore) insertCostingRecord(_ context.Context, _ CostingRecord) error {
@@ -54,9 +62,18 @@ func (m *mockStore) selectCostingRecordsPaged(_ context.Context, _ httpkit.PageP
 	return m.listResult, len(m.listResult), m.listErr
 }
 
-func (m *mockStore) finalizeCostingRecord(_ context.Context, _ uuid.UUID) error {
+func (m *mockStore) finalizeCostingRecord(_ context.Context, _ uuid.UUID, _ uuid.UUID) error {
 	m.finalizeCalled = true
 	return m.finalizeErr
+}
+
+func (m *mockStore) insertCostingAdjustment(_ context.Context, _ CostingAdjustment) error {
+	m.insertAdjCalled = true
+	return m.insertAdjErr
+}
+
+func (m *mockStore) selectAdjustmentsByRecord(_ context.Context, _ uuid.UUID) ([]CostingAdjustment, error) {
+	return m.selectAdjResult, m.selectAdjErr
 }
 
 // ── mockWOR (WorkOrderReader) ─────────────────────────────────────────────────
@@ -548,7 +565,7 @@ func TestFinalizeCost_DelegatesToStore(t *testing.T) {
 	st := &mockStore{}
 	svc := newSvc(st, &mockWOR{}, &mockCDR{}, zeroCONR())
 
-	err := svc.FinalizeCost(context.Background(), uuid.New())
+	err := svc.FinalizeCost(context.Background(), uuid.New(), uuid.New())
 
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -563,10 +580,186 @@ func TestFinalizeCost_StoreError_Propagates(t *testing.T) {
 	st := &mockStore{finalizeErr: storeErr}
 	svc := newSvc(st, &mockWOR{}, &mockCDR{}, zeroCONR())
 
-	err := svc.FinalizeCost(context.Background(), uuid.New())
+	err := svc.FinalizeCost(context.Background(), uuid.New(), uuid.New())
 
 	if !errors.Is(err, storeErr) {
 		t.Errorf("expected finalize error to propagate, got %v", err)
+	}
+}
+
+// ── TestCreateAdjustment — BR-C04 ────────────────────────────────────────────
+
+func TestCreateAdjustment_NonFinalizedRecord_ReturnsPreconditionFailed(t *testing.T) {
+	woID := uuid.New()
+	st := &mockStore{
+		selectByWOResult: CostingRecord{ID: uuid.New(), WorkOrderID: woID, Finalized: false},
+	}
+	svc := newSvc(st, &mockWOR{}, &mockCDR{}, zeroCONR())
+
+	_, err := svc.CreateAdjustment(context.Background(), CreateAdjustmentInput{
+		WorkOrderID:   woID,
+		Reason:        "price correction",
+		DeltaMaterial: domain.Money{Amount: 1000, Currency: "VND"},
+		CreatedBy:     uuid.New(),
+	})
+
+	if !errors.Is(err, domain.ErrPreconditionFailed) {
+		t.Errorf("expected ErrPreconditionFailed, got %v", err)
+	}
+	if st.insertAdjCalled {
+		t.Error("insertCostingAdjustment must NOT be called when record is not finalized")
+	}
+}
+
+func TestCreateAdjustment_EmptyReason_ReturnsInvalidInput(t *testing.T) {
+	woID := uuid.New()
+	st := &mockStore{
+		selectByWOResult: CostingRecord{ID: uuid.New(), WorkOrderID: woID, Finalized: true},
+	}
+	svc := newSvc(st, &mockWOR{}, &mockCDR{}, zeroCONR())
+
+	_, err := svc.CreateAdjustment(context.Background(), CreateAdjustmentInput{
+		WorkOrderID:   woID,
+		Reason:        "",
+		DeltaMaterial: domain.Money{Amount: 1000, Currency: "VND"},
+		CreatedBy:     uuid.New(),
+	})
+
+	if !errors.Is(err, domain.ErrInvalidInput) {
+		t.Errorf("expected ErrInvalidInput for empty reason, got %v", err)
+	}
+	if st.insertAdjCalled {
+		t.Error("insertCostingAdjustment must NOT be called with empty reason")
+	}
+}
+
+func TestCreateAdjustment_AllZeroDeltas_ReturnsInvalidInput(t *testing.T) {
+	woID := uuid.New()
+	st := &mockStore{
+		selectByWOResult: CostingRecord{ID: uuid.New(), WorkOrderID: woID, Finalized: true},
+	}
+	svc := newSvc(st, &mockWOR{}, &mockCDR{}, zeroCONR())
+
+	_, err := svc.CreateAdjustment(context.Background(), CreateAdjustmentInput{
+		WorkOrderID: woID,
+		Reason:      "oops",
+		CreatedBy:   uuid.New(),
+	})
+
+	if !errors.Is(err, domain.ErrInvalidInput) {
+		t.Errorf("expected ErrInvalidInput for all-zero deltas, got %v", err)
+	}
+	if st.insertAdjCalled {
+		t.Error("insertCostingAdjustment must NOT be called when all deltas are zero")
+	}
+}
+
+func TestCreateAdjustment_HappyPath_ReturnsSavedAdjustment(t *testing.T) {
+	woID := uuid.New()
+	recordID := uuid.New()
+	actorID := uuid.New()
+	st := &mockStore{
+		selectByWOResult: CostingRecord{ID: recordID, WorkOrderID: woID, Finalized: true},
+	}
+	svc := newSvc(st, &mockWOR{}, &mockCDR{}, zeroCONR())
+
+	got, err := svc.CreateAdjustment(context.Background(), CreateAdjustmentInput{
+		WorkOrderID:    woID,
+		Reason:         "vendor credit applied",
+		DeltaMaterial:  domain.Money{Amount: -5000, Currency: "VND"},
+		DeltaAuxiliary: domain.Money{Amount: 0, Currency: "VND"},
+		DeltaLabor:     domain.Money{Amount: 0, Currency: "VND"},
+		CreatedBy:      actorID,
+	})
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !st.insertAdjCalled {
+		t.Error("insertCostingAdjustment must be called on happy path")
+	}
+	if got.ID == uuid.Nil {
+		t.Error("returned adjustment must have a non-nil ID")
+	}
+	if got.CostingRecordID != recordID {
+		t.Errorf("CostingRecordID = %v, want %v", got.CostingRecordID, recordID)
+	}
+	if got.Reason != "vendor credit applied" {
+		t.Errorf("Reason = %q, want %q", got.Reason, "vendor credit applied")
+	}
+	if got.DeltaTotal.Amount != -5000 {
+		t.Errorf("DeltaTotal.Amount = %d, want -5000", got.DeltaTotal.Amount)
+	}
+	if got.CreatedBy != actorID {
+		t.Errorf("CreatedBy = %v, want %v", got.CreatedBy, actorID)
+	}
+}
+
+func TestCreateAdjustment_RecordNotFound_Propagates(t *testing.T) {
+	st := &mockStore{selectByWOErr: domain.NewBizError(domain.ErrNotFound, "not found")}
+	svc := newSvc(st, &mockWOR{}, &mockCDR{}, zeroCONR())
+
+	_, err := svc.CreateAdjustment(context.Background(), CreateAdjustmentInput{
+		WorkOrderID:   uuid.New(),
+		Reason:        "test",
+		DeltaMaterial: domain.Money{Amount: 100, Currency: "VND"},
+		CreatedBy:     uuid.New(),
+	})
+
+	if !errors.Is(err, domain.ErrNotFound) {
+		t.Errorf("expected ErrNotFound, got %v", err)
+	}
+}
+
+// ── TestListAdjustments ───────────────────────────────────────────────────────
+
+func TestListAdjustments_HappyPath_ReturnsList(t *testing.T) {
+	woID := uuid.New()
+	recordID := uuid.New()
+	adjs := []CostingAdjustment{
+		{ID: uuid.New(), CostingRecordID: recordID, Reason: "adj1"},
+		{ID: uuid.New(), CostingRecordID: recordID, Reason: "adj2"},
+	}
+	st := &mockStore{
+		selectByWOResult: CostingRecord{ID: recordID, WorkOrderID: woID},
+		selectAdjResult:  adjs,
+	}
+	svc := newSvc(st, &mockWOR{}, &mockCDR{}, zeroCONR())
+
+	got, err := svc.ListAdjustments(context.Background(), woID)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(got) != 2 {
+		t.Errorf("len = %d, want 2", len(got))
+	}
+}
+
+func TestListAdjustments_NoRecord_Propagates(t *testing.T) {
+	st := &mockStore{selectByWOErr: domain.NewBizError(domain.ErrNotFound, "not found")}
+	svc := newSvc(st, &mockWOR{}, &mockCDR{}, zeroCONR())
+
+	_, err := svc.ListAdjustments(context.Background(), uuid.New())
+
+	if !errors.Is(err, domain.ErrNotFound) {
+		t.Errorf("expected ErrNotFound, got %v", err)
+	}
+}
+
+func TestListAdjustments_EmptyList_ReturnsEmptySlice(t *testing.T) {
+	woID := uuid.New()
+	st := &mockStore{
+		selectByWOResult: CostingRecord{ID: uuid.New(), WorkOrderID: woID},
+		selectAdjResult:  nil,
+	}
+	svc := newSvc(st, &mockWOR{}, &mockCDR{}, zeroCONR())
+
+	got, err := svc.ListAdjustments(context.Background(), woID)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("expected empty slice, got %d elements", len(got))
 	}
 }
 
