@@ -86,8 +86,58 @@ func (s *service) ComputeCost(ctx context.Context, workOrderID uuid.UUID) (Costi
 	return record, nil
 }
 
-func (s *service) FinalizeCost(ctx context.Context, workOrderID uuid.UUID) error {
-	return s.st.finalizeCostingRecord(ctx, workOrderID)
+func (s *service) FinalizeCost(ctx context.Context, workOrderID uuid.UUID, actorID uuid.UUID) error {
+	return s.st.finalizeCostingRecord(ctx, workOrderID, actorID)
+}
+
+func (s *service) CreateAdjustment(ctx context.Context, in CreateAdjustmentInput) (CostingAdjustment, error) {
+	if in.Reason == "" {
+		return CostingAdjustment{}, domain.NewBizError(domain.ErrInvalidInput, "reason is required for costing adjustment")
+	}
+
+	record, err := s.st.selectCostingRecordByWO(ctx, in.WorkOrderID)
+	if err != nil {
+		return CostingAdjustment{}, err
+	}
+	if !record.Finalized {
+		return CostingAdjustment{}, domain.NewBizError(domain.ErrPreconditionFailed, "costing record must be finalized before creating an adjustment")
+	}
+
+	deltaTotal := in.DeltaMaterial.Add(in.DeltaAuxiliary).Add(in.DeltaLabor)
+	if deltaTotal.Amount == 0 && in.DeltaMaterial.Amount == 0 && in.DeltaAuxiliary.Amount == 0 && in.DeltaLabor.Amount == 0 {
+		return CostingAdjustment{}, domain.NewBizError(domain.ErrInvalidInput, "at least one non-zero delta is required")
+	}
+
+	adj := CostingAdjustment{
+		ID:              uuid.New(),
+		CostingRecordID: record.ID,
+		Reason:          in.Reason,
+		DeltaMaterial:   in.DeltaMaterial,
+		DeltaAuxiliary:  in.DeltaAuxiliary,
+		DeltaLabor:      in.DeltaLabor,
+		DeltaTotal:      deltaTotal,
+		CreatedBy:       in.CreatedBy,
+		CreatedAt:       time.Now().UTC(),
+	}
+	if err := s.st.insertCostingAdjustment(ctx, adj); err != nil {
+		return CostingAdjustment{}, err
+	}
+	return adj, nil
+}
+
+func (s *service) ListAdjustments(ctx context.Context, workOrderID uuid.UUID) ([]CostingAdjustment, error) {
+	record, err := s.st.selectCostingRecordByWO(ctx, workOrderID)
+	if err != nil {
+		return nil, err
+	}
+	adjs, err := s.st.selectAdjustmentsByRecord(ctx, record.ID)
+	if err != nil {
+		return nil, err
+	}
+	if adjs == nil {
+		adjs = []CostingAdjustment{}
+	}
+	return adjs, nil
 }
 
 func (s *service) GetCostingRecord(ctx context.Context, workOrderID uuid.UUID) (CostingRecord, error) {

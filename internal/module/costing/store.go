@@ -12,5 +12,7 @@ type store interface {
 	updateCostingRecord(ctx context.Context, r CostingRecord) error
 	selectCostingRecordByWO(ctx context.Context, woID uuid.UUID) (CostingRecord, error)
 	selectCostingRecordsPaged(ctx context.Context, p httpkit.PageParams, finalized *bool) ([]CostingRecord, int, error)
-	finalizeCostingRecord(ctx context.Context, woID uuid.UUID) error
+	finalizeCostingRecord(ctx context.Context, woID uuid.UUID, actorID uuid.UUID) error
+	insertCostingAdjustment(ctx context.Context, a CostingAdjustment) error
+	selectAdjustmentsByRecord(ctx context.Context, costingRecordID uuid.UUID) ([]CostingAdjustment, error)
 }
