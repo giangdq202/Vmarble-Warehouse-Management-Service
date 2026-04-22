@@ -178,3 +178,37 @@ func Error(c *gin.Context, err error) {
 	slog.Error("request error", "err", err, "status", status)
 	c.JSON(status, gin.H{"error": err.Error()})
 }
+
+// ParseDateRange reads "from" and "to" query parameters as dates (YYYY-MM-DD or RFC3339).
+// Writes a 400 response and returns false when either parameter is missing or malformed.
+func ParseDateRange(c *gin.Context) (from, to time.Time, ok bool) {
+	fromStr := c.Query("from")
+	toStr := c.Query("to")
+	if fromStr == "" || toStr == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "from and to query parameters are required"})
+		return time.Time{}, time.Time{}, false
+	}
+	for _, layout := range []string{time.DateOnly, time.RFC3339} {
+		var err error
+		from, err = time.Parse(layout, fromStr)
+		if err == nil {
+			break
+		}
+	}
+	if from.IsZero() {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid from date, use YYYY-MM-DD or RFC3339"})
+		return time.Time{}, time.Time{}, false
+	}
+	for _, layout := range []string{time.DateOnly, time.RFC3339} {
+		var err error
+		to, err = time.Parse(layout, toStr)
+		if err == nil {
+			break
+		}
+	}
+	if to.IsZero() {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid to date, use YYYY-MM-DD or RFC3339"})
+		return time.Time{}, time.Time{}, false
+	}
+	return from, to, true
+}

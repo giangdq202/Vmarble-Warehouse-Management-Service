@@ -2,6 +2,7 @@ package production
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"time"
@@ -30,18 +31,29 @@ func (s *pgStore) insertWorkOrder(ctx context.Context, wo WorkOrder) error {
 	return err
 }
 
-// scanWorkOrder reads the 12-column projection used by all SELECT queries.
+// scanWorkOrder reads the 14-column projection used by all SELECT queries.
 // Columns: wo.id, wo.plan_id, wo.sku_id, s.code, s.name, s.length_mm, s.width_mm,
-//          wo.quantity, wo.status, wo.assigned_to, wo.assigned_at, wo.created_at
+//          wo.quantity, wo.status, wo.assigned_to, wo.assigned_at, wo.created_at,
+//          wo.estimated_hours, wo.machine_slot_id
 func scanWorkOrder(row interface {
 	Scan(...any) error
 }) (WorkOrder, error) {
 	var wo WorkOrder
+	var estimatedHours sql.NullFloat64
+	var machineSlotID uuid.NullUUID
 	err := row.Scan(
 		&wo.ID, &wo.PlanID, &wo.SKUID, &wo.SKUCode, &wo.SKUName,
 		&wo.SKUDimensions.LengthMM, &wo.SKUDimensions.WidthMM,
 		&wo.Quantity, &wo.Status, &wo.AssignedTo, &wo.AssignedAt, &wo.CreatedAt,
+		&estimatedHours, &machineSlotID,
 	)
+	if estimatedHours.Valid {
+		wo.EstimatedHours = &estimatedHours.Float64
+	}
+	if machineSlotID.Valid {
+		v := machineSlotID.UUID
+		wo.MachineSlotID = &v
+	}
 	return wo, err
 }
 
@@ -53,7 +65,8 @@ const selectWOCols = `
 	COALESCE(s.name, '') AS sku_name,
 	COALESCE(s.length_mm, 0) AS sku_length_mm,
 	COALESCE(s.width_mm, 0)  AS sku_width_mm,
-	wo.quantity, wo.status, wo.assigned_to, wo.assigned_at, wo.created_at
+	wo.quantity, wo.status, wo.assigned_to, wo.assigned_at, wo.created_at,
+	wo.estimated_hours, wo.machine_slot_id
 FROM work_orders wo
 LEFT JOIN skus s ON s.id = wo.sku_id`
 
@@ -273,4 +286,273 @@ func (s *pgStore) selectCNCUserIDs(ctx context.Context) ([]uuid.UUID, error) {
 		ids = append(ids, id)
 	}
 	return ids, rows.Err()
+}
+
+// --- Machine CRUD ---
+
+func (s *pgStore) insertMachine(ctx context.Context, m Machine) error {
+	_, err := s.pool.Exec(ctx,
+		`INSERT INTO machines (id, code, name, capacity_hours_per_shift, is_active, created_at)
+		 VALUES ($1, $2, $3, $4, $5, $6)`,
+		m.ID, m.Code, m.Name, m.CapacityHoursPerShift, m.IsActive, m.CreatedAt,
+	)
+	return err
+}
+
+func (s *pgStore) selectMachines(ctx context.Context) ([]Machine, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT id, code, name, capacity_hours_per_shift, is_active, created_at
+		 FROM machines ORDER BY code`,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []Machine
+	for rows.Next() {
+		var m Machine
+		if err := rows.Scan(&m.ID, &m.Code, &m.Name, &m.CapacityHoursPerShift, &m.IsActive, &m.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, m)
+	}
+	return out, rows.Err()
+}
+
+func (s *pgStore) selectMachineByID(ctx context.Context, id uuid.UUID) (Machine, error) {
+	var m Machine
+	err := s.pool.QueryRow(ctx,
+		`SELECT id, code, name, capacity_hours_per_shift, is_active, created_at
+		 FROM machines WHERE id = $1`,
+		id,
+	).Scan(&m.ID, &m.Code, &m.Name, &m.CapacityHoursPerShift, &m.IsActive, &m.CreatedAt)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return Machine{}, domain.NewBizError(domain.ErrNotFound, "machine not found")
+		}
+		return Machine{}, err
+	}
+	return m, nil
+}
+
+func (s *pgStore) deactivateMachine(ctx context.Context, id uuid.UUID) error {
+	tag, err := s.pool.Exec(ctx,
+		`UPDATE machines SET is_active = FALSE WHERE id = $1`,
+		id,
+	)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return domain.NewBizError(domain.ErrNotFound, "machine not found")
+	}
+	return nil
+}
+
+// --- Slot CRUD ---
+
+// slotCols is the common SELECT for all slot queries. assigned_hours is computed via LEFT JOIN.
+const slotCols = `
+	s.id, s.machine_id, m.code, m.name, s.shift_date, s.shift_name,
+	s.capacity_hours,
+	COALESCE(SUM(wo.estimated_hours), 0) AS assigned_hours,
+	s.created_at
+FROM machine_shift_slots s
+JOIN machines m ON m.id = s.machine_id
+LEFT JOIN work_orders wo ON wo.machine_slot_id = s.id`
+
+func scanSlot(row interface {
+	Scan(...any) error
+}) (MachineShiftSlot, error) {
+	var sl MachineShiftSlot
+	err := row.Scan(
+		&sl.ID, &sl.MachineID, &sl.MachineCode, &sl.MachineName,
+		&sl.ShiftDate, &sl.ShiftName, &sl.CapacityHours, &sl.AssignedHours, &sl.CreatedAt,
+	)
+	return sl, err
+}
+
+func (s *pgStore) insertSlot(ctx context.Context, sl MachineShiftSlot) error {
+	_, err := s.pool.Exec(ctx,
+		`INSERT INTO machine_shift_slots (id, machine_id, shift_date, shift_name, capacity_hours, created_at)
+		 VALUES ($1, $2, $3, $4, $5, $6)`,
+		sl.ID, sl.MachineID, sl.ShiftDate, sl.ShiftName, sl.CapacityHours, sl.CreatedAt,
+	)
+	return err
+}
+
+func (s *pgStore) selectSlotByID(ctx context.Context, id uuid.UUID) (MachineShiftSlot, error) {
+	row := s.pool.QueryRow(ctx,
+		`SELECT `+slotCols+`
+		 WHERE s.id = $1
+		 GROUP BY s.id, m.code, m.name`,
+		id,
+	)
+	sl, err := scanSlot(row)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return MachineShiftSlot{}, domain.NewBizError(domain.ErrNotFound, "machine shift slot not found")
+		}
+		return MachineShiftSlot{}, err
+	}
+	return sl, nil
+}
+
+func (s *pgStore) selectSlotsByMachine(ctx context.Context, machineID uuid.UUID, from, to time.Time) ([]MachineShiftSlot, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT `+slotCols+`
+		 WHERE s.machine_id = $1 AND s.shift_date >= $2 AND s.shift_date <= $3
+		 GROUP BY s.id, m.code, m.name
+		 ORDER BY s.shift_date, s.shift_name`,
+		machineID, from, to,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []MachineShiftSlot
+	for rows.Next() {
+		sl, err := scanSlot(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, sl)
+	}
+	return out, rows.Err()
+}
+
+func (s *pgStore) selectFutureSlotsWithCapacity(ctx context.Context, minAvailableHours float64) ([]MachineShiftSlot, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT `+slotCols+`
+		 WHERE s.shift_date >= CURRENT_DATE AND m.is_active = TRUE
+		 GROUP BY s.id, m.code, m.name
+		 HAVING s.capacity_hours - COALESCE(SUM(wo.estimated_hours), 0) >= $1
+		 ORDER BY s.shift_date ASC, (s.capacity_hours - COALESCE(SUM(wo.estimated_hours), 0)) DESC`,
+		minAvailableHours,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []MachineShiftSlot
+	for rows.Next() {
+		sl, err := scanSlot(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, sl)
+	}
+	return out, rows.Err()
+}
+
+func (s *pgStore) deleteSlot(ctx context.Context, id uuid.UUID) error {
+	tag, err := s.pool.Exec(ctx,
+		`DELETE FROM machine_shift_slots WHERE id = $1`,
+		id,
+	)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return domain.NewBizError(domain.ErrNotFound, "machine shift slot not found")
+	}
+	return nil
+}
+
+// --- Work order scheduling ---
+
+func (s *pgStore) updateEstimatedHours(ctx context.Context, woID uuid.UUID, hours float64) error {
+	tag, err := s.pool.Exec(ctx,
+		`UPDATE work_orders SET estimated_hours = $1 WHERE id = $2`,
+		hours, woID,
+	)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return domain.NewBizError(domain.ErrNotFound, "work order not found")
+	}
+	return nil
+}
+
+func (s *pgStore) unassignWOFromSlot(ctx context.Context, woID uuid.UUID) error {
+	tag, err := s.pool.Exec(ctx,
+		`UPDATE work_orders SET machine_slot_id = NULL WHERE id = $1`,
+		woID,
+	)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return domain.NewBizError(domain.ErrNotFound, "work order not found")
+	}
+	return nil
+}
+
+// assignSlotAtomically locks the slot row, validates remaining capacity,
+// then sets machine_slot_id on the work order — all inside one transaction.
+func (s *pgStore) assignSlotAtomically(ctx context.Context, op assignSlotOp) error {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin transaction: %w", err)
+	}
+	defer func() {
+		if err != nil {
+			_ = tx.Rollback(ctx)
+		}
+	}()
+
+	// Lock slot row and read its capacity.
+	var capacityHours float64
+	lockErr := tx.QueryRow(ctx,
+		`SELECT capacity_hours FROM machine_shift_slots WHERE id = $1 FOR UPDATE`,
+		op.SlotID,
+	).Scan(&capacityHours)
+	if errors.Is(lockErr, pgx.ErrNoRows) {
+		err = domain.NewBizError(domain.ErrNotFound, "machine shift slot not found")
+		return err
+	}
+	if lockErr != nil {
+		err = fmt.Errorf("lock slot: %w", lockErr)
+		return err
+	}
+
+	// Compute currently assigned hours under the lock.
+	var assignedHours float64
+	if scanErr := tx.QueryRow(ctx,
+		`SELECT COALESCE(SUM(estimated_hours), 0)
+		 FROM work_orders WHERE machine_slot_id = $1`,
+		op.SlotID,
+	).Scan(&assignedHours); scanErr != nil {
+		err = fmt.Errorf("sum assigned hours: %w", scanErr)
+		return err
+	}
+
+	available := capacityHours - assignedHours
+	if op.EstimatedHours > available {
+		err = domain.NewBizError(domain.ErrPreconditionFailed,
+			fmt.Sprintf("slot has %.2f available hours but work order requires %.2f", available, op.EstimatedHours))
+		return err
+	}
+
+	tag, execErr := tx.Exec(ctx,
+		`UPDATE work_orders SET machine_slot_id = $1 WHERE id = $2`,
+		op.SlotID, op.WorkOrderID,
+	)
+	if execErr != nil {
+		err = fmt.Errorf("assign slot: %w", execErr)
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		err = domain.NewBizError(domain.ErrNotFound, "work order not found")
+		return err
+	}
+
+	if err = tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit: %w", err)
+	}
+	return nil
 }

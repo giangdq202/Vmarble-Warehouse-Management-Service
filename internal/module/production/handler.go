@@ -28,6 +28,19 @@ func (h *Handler) Register(rg *gin.RouterGroup) {
 	rg.GET("/work-orders/:id/consumptions", h.listConsumptions)
 	rg.POST("/work-orders/:id/assign", auth.RequireRole(auth.RoleCNCManager), h.assign)
 	rg.POST("/work-orders/:id/suggest-assignment", auth.RequireRole(auth.RoleCNCManager), h.suggestAssignment)
+	rg.POST("/work-orders/:id/estimated-hours", auth.RequireRole(auth.RoleCNCManager, auth.RolePlanner), h.setEstimatedHours)
+	rg.POST("/work-orders/:id/assign-slot", auth.RequireRole(auth.RoleCNCManager, auth.RolePlanner), h.assignSlot)
+	rg.POST("/work-orders/:id/unassign-slot", auth.RequireRole(auth.RoleCNCManager, auth.RolePlanner), h.unassignSlot)
+	rg.GET("/work-orders/:id/suggest-schedule", auth.RequireRole(auth.RoleCNCManager, auth.RolePlanner), h.suggestSchedule)
+
+	rg.POST("/machines", auth.RequireRole(auth.RoleAdmin, auth.RoleCNCManager), h.createMachine)
+	rg.GET("/machines", h.listMachines)
+	rg.GET("/machines/:id", h.getMachine)
+	rg.DELETE("/machines/:id", auth.RequireRole(auth.RoleAdmin), h.deactivateMachine)
+	rg.POST("/machines/:id/slots", auth.RequireRole(auth.RoleCNCManager, auth.RolePlanner), h.createSlot)
+	rg.GET("/machines/:id/slots", h.listSlots)
+	rg.GET("/slots/:slotID", h.getSlot)
+	rg.DELETE("/slots/:slotID", auth.RequireRole(auth.RoleCNCManager, auth.RolePlanner), h.deleteSlot)
 }
 
 // createWorkOrder godoc
@@ -310,4 +323,315 @@ func (h *Handler) listMine(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, wos)
+}
+
+// setEstimatedHours godoc
+//
+// @Summary      Set estimated hours for scheduling
+// @Tags         production
+// @Accept       json
+// @Produce      json
+// @Security     BearerAuth
+// @Param        id    path      string                  true  "work order id (uuid)"
+// @Param        body  body      SetEstimatedHoursInput  true  "payload"
+// @Success      200   {object}  WorkOrder
+// @Failure      400   {object}  map[string]string
+// @Failure      404   {object}  map[string]string
+// @Router       /api/v1/work-orders/{id}/estimated-hours [post]
+func (h *Handler) setEstimatedHours(c *gin.Context) {
+	woID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+	var in SetEstimatedHoursInput
+	if !httpkit.Bind(c, &in) {
+		return
+	}
+	in.WorkOrderID = woID
+	wo, err := h.svc.SetEstimatedHours(c.Request.Context(), in)
+	if err != nil {
+		httpkit.Error(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, wo)
+}
+
+// assignSlot godoc
+//
+// @Summary      Assign a machine shift slot to a work order
+// @Tags         production
+// @Accept       json
+// @Produce      json
+// @Security     BearerAuth
+// @Param        id    path      string          true  "work order id (uuid)"
+// @Param        body  body      AssignSlotInput true  "payload"
+// @Success      200   {object}  WorkOrder
+// @Failure      400   {object}  map[string]string
+// @Failure      404   {object}  map[string]string
+// @Failure      412   {object}  map[string]string
+// @Router       /api/v1/work-orders/{id}/assign-slot [post]
+func (h *Handler) assignSlot(c *gin.Context) {
+	woID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+	var in AssignSlotInput
+	if !httpkit.Bind(c, &in) {
+		return
+	}
+	in.WorkOrderID = woID
+	wo, err := h.svc.AssignSlot(c.Request.Context(), in)
+	if err != nil {
+		httpkit.Error(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, wo)
+}
+
+// unassignSlot godoc
+//
+// @Summary      Remove machine slot assignment from a work order
+// @Tags         production
+// @Produce      json
+// @Security     BearerAuth
+// @Param        id  path      string  true  "work order id (uuid)"
+// @Success      200 {object}  WorkOrder
+// @Failure      400 {object}  map[string]string
+// @Failure      404 {object}  map[string]string
+// @Router       /api/v1/work-orders/{id}/unassign-slot [post]
+func (h *Handler) unassignSlot(c *gin.Context) {
+	woID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+	wo, err := h.svc.UnassignSlot(c.Request.Context(), woID)
+	if err != nil {
+		httpkit.Error(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, wo)
+}
+
+// suggestSchedule godoc
+//
+// @Summary      Suggest available machine shift slots for a work order
+// @Tags         production
+// @Produce      json
+// @Security     BearerAuth
+// @Param        id  path      string  true  "work order id (uuid)"
+// @Success      200 {array}   ScheduleSuggestion
+// @Failure      400 {object}  map[string]string
+// @Failure      412 {object}  map[string]string
+// @Router       /api/v1/work-orders/{id}/suggest-schedule [get]
+func (h *Handler) suggestSchedule(c *gin.Context) {
+	woID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+	suggestions, err := h.svc.SuggestSchedule(c.Request.Context(), woID)
+	if err != nil {
+		httpkit.Error(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, suggestions)
+}
+
+// createMachine godoc
+//
+// @Summary      Create a CNC machine
+// @Tags         production
+// @Accept       json
+// @Produce      json
+// @Security     BearerAuth
+// @Param        body  body      CreateMachineInput  true  "payload"
+// @Success      201   {object}  Machine
+// @Failure      400   {object}  map[string]string
+// @Router       /api/v1/machines [post]
+func (h *Handler) createMachine(c *gin.Context) {
+	var in CreateMachineInput
+	if !httpkit.Bind(c, &in) {
+		return
+	}
+	m, err := h.svc.CreateMachine(c.Request.Context(), in)
+	if err != nil {
+		httpkit.Error(c, err)
+		return
+	}
+	c.JSON(http.StatusCreated, m)
+}
+
+// listMachines godoc
+//
+// @Summary      List all machines
+// @Tags         production
+// @Produce      json
+// @Security     BearerAuth
+// @Success      200 {array}   Machine
+// @Router       /api/v1/machines [get]
+func (h *Handler) listMachines(c *gin.Context) {
+	machines, err := h.svc.ListMachines(c.Request.Context())
+	if err != nil {
+		httpkit.Error(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, machines)
+}
+
+// getMachine godoc
+//
+// @Summary      Get machine by ID
+// @Tags         production
+// @Produce      json
+// @Security     BearerAuth
+// @Param        id  path      string  true  "machine id (uuid)"
+// @Success      200 {object}  Machine
+// @Failure      404 {object}  map[string]string
+// @Router       /api/v1/machines/{id} [get]
+func (h *Handler) getMachine(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+	m, err := h.svc.GetMachine(c.Request.Context(), id)
+	if err != nil {
+		httpkit.Error(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, m)
+}
+
+// deactivateMachine godoc
+//
+// @Summary      Deactivate a machine
+// @Tags         production
+// @Produce      json
+// @Security     BearerAuth
+// @Param        id  path      string  true  "machine id (uuid)"
+// @Success      204
+// @Failure      404 {object}  map[string]string
+// @Router       /api/v1/machines/{id} [delete]
+func (h *Handler) deactivateMachine(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+	if err := h.svc.DeactivateMachine(c.Request.Context(), id); err != nil {
+		httpkit.Error(c, err)
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
+// createSlot godoc
+//
+// @Summary      Create a machine shift slot
+// @Tags         production
+// @Accept       json
+// @Produce      json
+// @Security     BearerAuth
+// @Param        id    path      string          true  "machine id (uuid)"
+// @Param        body  body      CreateSlotInput true  "payload"
+// @Success      201   {object}  MachineShiftSlot
+// @Failure      400   {object}  map[string]string
+// @Router       /api/v1/machines/{id}/slots [post]
+func (h *Handler) createSlot(c *gin.Context) {
+	machineID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid machine id"})
+		return
+	}
+	var in CreateSlotInput
+	if !httpkit.Bind(c, &in) {
+		return
+	}
+	in.MachineID = machineID
+	sl, err := h.svc.CreateSlot(c.Request.Context(), in)
+	if err != nil {
+		httpkit.Error(c, err)
+		return
+	}
+	c.JSON(http.StatusCreated, sl)
+}
+
+// listSlots godoc
+//
+// @Summary      List slots for a machine in a date range
+// @Tags         production
+// @Produce      json
+// @Security     BearerAuth
+// @Param        id    path      string  true   "machine id (uuid)"
+// @Param        from  query     string  true   "start date (RFC3339 or YYYY-MM-DD)"
+// @Param        to    query     string  true   "end date (RFC3339 or YYYY-MM-DD)"
+// @Success      200   {array}   MachineShiftSlot
+// @Failure      400   {object}  map[string]string
+// @Router       /api/v1/machines/{id}/slots [get]
+func (h *Handler) listSlots(c *gin.Context) {
+	machineID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid machine id"})
+		return
+	}
+	from, to, ok := httpkit.ParseDateRange(c)
+	if !ok {
+		return
+	}
+	slots, err := h.svc.ListSlots(c.Request.Context(), machineID, from, to)
+	if err != nil {
+		httpkit.Error(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, slots)
+}
+
+// getSlot godoc
+//
+// @Summary      Get a machine shift slot by ID
+// @Tags         production
+// @Produce      json
+// @Security     BearerAuth
+// @Param        slotID  path      string  true  "slot id (uuid)"
+// @Success      200     {object}  MachineShiftSlot
+// @Failure      404     {object}  map[string]string
+// @Router       /api/v1/slots/{slotID} [get]
+func (h *Handler) getSlot(c *gin.Context) {
+	slotID, err := uuid.Parse(c.Param("slotID"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid slot id"})
+		return
+	}
+	sl, err := h.svc.GetSlot(c.Request.Context(), slotID)
+	if err != nil {
+		httpkit.Error(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, sl)
+}
+
+// deleteSlot godoc
+//
+// @Summary      Delete a machine shift slot
+// @Tags         production
+// @Produce      json
+// @Security     BearerAuth
+// @Param        slotID  path      string  true  "slot id (uuid)"
+// @Success      204
+// @Failure      404     {object}  map[string]string
+// @Router       /api/v1/slots/{slotID} [delete]
+func (h *Handler) deleteSlot(c *gin.Context) {
+	slotID, err := uuid.Parse(c.Param("slotID"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid slot id"})
+		return
+	}
+	if err := h.svc.DeleteSlot(c.Request.Context(), slotID); err != nil {
+		httpkit.Error(c, err)
+		return
+	}
+	c.Status(http.StatusNoContent)
 }

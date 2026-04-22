@@ -2500,6 +2500,268 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/machines": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "production"
+                ],
+                "summary": "List all machines",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/internal_module_production.Machine"
+                            }
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "production"
+                ],
+                "summary": "Create a CNC machine",
+                "parameters": [
+                    {
+                        "description": "payload",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_module_production.CreateMachineInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/internal_module_production.Machine"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/machines/{id}": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "production"
+                ],
+                "summary": "Get machine by ID",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "machine id (uuid)",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_module_production.Machine"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "production"
+                ],
+                "summary": "Deactivate a machine",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "machine id (uuid)",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/machines/{id}/slots": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "production"
+                ],
+                "summary": "List slots for a machine in a date range",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "machine id (uuid)",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "start date (RFC3339 or YYYY-MM-DD)",
+                        "name": "from",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "end date (RFC3339 or YYYY-MM-DD)",
+                        "name": "to",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/internal_module_production.MachineShiftSlot"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "production"
+                ],
+                "summary": "Create a machine shift slot",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "machine id (uuid)",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "payload",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_module_production.CreateSlotInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/internal_module_production.MachineShiftSlot"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/materials": {
             "get": {
                 "security": [
@@ -3736,6 +3998,85 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/slots/{slotID}": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "production"
+                ],
+                "summary": "Get a machine shift slot by ID",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "slot id (uuid)",
+                        "name": "slotID",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_module_production.MachineShiftSlot"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "production"
+                ],
+                "summary": "Delete a machine shift slot",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "slot id (uuid)",
+                        "name": "slotID",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/storage-locations": {
             "get": {
                 "security": [
@@ -4177,6 +4518,78 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/work-orders/{id}/assign-slot": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "production"
+                ],
+                "summary": "Assign a machine shift slot to a work order",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "work order id (uuid)",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "payload",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_module_production.AssignSlotInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_module_production.WorkOrder"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "412": {
+                        "description": "Precondition Failed",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/work-orders/{id}/consumptions": {
             "get": {
                 "security": [
@@ -4310,6 +4723,69 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/work-orders/{id}/estimated-hours": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "production"
+                ],
+                "summary": "Set estimated hours for scheduling",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "work order id (uuid)",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "payload",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_module_production.SetEstimatedHoursInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_module_production.WorkOrder"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/work-orders/{id}/suggest-assignment": {
             "post": {
                 "security": [
@@ -4351,6 +4827,111 @@ const docTemplate = `{
                     },
                     "403": {
                         "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/work-orders/{id}/suggest-schedule": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "production"
+                ],
+                "summary": "Suggest available machine shift slots for a work order",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "work order id (uuid)",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/internal_module_production.ScheduleSuggestion"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "412": {
+                        "description": "Precondition Failed",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/work-orders/{id}/unassign-slot": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "production"
+                ],
+                "summary": "Remove machine slot assignment from a work order",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "work order id (uuid)",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_module_production.WorkOrder"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -5989,6 +6570,14 @@ const docTemplate = `{
                 }
             }
         },
+        "internal_module_production.AssignSlotInput": {
+            "type": "object",
+            "properties": {
+                "slot_id": {
+                    "type": "string"
+                }
+            }
+        },
         "internal_module_production.ConsumptionRecord": {
             "type": "object",
             "properties": {
@@ -6015,6 +6604,34 @@ const docTemplate = `{
                 }
             }
         },
+        "internal_module_production.CreateMachineInput": {
+            "type": "object",
+            "properties": {
+                "capacity_hours_per_shift": {
+                    "type": "number"
+                },
+                "code": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_module_production.CreateSlotInput": {
+            "type": "object",
+            "properties": {
+                "capacity_hours": {
+                    "type": "number"
+                },
+                "shift_date": {
+                    "type": "string"
+                },
+                "shift_name": {
+                    "type": "string"
+                }
+            }
+        },
         "internal_module_production.CreateWOInput": {
             "type": "object",
             "properties": {
@@ -6025,6 +6642,61 @@ const docTemplate = `{
                     "type": "integer"
                 },
                 "sku_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_module_production.Machine": {
+            "type": "object",
+            "properties": {
+                "capacity_hours_per_shift": {
+                    "type": "number"
+                },
+                "code": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "is_active": {
+                    "type": "boolean"
+                },
+                "name": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_module_production.MachineShiftSlot": {
+            "type": "object",
+            "properties": {
+                "assigned_hours": {
+                    "type": "number"
+                },
+                "capacity_hours": {
+                    "type": "number"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "machine_code": {
+                    "type": "string"
+                },
+                "machine_id": {
+                    "type": "string"
+                },
+                "machine_name": {
+                    "type": "string"
+                },
+                "shift_date": {
+                    "type": "string"
+                },
+                "shift_name": {
                     "type": "string"
                 }
             }
@@ -6046,6 +6718,28 @@ const docTemplate = `{
                 },
                 "work_order_id": {
                     "type": "string"
+                }
+            }
+        },
+        "internal_module_production.ScheduleSuggestion": {
+            "type": "object",
+            "properties": {
+                "available_hours": {
+                    "type": "number"
+                },
+                "rank": {
+                    "type": "integer"
+                },
+                "slot": {
+                    "$ref": "#/definitions/internal_module_production.MachineShiftSlot"
+                }
+            }
+        },
+        "internal_module_production.SetEstimatedHoursInput": {
+            "type": "object",
+            "properties": {
+                "estimated_hours": {
+                    "type": "number"
                 }
             }
         },
@@ -6072,7 +6766,13 @@ const docTemplate = `{
                 "created_at": {
                     "type": "string"
                 },
+                "estimated_hours": {
+                    "type": "number"
+                },
                 "id": {
+                    "type": "string"
+                },
+                "machine_slot_id": {
                     "type": "string"
                 },
                 "plan_id": {
