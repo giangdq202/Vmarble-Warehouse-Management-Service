@@ -1073,6 +1073,11 @@ definitions:
       status:
         $ref: '#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.WorkOrderStatus'
     type: object
+  internal_module_production.AssignSlotInput:
+    properties:
+      slot_id:
+        type: string
+    type: object
   internal_module_production.ConsumptionRecord:
     properties:
       created_at:
@@ -1090,6 +1095,24 @@ definitions:
       work_order_id:
         type: string
     type: object
+  internal_module_production.CreateMachineInput:
+    properties:
+      capacity_hours_per_shift:
+        type: number
+      code:
+        type: string
+      name:
+        type: string
+    type: object
+  internal_module_production.CreateSlotInput:
+    properties:
+      capacity_hours:
+        type: number
+      shift_date:
+        type: string
+      shift_name:
+        type: string
+    type: object
   internal_module_production.CreateWOInput:
     properties:
       plan_id:
@@ -1097,6 +1120,42 @@ definitions:
       quantity:
         type: integer
       sku_id:
+        type: string
+    type: object
+  internal_module_production.Machine:
+    properties:
+      capacity_hours_per_shift:
+        type: number
+      code:
+        type: string
+      created_at:
+        type: string
+      id:
+        type: string
+      is_active:
+        type: boolean
+      name:
+        type: string
+    type: object
+  internal_module_production.MachineShiftSlot:
+    properties:
+      assigned_hours:
+        type: number
+      capacity_hours:
+        type: number
+      created_at:
+        type: string
+      id:
+        type: string
+      machine_code:
+        type: string
+      machine_id:
+        type: string
+      machine_name:
+        type: string
+      shift_date:
+        type: string
+      shift_name:
         type: string
     type: object
   internal_module_production.RecordConsumptionInput:
@@ -1111,6 +1170,20 @@ definitions:
         type: string
       work_order_id:
         type: string
+    type: object
+  internal_module_production.ScheduleSuggestion:
+    properties:
+      available_hours:
+        type: number
+      rank:
+        type: integer
+      slot:
+        $ref: '#/definitions/internal_module_production.MachineShiftSlot'
+    type: object
+  internal_module_production.SetEstimatedHoursInput:
+    properties:
+      estimated_hours:
+        type: number
     type: object
   internal_module_production.SuggestAssignmentResult:
     properties:
@@ -1127,7 +1200,11 @@ definitions:
         type: string
       created_at:
         type: string
+      estimated_hours:
+        type: number
       id:
+        type: string
+      machine_slot_id:
         type: string
       plan_id:
         type: string
@@ -2722,6 +2799,170 @@ paths:
       summary: Transfer inventory item to a new bin location
       tags:
       - inventory
+  /api/v1/machines:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/internal_module_production.Machine'
+            type: array
+      security:
+      - BearerAuth: []
+      summary: List all machines
+      tags:
+      - production
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: payload
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_module_production.CreateMachineInput'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/internal_module_production.Machine'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Create a CNC machine
+      tags:
+      - production
+  /api/v1/machines/{id}:
+    delete:
+      parameters:
+      - description: machine id (uuid)
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "204":
+          description: No Content
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Deactivate a machine
+      tags:
+      - production
+    get:
+      parameters:
+      - description: machine id (uuid)
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_module_production.Machine'
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Get machine by ID
+      tags:
+      - production
+  /api/v1/machines/{id}/slots:
+    get:
+      parameters:
+      - description: machine id (uuid)
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: start date (RFC3339 or YYYY-MM-DD)
+        in: query
+        name: from
+        required: true
+        type: string
+      - description: end date (RFC3339 or YYYY-MM-DD)
+        in: query
+        name: to
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/internal_module_production.MachineShiftSlot'
+            type: array
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: List slots for a machine in a date range
+      tags:
+      - production
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: machine id (uuid)
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: payload
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_module_production.CreateSlotInput'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/internal_module_production.MachineShiftSlot'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Create a machine shift slot
+      tags:
+      - production
   /api/v1/materials:
     get:
       parameters:
@@ -3506,6 +3747,55 @@ paths:
       summary: Set BOM for SKU
       tags:
       - catalog
+  /api/v1/slots/{slotID}:
+    delete:
+      parameters:
+      - description: slot id (uuid)
+        in: path
+        name: slotID
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "204":
+          description: No Content
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Delete a machine shift slot
+      tags:
+      - production
+    get:
+      parameters:
+      - description: slot id (uuid)
+        in: path
+        name: slotID
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_module_production.MachineShiftSlot'
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Get a machine shift slot by ID
+      tags:
+      - production
   /api/v1/storage-locations:
     get:
       description: Returns all storage locations where is_active = true, ordered by
@@ -3760,6 +4050,52 @@ paths:
       summary: Assign a PLANNED work order to a CNC operator
       tags:
       - production
+  /api/v1/work-orders/{id}/assign-slot:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: work order id (uuid)
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: payload
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_module_production.AssignSlotInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_module_production.WorkOrder'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "412":
+          description: Precondition Failed
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Assign a machine shift slot to a work order
+      tags:
+      - production
   /api/v1/work-orders/{id}/consumptions:
     get:
       parameters:
@@ -3845,6 +4181,46 @@ paths:
       summary: Record material consumption for work order
       tags:
       - production
+  /api/v1/work-orders/{id}/estimated-hours:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: work order id (uuid)
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: payload
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_module_production.SetEstimatedHoursInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_module_production.WorkOrder'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Set estimated hours for scheduling
+      tags:
+      - production
   /api/v1/work-orders/{id}/suggest-assignment:
     post:
       parameters:
@@ -3881,6 +4257,72 @@ paths:
       security:
       - BearerAuth: []
       summary: Suggest the least-busy CNC operator for a work order
+      tags:
+      - production
+  /api/v1/work-orders/{id}/suggest-schedule:
+    get:
+      parameters:
+      - description: work order id (uuid)
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/internal_module_production.ScheduleSuggestion'
+            type: array
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "412":
+          description: Precondition Failed
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Suggest available machine shift slots for a work order
+      tags:
+      - production
+  /api/v1/work-orders/{id}/unassign-slot:
+    post:
+      parameters:
+      - description: work order id (uuid)
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_module_production.WorkOrder'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Remove machine slot assignment from a work order
       tags:
       - production
   /api/v1/work-orders/mine:

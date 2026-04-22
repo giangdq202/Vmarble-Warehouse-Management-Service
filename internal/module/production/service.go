@@ -247,3 +247,171 @@ func (svc *service) SuggestAssignment(ctx context.Context, woID uuid.UUID) (Sugg
 
 	return SuggestAssignmentResult{UserID: bestUser, InCuttingCount: bestCount}, nil
 }
+
+// --- Machine management ---
+
+func (svc *service) CreateMachine(ctx context.Context, in CreateMachineInput) (Machine, error) {
+	if in.Code == "" {
+		return Machine{}, domain.NewBizError(domain.ErrInvalidInput, "machine code is required")
+	}
+	if in.Name == "" {
+		return Machine{}, domain.NewBizError(domain.ErrInvalidInput, "machine name is required")
+	}
+	if in.CapacityHoursPerShift <= 0 {
+		return Machine{}, domain.NewBizError(domain.ErrInvalidInput, "capacity_hours_per_shift must be greater than 0")
+	}
+	m := Machine{
+		ID:                    uuid.New(),
+		Code:                  in.Code,
+		Name:                  in.Name,
+		CapacityHoursPerShift: in.CapacityHoursPerShift,
+		IsActive:              true,
+		CreatedAt:             time.Now().UTC(),
+	}
+	if err := svc.s.insertMachine(ctx, m); err != nil {
+		return Machine{}, err
+	}
+	return m, nil
+}
+
+func (svc *service) ListMachines(ctx context.Context) ([]Machine, error) {
+	return svc.s.selectMachines(ctx)
+}
+
+func (svc *service) GetMachine(ctx context.Context, machineID uuid.UUID) (Machine, error) {
+	return svc.s.selectMachineByID(ctx, machineID)
+}
+
+func (svc *service) DeactivateMachine(ctx context.Context, machineID uuid.UUID) error {
+	return svc.s.deactivateMachine(ctx, machineID)
+}
+
+// --- Shift slot management ---
+
+func (svc *service) CreateSlot(ctx context.Context, in CreateSlotInput) (MachineShiftSlot, error) {
+	if in.ShiftName == "" {
+		return MachineShiftSlot{}, domain.NewBizError(domain.ErrInvalidInput, "shift_name is required")
+	}
+	if in.ShiftDate.IsZero() {
+		return MachineShiftSlot{}, domain.NewBizError(domain.ErrInvalidInput, "shift_date is required")
+	}
+	machine, err := svc.s.selectMachineByID(ctx, in.MachineID)
+	if err != nil {
+		return MachineShiftSlot{}, err
+	}
+	if !machine.IsActive {
+		return MachineShiftSlot{}, domain.NewBizError(domain.ErrInvalidInput, "cannot create slot for inactive machine")
+	}
+
+	capacityHours := machine.CapacityHoursPerShift
+	if in.CapacityHours != nil {
+		if *in.CapacityHours <= 0 {
+			return MachineShiftSlot{}, domain.NewBizError(domain.ErrInvalidInput, "capacity_hours must be greater than 0")
+		}
+		capacityHours = *in.CapacityHours
+	}
+
+	sl := MachineShiftSlot{
+		ID:            uuid.New(),
+		MachineID:     in.MachineID,
+		MachineCode:   machine.Code,
+		MachineName:   machine.Name,
+		ShiftDate:     in.ShiftDate,
+		ShiftName:     in.ShiftName,
+		CapacityHours: capacityHours,
+		CreatedAt:     time.Now().UTC(),
+	}
+	if err := svc.s.insertSlot(ctx, sl); err != nil {
+		return MachineShiftSlot{}, err
+	}
+	return sl, nil
+}
+
+func (svc *service) ListSlots(ctx context.Context, machineID uuid.UUID, from, to time.Time) ([]MachineShiftSlot, error) {
+	if from.After(to) {
+		return nil, domain.NewBizError(domain.ErrInvalidInput, "from must be before or equal to to")
+	}
+	return svc.s.selectSlotsByMachine(ctx, machineID, from, to)
+}
+
+func (svc *service) GetSlot(ctx context.Context, slotID uuid.UUID) (MachineShiftSlot, error) {
+	return svc.s.selectSlotByID(ctx, slotID)
+}
+
+func (svc *service) DeleteSlot(ctx context.Context, slotID uuid.UUID) error {
+	return svc.s.deleteSlot(ctx, slotID)
+}
+
+// --- Work order scheduling ---
+
+func (svc *service) SetEstimatedHours(ctx context.Context, in SetEstimatedHoursInput) (WorkOrder, error) {
+	if in.EstimatedHours <= 0 {
+		return WorkOrder{}, domain.NewBizError(domain.ErrInvalidInput, "estimated_hours must be greater than 0")
+	}
+	if err := svc.s.updateEstimatedHours(ctx, in.WorkOrderID, in.EstimatedHours); err != nil {
+		return WorkOrder{}, err
+	}
+	return svc.s.selectWorkOrderByID(ctx, in.WorkOrderID)
+}
+
+func (svc *service) AssignSlot(ctx context.Context, in AssignSlotInput) (WorkOrder, error) {
+	wo, err := svc.s.selectWorkOrderByID(ctx, in.WorkOrderID)
+	if err != nil {
+		return WorkOrder{}, err
+	}
+	if wo.Status != domain.WOPlanned && wo.Status != domain.WOInCutting {
+		return WorkOrder{}, domain.NewBizError(domain.ErrPreconditionFailed, "slot can only be assigned to PLANNED or IN_CUTTING work orders")
+	}
+	if wo.EstimatedHours == nil {
+		return WorkOrder{}, domain.NewBizError(domain.ErrPreconditionFailed, "set estimated_hours before assigning a slot")
+	}
+
+	op := assignSlotOp{
+		WorkOrderID:    in.WorkOrderID,
+		SlotID:         in.SlotID,
+		EstimatedHours: *wo.EstimatedHours,
+	}
+	if err := svc.s.assignSlotAtomically(ctx, op); err != nil {
+		return WorkOrder{}, err
+	}
+	return svc.s.selectWorkOrderByID(ctx, in.WorkOrderID)
+}
+
+func (svc *service) UnassignSlot(ctx context.Context, woID uuid.UUID) (WorkOrder, error) {
+	if err := svc.s.unassignWOFromSlot(ctx, woID); err != nil {
+		return WorkOrder{}, err
+	}
+	return svc.s.selectWorkOrderByID(ctx, woID)
+}
+
+// SuggestSchedule returns the top 5 available slots that can accommodate the
+// work order's estimated hours, sorted by earliest date then largest remaining capacity.
+func (svc *service) SuggestSchedule(ctx context.Context, woID uuid.UUID) ([]ScheduleSuggestion, error) {
+	wo, err := svc.s.selectWorkOrderByID(ctx, woID)
+	if err != nil {
+		return nil, err
+	}
+	if wo.EstimatedHours == nil {
+		return nil, domain.NewBizError(domain.ErrPreconditionFailed, "set estimated_hours before requesting schedule suggestions")
+	}
+
+	slots, err := svc.s.selectFutureSlotsWithCapacity(ctx, *wo.EstimatedHours)
+	if err != nil {
+		return nil, err
+	}
+
+	const maxSuggestions = 5
+	if len(slots) > maxSuggestions {
+		slots = slots[:maxSuggestions]
+	}
+
+	out := make([]ScheduleSuggestion, len(slots))
+	for i, sl := range slots {
+		out[i] = ScheduleSuggestion{
+			Slot:           sl,
+			AvailableHours: sl.CapacityHours - sl.AssignedHours,
+			Rank:           i + 1,
+		}
+	}
+	return out, nil
+}

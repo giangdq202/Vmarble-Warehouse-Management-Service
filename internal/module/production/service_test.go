@@ -61,6 +61,29 @@ type mockStore struct {
 	// selectCNCUserIDs
 	selectCNCUserIDsResult []uuid.UUID
 	selectCNCUserIDsErr    error
+
+	// Machine methods
+	insertMachineErr       error
+	selectMachinesResult   []Machine
+	selectMachinesErr      error
+	selectMachineByIDResult Machine
+	selectMachineByIDErr   error
+	deactivateMachineErr   error
+
+	// Slot methods
+	insertSlotErr                  error
+	selectSlotByIDResult           MachineShiftSlot
+	selectSlotByIDErr              error
+	selectSlotsByMachineResult     []MachineShiftSlot
+	selectSlotsByMachineErr        error
+	selectFutureSlotsResult        []MachineShiftSlot
+	selectFutureSlotsErr           error
+	deleteSlotErr                  error
+
+	// Work order scheduling
+	updateEstimatedHoursErr    error
+	unassignWOFromSlotErr      error
+	assignSlotAtomicallyErr    error
 }
 
 func (m *mockStore) insertWorkOrder(_ context.Context, _ WorkOrder) error {
@@ -101,6 +124,42 @@ func (m *mockStore) selectInCuttingCountByUser(_ context.Context) (map[uuid.UUID
 }
 func (m *mockStore) selectCNCUserIDs(_ context.Context) ([]uuid.UUID, error) {
 	return m.selectCNCUserIDsResult, m.selectCNCUserIDsErr
+}
+func (m *mockStore) insertMachine(_ context.Context, _ Machine) error {
+	return m.insertMachineErr
+}
+func (m *mockStore) selectMachines(_ context.Context) ([]Machine, error) {
+	return m.selectMachinesResult, m.selectMachinesErr
+}
+func (m *mockStore) selectMachineByID(_ context.Context, _ uuid.UUID) (Machine, error) {
+	return m.selectMachineByIDResult, m.selectMachineByIDErr
+}
+func (m *mockStore) deactivateMachine(_ context.Context, _ uuid.UUID) error {
+	return m.deactivateMachineErr
+}
+func (m *mockStore) insertSlot(_ context.Context, _ MachineShiftSlot) error {
+	return m.insertSlotErr
+}
+func (m *mockStore) selectSlotByID(_ context.Context, _ uuid.UUID) (MachineShiftSlot, error) {
+	return m.selectSlotByIDResult, m.selectSlotByIDErr
+}
+func (m *mockStore) selectSlotsByMachine(_ context.Context, _ uuid.UUID, _, _ time.Time) ([]MachineShiftSlot, error) {
+	return m.selectSlotsByMachineResult, m.selectSlotsByMachineErr
+}
+func (m *mockStore) selectFutureSlotsWithCapacity(_ context.Context, _ float64) ([]MachineShiftSlot, error) {
+	return m.selectFutureSlotsResult, m.selectFutureSlotsErr
+}
+func (m *mockStore) deleteSlot(_ context.Context, _ uuid.UUID) error {
+	return m.deleteSlotErr
+}
+func (m *mockStore) updateEstimatedHours(_ context.Context, _ uuid.UUID, _ float64) error {
+	return m.updateEstimatedHoursErr
+}
+func (m *mockStore) unassignWOFromSlot(_ context.Context, _ uuid.UUID) error {
+	return m.unassignWOFromSlotErr
+}
+func (m *mockStore) assignSlotAtomically(_ context.Context, _ assignSlotOp) error {
+	return m.assignSlotAtomicallyErr
 }
 
 // mockPlanChecker satisfies PlanChecker.
@@ -1662,5 +1721,179 @@ func TestAssignWorkOrder_ValidationFails_NotifierNotCalled(t *testing.T) {
 	}
 	if notifier.called {
 		t.Error("NotifyAssignment must NOT be called when assignment fails")
+	}
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Machine CRUD
+// ═════════════════════════════════════════════════════════════════════════════
+
+func TestCreateMachine_InvalidName_ReturnsError(t *testing.T) {
+	st := &mockStore{}
+	svc := newSvc(st, approvedPlan(uuid.New()), skuNoMetal(uuid.New()))
+
+	_, err := svc.CreateMachine(context.Background(), CreateMachineInput{Name: ""})
+	if !errors.Is(err, domain.ErrInvalidInput) {
+		t.Errorf("expected ErrInvalidInput for empty name, got %v", err)
+	}
+}
+
+func TestCreateMachine_HappyPath(t *testing.T) {
+	st := &mockStore{}
+	svc := newSvc(st, approvedPlan(uuid.New()), skuNoMetal(uuid.New()))
+
+	m, err := svc.CreateMachine(context.Background(), CreateMachineInput{
+		Name:                  "CNC-01",
+		Code:                  "X200",
+		CapacityHoursPerShift: 8.0,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if m.Name != "CNC-01" {
+		t.Errorf("Name = %q, want CNC-01", m.Name)
+	}
+	if !m.IsActive {
+		t.Error("new machine must be active")
+	}
+}
+
+func TestDeactivateMachine_NotFound_ReturnsError(t *testing.T) {
+	st := &mockStore{deactivateMachineErr: domain.NewBizError(domain.ErrNotFound, "machine not found")}
+	svc := newSvc(st, approvedPlan(uuid.New()), skuNoMetal(uuid.New()))
+
+	err := svc.DeactivateMachine(context.Background(), uuid.New())
+	if !errors.Is(err, domain.ErrNotFound) {
+		t.Errorf("expected ErrNotFound, got %v", err)
+	}
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// SetEstimatedHours
+// ═════════════════════════════════════════════════════════════════════════════
+
+func TestSetEstimatedHours_InvalidHours_ReturnsError(t *testing.T) {
+	woID := uuid.New()
+	st := &mockStore{selectWorkOrderByIDResult: plannedWO(woID, uuid.New(), uuid.New())}
+	svc := newSvc(st, approvedPlan(uuid.New()), skuNoMetal(uuid.New()))
+
+	_, err := svc.SetEstimatedHours(context.Background(), SetEstimatedHoursInput{WorkOrderID: woID, EstimatedHours: 0})
+	if !errors.Is(err, domain.ErrInvalidInput) {
+		t.Errorf("expected ErrInvalidInput for 0 hours, got %v", err)
+	}
+}
+
+func TestSetEstimatedHours_NegativeHours_ReturnsError(t *testing.T) {
+	woID := uuid.New()
+	st := &mockStore{selectWorkOrderByIDResult: plannedWO(woID, uuid.New(), uuid.New())}
+	svc := newSvc(st, approvedPlan(uuid.New()), skuNoMetal(uuid.New()))
+
+	_, err := svc.SetEstimatedHours(context.Background(), SetEstimatedHoursInput{WorkOrderID: woID, EstimatedHours: -1})
+	if !errors.Is(err, domain.ErrInvalidInput) {
+		t.Errorf("expected ErrInvalidInput for negative hours, got %v", err)
+	}
+}
+
+func TestSetEstimatedHours_WorkOrderNotFound_ReturnsError(t *testing.T) {
+	st := &mockStore{updateEstimatedHoursErr: domain.NewBizError(domain.ErrNotFound, "not found")}
+	svc := newSvc(st, approvedPlan(uuid.New()), skuNoMetal(uuid.New()))
+
+	_, err := svc.SetEstimatedHours(context.Background(), SetEstimatedHoursInput{WorkOrderID: uuid.New(), EstimatedHours: 4})
+	if !errors.Is(err, domain.ErrNotFound) {
+		t.Errorf("expected ErrNotFound, got %v", err)
+	}
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// AssignSlot / UnassignSlot
+// ═════════════════════════════════════════════════════════════════════════════
+
+func TestAssignSlot_MissingEstimatedHours_ReturnsError(t *testing.T) {
+	woID := uuid.New()
+	wo := plannedWO(woID, uuid.New(), uuid.New())
+	st := &mockStore{selectWorkOrderByIDResult: wo}
+	svc := newSvc(st, approvedPlan(uuid.New()), skuNoMetal(uuid.New()))
+
+	_, err := svc.AssignSlot(context.Background(), AssignSlotInput{WorkOrderID: woID, SlotID: uuid.New()})
+	if !errors.Is(err, domain.ErrPreconditionFailed) {
+		t.Errorf("expected ErrPreconditionFailed when EstimatedHours not set, got %v", err)
+	}
+}
+
+func TestAssignSlot_SlotNotFound_ReturnsError(t *testing.T) {
+	woID := uuid.New()
+	wo := plannedWO(woID, uuid.New(), uuid.New())
+	hours := 4.0
+	wo.EstimatedHours = &hours
+	st := &mockStore{
+		selectWorkOrderByIDResult: wo,
+		assignSlotAtomicallyErr:   domain.NewBizError(domain.ErrNotFound, "slot not found"),
+	}
+	svc := newSvc(st, approvedPlan(uuid.New()), skuNoMetal(uuid.New()))
+
+	_, err := svc.AssignSlot(context.Background(), AssignSlotInput{WorkOrderID: woID, SlotID: uuid.New()})
+	if !errors.Is(err, domain.ErrNotFound) {
+		t.Errorf("expected ErrNotFound for missing slot, got %v", err)
+	}
+}
+
+func TestUnassignSlot_WorkOrderNotFound_ReturnsError(t *testing.T) {
+	st := &mockStore{selectWorkOrderByIDErr: domain.NewBizError(domain.ErrNotFound, "not found")}
+	svc := newSvc(st, approvedPlan(uuid.New()), skuNoMetal(uuid.New()))
+
+	_, err := svc.UnassignSlot(context.Background(), uuid.New())
+	if !errors.Is(err, domain.ErrNotFound) {
+		t.Errorf("expected ErrNotFound, got %v", err)
+	}
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// SuggestSchedule
+// ═════════════════════════════════════════════════════════════════════════════
+
+func TestSuggestSchedule_WorkOrderNotFound_ReturnsError(t *testing.T) {
+	st := &mockStore{selectWorkOrderByIDErr: domain.NewBizError(domain.ErrNotFound, "not found")}
+	svc := newSvc(st, approvedPlan(uuid.New()), skuNoMetal(uuid.New()))
+
+	_, err := svc.SuggestSchedule(context.Background(), uuid.New())
+	if !errors.Is(err, domain.ErrNotFound) {
+		t.Errorf("expected ErrNotFound, got %v", err)
+	}
+}
+
+func TestSuggestSchedule_MissingEstimatedHours_ReturnsPreconditionFailed(t *testing.T) {
+	woID := uuid.New()
+	wo := plannedWO(woID, uuid.New(), uuid.New())
+	st := &mockStore{selectWorkOrderByIDResult: wo}
+	svc := newSvc(st, approvedPlan(uuid.New()), skuNoMetal(uuid.New()))
+
+	_, err := svc.SuggestSchedule(context.Background(), woID)
+	if !errors.Is(err, domain.ErrPreconditionFailed) {
+		t.Errorf("expected ErrPreconditionFailed when EstimatedHours not set, got %v", err)
+	}
+}
+
+func TestSuggestSchedule_HappyPath_ReturnsSuggestions(t *testing.T) {
+	woID := uuid.New()
+	wo := plannedWO(woID, uuid.New(), uuid.New())
+	hours := 3.0
+	wo.EstimatedHours = &hours
+	machineID := uuid.New()
+	slots := []MachineShiftSlot{
+		{ID: uuid.New(), MachineID: machineID, CapacityHours: 8.0, AssignedHours: 2.0},
+		{ID: uuid.New(), MachineID: machineID, CapacityHours: 8.0, AssignedHours: 0.0},
+	}
+	st := &mockStore{
+		selectWorkOrderByIDResult: wo,
+		selectFutureSlotsResult:   slots,
+	}
+	svc := newSvc(st, approvedPlan(uuid.New()), skuNoMetal(uuid.New()))
+
+	suggestions, err := svc.SuggestSchedule(context.Background(), woID)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(suggestions) != 2 {
+		t.Errorf("len = %d, want 2", len(suggestions))
 	}
 }
