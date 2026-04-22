@@ -5679,6 +5679,10 @@ const docTemplate = `{
                 "remnant_id": {
                     "type": "string"
                 },
+                "shape_type": {
+                    "description": "\"rectangle\" (default) | \"irregular\"",
+                    "type": "string"
+                },
                 "sheet_id": {
                     "type": "string"
                 },
@@ -5733,6 +5737,9 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "quality_grade": {
+                    "type": "string"
+                },
+                "shape_type": {
                     "type": "string"
                 },
                 "status": {

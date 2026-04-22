@@ -879,6 +879,78 @@ func TestRecordCut_RemnantDimDoesNotFitInSource_IsInvalidInput(t *testing.T) {
 	}
 }
 
+func TestRecordCut_InvalidShapeType_IsInvalidInput(t *testing.T) {
+	sheetID := uuid.New()
+	st := &mockStore{selectSheetByIDResult: availableSheet(sheetID)}
+	svc := NewService(st, nil)
+
+	remnantDim := domain.Dimension{LengthMM: 500, WidthMM: 200}
+	_, err := svc.RecordCut(context.Background(), RecordCutInput{
+		SheetID:          ptr(sheetID),
+		WorkOrderID:      uuid.New(),
+		SKUID:            uuid.New(),
+		UsedDimension:    dim100x100,
+		RemnantDimension: &remnantDim,
+		ShapeType:        "triangle",
+	})
+	if !errors.Is(err, domain.ErrInvalidInput) {
+		t.Errorf("expected ErrInvalidInput for invalid shape_type, got %v", err)
+	}
+	if st.recordCutAtomicallyCalled {
+		t.Error("recordCutAtomically must NOT be called for invalid shape_type")
+	}
+}
+
+func TestRecordCut_ShapeTypeIrregular_PropagatedToNewRemnant(t *testing.T) {
+	sheetID := uuid.New()
+	st := &mockStore{selectSheetByIDResult: availableSheet(sheetID)}
+	svc := NewService(st, nil)
+
+	remnantDim := domain.Dimension{LengthMM: 500, WidthMM: 200}
+	_, err := svc.RecordCut(context.Background(), RecordCutInput{
+		SheetID:          ptr(sheetID),
+		WorkOrderID:      uuid.New(),
+		SKUID:            uuid.New(),
+		UsedDimension:    dim100x100,
+		RemnantDimension: &remnantDim,
+		ShapeType:        "irregular",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if st.recordCutAtomicallyOp.NewRemnant == nil {
+		t.Fatal("expected a new remnant to be inserted")
+	}
+	if st.recordCutAtomicallyOp.NewRemnant.ShapeType != "irregular" {
+		t.Errorf("expected shape_type 'irregular', got %q", st.recordCutAtomicallyOp.NewRemnant.ShapeType)
+	}
+}
+
+func TestRecordCut_ShapeTypeEmpty_DefaultsToRectangle(t *testing.T) {
+	sheetID := uuid.New()
+	st := &mockStore{selectSheetByIDResult: availableSheet(sheetID)}
+	svc := NewService(st, nil)
+
+	remnantDim := domain.Dimension{LengthMM: 500, WidthMM: 200}
+	_, err := svc.RecordCut(context.Background(), RecordCutInput{
+		SheetID:          ptr(sheetID),
+		WorkOrderID:      uuid.New(),
+		SKUID:            uuid.New(),
+		UsedDimension:    dim100x100,
+		RemnantDimension: &remnantDim,
+		// ShapeType intentionally omitted
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if st.recordCutAtomicallyOp.NewRemnant == nil {
+		t.Fatal("expected a new remnant to be inserted")
+	}
+	if st.recordCutAtomicallyOp.NewRemnant.ShapeType != "rectangle" {
+		t.Errorf("expected default shape_type 'rectangle', got %q", st.recordCutAtomicallyOp.NewRemnant.ShapeType)
+	}
+}
+
 // ── ReceiveStock ──────────────────────────────────────────────────────────────
 
 func TestReceiveStock_HappyPath(t *testing.T) {

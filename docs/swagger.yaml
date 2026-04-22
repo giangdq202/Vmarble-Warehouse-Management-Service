@@ -871,6 +871,9 @@ definitions:
         $ref: '#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.Dimension'
       remnant_id:
         type: string
+      shape_type:
+        description: '"rectangle" (default) | "irregular"'
+        type: string
       sheet_id:
         type: string
       sku_id:
@@ -907,6 +910,8 @@ definitions:
       parent_remnant_id:
         type: string
       quality_grade:
+        type: string
+      shape_type:
         type: string
       status:
         $ref: '#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.RemnantStatus'
