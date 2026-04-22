@@ -1,5 +1,7 @@
 # docker-compose.staging.yml
-# Updated with Double Binding (Localhost & VPN)
+# Double Binding: localhost + VPN interface.
+# Set STAGING_VPN_IP in .env.staging (e.g. STAGING_VPN_IP=10.8.0.1) to expose
+# services over the VPN. Defaults to 127.0.0.1 (localhost-only) when not set.
 
 services:
   postgres:
@@ -8,7 +10,7 @@ services:
     restart: unless-stopped
     ports:
       - "127.0.0.1:5432:5432"
-      - "10.8.0.1:5432:5432"
+      - "${STAGING_VPN_IP:-127.0.0.1}:5432:5432"
     logging:
       driver: "journald"
       options:
@@ -31,7 +33,7 @@ services:
     restart: unless-stopped
     ports:
       - "127.0.0.1:8080:8080"
-      - "10.8.0.1:8080:8080"
+      - "${STAGING_VPN_IP:-127.0.0.1}:8080:8080"
     logging:
       driver: "journald"
       options:

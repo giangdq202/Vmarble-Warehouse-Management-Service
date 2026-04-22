@@ -34,7 +34,7 @@ cd /opt/vwms-staging
 
 ### 3. Upload files từ repo
 
-Cấu hình `docker-compose.staging.yml` sử dụng **Double Binding**: cho phép truy cập từ chính server (`127.0.0.1`) và qua mạng riêng ảo (`10.8.0.1` - VPN).
+Cấu hình `docker-compose.staging.yml` sử dụng **Double Binding**: cho phép truy cập từ chính server (`127.0.0.1`) và qua mạng riêng ảo (VPN — địa chỉ cấu hình qua biến `STAGING_VPN_IP` trong `.env.staging`).
 
 ```bash
 # Chạy từ máy local
@@ -55,6 +55,8 @@ LOG_LEVEL=info
 POSTGRES_USER=vmarble
 POSTGRES_PASSWORD=STRONG_PASSWORD
 POSTGRES_DB=vmarble_staging
+# IP VPN của server (WireGuard/OpenVPN) — để trống nếu không cần VPN access
+STAGING_VPN_IP=<YOUR_SERVER_VPN_IP>
 EOF
 chmod 600 /opt/vwms-staging/.env.staging
 ```
@@ -70,7 +72,7 @@ Vào **GitHub repo → Settings → Secrets and variables → Actions** và thê
 | `DISCORD_WEBHOOK_URL` | Secret | Webhook URL của Discord channel |
 | `STAGING_HOST` | Secret | IP của staging server |
 | `STAGING_SSH_KEY` | Secret | Nội dung private key |
-| `STAGING_URL` | **Variable** | `http://<staging-host>:8080` hoặc `http://10.8.0.1:8080` (VPN) |
+| `STAGING_URL` | **Variable** | `http://<staging-host>:8080` hoặc URL qua VPN nếu có |
 
 ---
 
@@ -152,5 +154,6 @@ Dự án áp dụng triết lý **"Fix-forward"** và **"Append-only Schema"**:
 ```bash
 # Thử từ nội bộ server hoặc qua VPN
 curl http://$STAGING_HOST:8080/healthz
-curl http://10.8.0.1:8080/healthz
+# Nếu có cấu hình VPN (STAGING_VPN_IP trong .env.staging):
+curl http://$STAGING_VPN_IP:8080/healthz
 ```
