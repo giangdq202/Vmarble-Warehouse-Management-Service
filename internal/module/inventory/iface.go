@@ -55,8 +55,9 @@ type RecordCutInput struct {
 	// Both must be provided together. If omitted, the system defaults to the
 	// actual remnant dimension so that search queries always have a value to
 	// filter on. Must not exceed the corresponding RemnantDimension axis.
-	BoundingBoxLengthMM *int `json:"bounding_box_length_mm,omitempty"`
-	BoundingBoxWidthMM  *int `json:"bounding_box_width_mm,omitempty"`
+	BoundingBoxLengthMM *int   `json:"bounding_box_length_mm,omitempty"`
+	BoundingBoxWidthMM  *int   `json:"bounding_box_width_mm,omitempty"`
+	ShapeType           string `json:"shape_type,omitempty"` // "rectangle" (default) | "irregular"
 }
 
 type CutResult struct {
@@ -97,6 +98,7 @@ type Remnant struct {
 	ParentRemnantID     *uuid.UUID           `json:"parent_remnant_id,omitempty"`
 	Dimensions          domain.Dimension     `json:"dimensions"`
 	Status              domain.RemnantStatus `json:"status"`
+	ShapeType           string               `json:"shape_type"`
 	AllocatedToWO       *uuid.UUID           `json:"allocated_to_wo,omitempty"`
 	AllocatedAt         *time.Time           `json:"allocated_at,omitempty"`
 	SupplierCode        *string              `json:"supplier_code,omitempty"`

@@ -154,6 +154,12 @@ func (s *service) RecordCut(ctx context.Context, in RecordCutInput) (CutResult, 
 	if in.RemnantDimension != nil && !in.RemnantDimension.Valid() {
 		return CutResult{}, domain.NewBizError(domain.ErrInvalidInput, "invalid remnant dimension")
 	}
+	if in.ShapeType == "" {
+		in.ShapeType = "rectangle"
+	}
+	if in.ShapeType != "rectangle" && in.ShapeType != "irregular" {
+		return CutResult{}, domain.NewBizError(domain.ErrInvalidInput, "shape_type must be 'rectangle' or 'irregular'")
+	}
 
 	var sourceDim domain.Dimension
 	var parentBoardID uuid.UUID
@@ -282,6 +288,7 @@ func (s *service) RecordCut(ctx context.Context, in RecordCutInput) (CutResult, 
 			ParentRemnantID:     parentRemnantID,
 			Dimensions:          *in.RemnantDimension,
 			Status:              domain.RemnantAvailable,
+			ShapeType:           in.ShapeType,
 			SupplierCode:        inheritSupplierCode,
 			LotBatch:            inheritLotBatch,
 			GrainPattern:        inheritGrainPattern,

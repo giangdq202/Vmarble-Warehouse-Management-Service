@@ -339,13 +339,13 @@ func (s *pgStore) insertRemnant(ctx context.Context, r Remnant) error {
 	_, err := s.pool.Exec(ctx,
 		`INSERT INTO remnants (
 			id, parent_board_id, parent_remnant_id, length_mm, width_mm,
-			status, allocated_to_wo_id, supplier_code, lot_batch, grain_pattern,
+			status, shape_type, allocated_to_wo_id, supplier_code, lot_batch, grain_pattern,
 			quality_grade, bounding_box_length_mm, bounding_box_width_mm, bin_location_id, created_at
 		)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`,
 		r.ID, r.ParentBoardID, r.ParentRemnantID,
 		r.Dimensions.LengthMM, r.Dimensions.WidthMM,
-		string(r.Status), r.AllocatedToWO,
+		string(r.Status), r.ShapeType, r.AllocatedToWO,
 		r.SupplierCode, r.LotBatch, r.GrainPattern, r.QualityGrade,
 		r.BoundingBoxLengthMM, r.BoundingBoxWidthMM, r.BinLocationID, r.CreatedAt,
 	)
@@ -354,7 +354,7 @@ func (s *pgStore) insertRemnant(ctx context.Context, r Remnant) error {
 
 func (s *pgStore) selectAvailableRemnantsByMinDimension(ctx context.Context, minDim domain.Dimension) ([]Remnant, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT id, parent_board_id, parent_remnant_id, length_mm, width_mm, status, allocated_to_wo_id, allocated_at,
+		`SELECT id, parent_board_id, parent_remnant_id, length_mm, width_mm, status, shape_type, allocated_to_wo_id, allocated_at,
 		        supplier_code, lot_batch, grain_pattern, quality_grade,
 		        bounding_box_length_mm, bounding_box_width_mm, bin_location_id, created_at
 		 FROM remnants
@@ -379,7 +379,7 @@ func (s *pgStore) selectTopRemnantSuggestions(ctx context.Context, minDim domain
 	rows, err := s.pool.Query(ctx,
 		`SELECT
 			r.id, r.parent_board_id, r.parent_remnant_id,
-			r.length_mm, r.width_mm, r.status, r.allocated_to_wo_id, r.allocated_at,
+			r.length_mm, r.width_mm, r.status, r.shape_type, r.allocated_to_wo_id, r.allocated_at,
 			r.supplier_code, r.lot_batch, r.grain_pattern, r.quality_grade,
 			r.bounding_box_length_mm, r.bounding_box_width_mm, r.bin_location_id, r.created_at,
 			sl.id, sl.zone, sl.rack, sl.shelf, sl.label, sl.barcode, sl.is_active, sl.created_at
@@ -417,7 +417,7 @@ func (s *pgStore) selectTopRemnantSuggestions(ctx context.Context, minDim domain
 		if err := rows.Scan(
 			&r.ID, &r.ParentBoardID, &r.ParentRemnantID,
 			&r.Dimensions.LengthMM, &r.Dimensions.WidthMM,
-			&r.Status, &r.AllocatedToWO, &allocatedAt,
+			&r.Status, &r.ShapeType, &r.AllocatedToWO, &allocatedAt,
 			&supplierCode, &lotBatch, &grainPattern, &qualityGrade,
 			&bbLengthMM, &bbWidthMM, &binLocationID, &r.CreatedAt,
 			&locID, &locZone, &locRack, &locShelf, &locLabel, &locBarcode, &locIsActive, &locCreatedAt,
@@ -501,7 +501,7 @@ func (s *pgStore) selectRemnantsByFilter(ctx context.Context, f RemnantFilter, p
 	}
 
 	rows, err := s.pool.Query(ctx,
-		`SELECT id, parent_board_id, parent_remnant_id, length_mm, width_mm, status, allocated_to_wo_id, allocated_at,
+		`SELECT id, parent_board_id, parent_remnant_id, length_mm, width_mm, status, shape_type, allocated_to_wo_id, allocated_at,
 		        supplier_code, lot_batch, grain_pattern, quality_grade,
 		        bounding_box_length_mm, bounding_box_width_mm, bin_location_id, created_at
 		 FROM remnants`+baseWhere+`
@@ -523,7 +523,7 @@ func (s *pgStore) selectRemnantsByFilter(ctx context.Context, f RemnantFilter, p
 
 func (s *pgStore) selectRemnantsByBoardSheet(ctx context.Context, boardSheetID uuid.UUID) ([]Remnant, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT id, parent_board_id, parent_remnant_id, length_mm, width_mm, status, allocated_to_wo_id, allocated_at,
+		`SELECT id, parent_board_id, parent_remnant_id, length_mm, width_mm, status, shape_type, allocated_to_wo_id, allocated_at,
 		        supplier_code, lot_batch, grain_pattern, quality_grade,
 		        bounding_box_length_mm, bounding_box_width_mm, bin_location_id, created_at
 		 FROM remnants WHERE parent_board_id = $1 ORDER BY created_at`, boardSheetID)
@@ -537,7 +537,7 @@ func (s *pgStore) selectRemnantsByBoardSheet(ctx context.Context, boardSheetID u
 func (s *pgStore) selectRemnantByID(ctx context.Context, id uuid.UUID) (Remnant, error) {
 	var r Remnant
 	row := s.pool.QueryRow(ctx,
-		`SELECT id, parent_board_id, parent_remnant_id, length_mm, width_mm, status, allocated_to_wo_id, allocated_at,
+		`SELECT id, parent_board_id, parent_remnant_id, length_mm, width_mm, status, shape_type, allocated_to_wo_id, allocated_at,
 		        supplier_code, lot_batch, grain_pattern, quality_grade,
 		        bounding_box_length_mm, bounding_box_width_mm, bin_location_id, created_at
 		 FROM remnants WHERE id = $1`, id)
@@ -656,13 +656,13 @@ func (s *pgStore) recordCutAtomically(ctx context.Context, op cutWriteOp) error 
 		if _, execErr := tx.Exec(ctx,
 			`INSERT INTO remnants (
 				id, parent_board_id, parent_remnant_id, length_mm, width_mm,
-				status, allocated_to_wo_id, supplier_code, lot_batch, grain_pattern,
+				status, shape_type, allocated_to_wo_id, supplier_code, lot_batch, grain_pattern,
 				quality_grade, bounding_box_length_mm, bounding_box_width_mm, bin_location_id, created_at
 			)
-			 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
+			 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`,
 			r.ID, r.ParentBoardID, r.ParentRemnantID,
 			r.Dimensions.LengthMM, r.Dimensions.WidthMM,
-			string(r.Status), r.AllocatedToWO,
+			string(r.Status), r.ShapeType, r.AllocatedToWO,
 			r.SupplierCode, r.LotBatch, r.GrainPattern, r.QualityGrade,
 			r.BoundingBoxLengthMM, r.BoundingBoxWidthMM, r.BinLocationID, r.CreatedAt,
 		); execErr != nil {
@@ -875,7 +875,7 @@ func scanRemnantRecord(scanner remnantScanner, r *Remnant) error {
 	if err := scanner.Scan(
 		&r.ID, &r.ParentBoardID, &r.ParentRemnantID,
 		&r.Dimensions.LengthMM, &r.Dimensions.WidthMM,
-		&r.Status, &r.AllocatedToWO, &allocatedAt,
+		&r.Status, &r.ShapeType, &r.AllocatedToWO, &allocatedAt,
 		&supplierCode, &lotBatch, &grainPattern, &qualityGrade,
 		&boundingBoxLengthMM, &boundingBoxWidthMM, &binLocationID,
 		&r.CreatedAt,
