@@ -1,135 +1,233 @@
 # Vmarble Warehouse Management Service
 
-Backend cho hệ thống quản lý kho và sản xuất carcass tại xưởng gỗ.
+[![CI](https://github.com/giangdq202/Vmarble-Warehouse-Management-Service/actions/workflows/ci.yml/badge.svg)](https://github.com/giangdq202/Vmarble-Warehouse-Management-Service/actions/workflows/ci.yml)
+[![Go](https://img.shields.io/badge/Go-1.24-00ADD8?logo=go)](https://go.dev)
+[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-17-336791?logo=postgresql)](https://www.postgresql.org)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-## Mục tiêu dự án
+Backend service for a furniture workshop's warehouse and production management system.
+Tracks the full lifecycle from Purchase Orders → CNC cutting → Processing → Costing, with remnant optimisation and barcode scan checkpoints.
 
-- Quản lý luồng từ đơn hàng (PO) đến sản xuất, nhập xuất kho và tính giá thành.
-- Theo dõi remnant (vật tư dư) để tối ưu sử dụng ván ép và giảm hao hụt.
-- Chuẩn hóa dữ liệu để kế toán có thể tính costing chính xác theo từng SKU.
+---
 
-## Phạm vi hiện tại (MVP)
+## Architecture
 
-- PO và kế hoạch sản xuất.
-- Kho vật tư: plywood, vật tư phụ, metal.
-- Work Order và trạng thái sản xuất.
-- Costing cơ bản theo SKU.
-- Barcode/QR tracking.
+A **modular monolith** in Go. Nine domain modules live under `internal/module/`, each a self-contained black box with its own `iface.go / service.go / store.go / pgstore.go / handler.go`. Modules never import each other — cross-module calls go through dependency interfaces wired in `cmd/server/main.go`.
+
+```
+HTTP Clients (Web UI / Barcode Scanner)
+          │
+          ▼
+ ┌─────────────────────────────────────────────────┐
+ │  gin HTTP Router  +  JWT auth middleware         │
+ │  internal/platform/httpkit + auth               │
+ └────────────────────┬────────────────────────────┘
+                      │
+   ┌──────────────────┼──────────────────┐
+   ▼                  ▼                  ▼
+catalog            order            planning
+SKU/Material/BOM   PO/LineItems     ProductionPlan
+   │                  │                  │
+   └──────────────────┼──────────────────┘
+                      │
+   ┌──────────────────┼──────────────────┐
+   ▼                  ▼                  ▼
+inventory        production          costing
+BoardSheet        WorkOrder         CostingRecord
+Remnant         ConsumptionRecord   area-based
+CuttingRecord   state machine       allocation
+   │                  │                  │
+   └──────────────────┼──────────────────┘
+                      │
+              ┌───────┼───────┐
+              ▼               ▼
+           barcode         authn / dashboard
+           Scan events     JWT + stats
+              │
+              ▼
+       PostgreSQL 17  (pgx/pgxpool)
+```
+
+Key technical properties:
+- **Row-level locking**: critical writes use `SELECT … FOR UPDATE` inside `pgx.Tx` to prevent inventory oversell and capacity overcommit — see `recordCutAtomically`, `allocateRemnantAtomically`, `assignSlotAtomically`
+- **Domain invariants enforced in service layer**: area conservation (BR-K03), work order state machine (BR-P01-P04), costing immutability (BR-C04)
+- **No ORM**: all SQL written by hand with `pgx/v5`; prepared statements and parameterised queries throughout
+- **32 ordered migrations** managed by goose with idempotent Up/Down
+
+---
+
+## Quick Start (3 commands)
+
+```bash
+# 1. Copy env and start Postgres + app
+cp .env.example .env
+docker compose up --build
+
+# 2. Swagger UI (in a separate terminal or browser)
+open http://localhost:8080/swagger/index.html
+
+# 3. Health check
+curl http://localhost:8080/healthz
+```
+
+> Requires: Docker 24+ and Docker Compose v2.
+
+---
+
+## Domain Modules
+
+| Module | Entities | Key rules |
+|---|---|---|
+| `catalog` | SKU, Material, BOM | Foundation data; referenced by all modules |
+| `order` | PurchaseOrder, POLineItem | PO lifecycle |
+| `planning` | ProductionPlan, PlanItem | DRAFT → APPROVED → CANCELED |
+| `inventory` | InventoryLot, BoardSheet, Remnant, CuttingRecord | BR-K01–K05: stock, area conservation, remnant lineage, cycle count, bin transfer |
+| `production` | WorkOrder, ConsumptionRecord, Machine, ShiftSlot | BR-P01–P04: state machine, metal check, capacity-aware scheduling |
+| `costing` | CostingRecord | BR-C01–C04: area-based cost allocation, finalisation lock |
+| `barcode` | Barcode, ScanEvent | 3 scan checkpoints with actor identity |
+| `authn` | JWT | Role-based auth (admin, warehouse_staff, cnc_manager, accountant) |
+| `dashboard` | — | Aggregated stats endpoints |
+
+---
 
 ## Tech Stack
 
-- **Language**: Go 1.24
-- **Database**: PostgreSQL 17
-- **Router**: gin-gonic/gin v1.10
-- **DB driver**: jackc/pgx v5
-- **Migrations**: pressly/goose v3
-- **Config**: caarlos0/env v11
-
-## Cài đặt & Chạy
-
-```bash
-# 1. Khởi động Postgres
-make docker-up
-
-# (Khuyến nghị) 1.5. Tạo file env local
-cp .env.example .env
-
-# 2. Chạy migration + server
-make dev
-
-# 3. Hoặc chạy riêng
-make migrate-up
-make run
-```
-
-Server mặc định chạy tại `http://localhost:8080`. Health check: `GET /healthz`.
-
-## API Docs (Swagger)
-
-- Swagger UI: `http://localhost:8080/swagger/index.html`
-- Regenerate swagger spec:
-
-```bash
-make swagger
-```
-
-## Lệnh phát triển
-
-| Lệnh | Mô tả |
+| Concern | Choice |
 |---|---|
-| `make dev` | Docker + migrate + run |
-| `make run` | Chạy server |
-| `make build` | Build binary |
-| `make test` | Chạy tests |
-| `make lint` | Chạy linter |
-| `make swagger` | Generate swagger spec (docs/) |
-| `make migrate-up` | Chạy migration lên |
-| `make migrate-down` | Rollback migration |
-| `make migrate-create` | Tạo migration mới |
-| `make docker-up` | Bật docker compose |
-| `make docker-down` | Tắt docker compose |
+| Language | Go 1.24 |
+| Database | PostgreSQL 17 |
+| HTTP Router | gin-gonic/gin v1.10 |
+| DB Driver | jackc/pgx v5 (pgxpool, no ORM) |
+| Migrations | pressly/goose v3 |
+| Config | caarlos0/env v11 (12-factor) |
+| Logging | log/slog (stdlib, structured JSON) |
+| Auth | JWT (HMAC-SHA256) |
+| API Docs | swaggo/swag (OpenAPI 2.0) |
 
-## Cấu trúc dự án
+---
+
+## Development Commands
+
+| Command | Description |
+|---|---|
+| `make dev` | docker-up + migrate + run |
+| `make run` | `go run ./cmd/server` |
+| `make build` | `go build -o bin/warehouse-server` |
+| `make test` | `go test ./... -race -count=1` |
+| `make lint` | golangci-lint |
+| `make swagger` | regenerate `docs/` from annotations |
+| `make migrate-up` | goose up |
+| `make migrate-down` | goose down |
+| `make docker-up` | `docker compose up -d` |
+| `make docker-down` | `docker compose down` |
+
+---
+
+## Project Structure
 
 ```
-cmd/server/         Entry point, wiring tất cả modules
+cmd/server/         Entry point — wires all modules together
 internal/
-  domain/           Shared primitives (Dimension, Money, Status enums, Errors)
+  domain/           Shared value objects: Dimension, Money, status enums, BizError
   module/
     catalog/        SKU, Material, BOM
     order/          Purchase Order, Line Items
     planning/       Production Plan
-    inventory/      Kho, BoardSheet, Remnant, CuttingRecord
-    production/     WorkOrder, ConsumptionRecord
-    costing/        CostingRecord
+    inventory/      BoardSheet, Remnant, CuttingRecord, cycle count, bin transfer
+    production/     WorkOrder, ConsumptionRecord, machine capacity scheduling
+    costing/        CostingRecord (area-based allocation)
     barcode/        Barcode/QR, ScanEvent
+    authn/          JWT authentication
+    dashboard/      Stats aggregation
   platform/
-    postgres/       DB pool + migration runner
-    httpkit/        Router, JSON helpers, error mapping
-    auth/           Auth middleware (placeholder)
+    postgres/       pgxpool creation + goose migration runner
+    httpkit/        Router setup, pagination, JSON helpers, error mapping
+    auth/           Auth middleware + context helpers
     config/         Env config loader
-migrations/         SQL migration files (goose)
+migrations/         32 SQL migration files (goose Up/Down)
+docs/               Swagger spec, architecture, business logic spec (Vietnamese)
 ```
 
-Mỗi module tuân theo pattern: `iface.go` (interface + DTOs) → `service.go` (business logic) → `store.go` (repo interface) → `pgstore.go` (Postgres) → `handler.go` (HTTP).
+Each module follows the same 5-file layering pattern:
 
-## Tài liệu nghiệp vụ
+```
+iface.go    → exported Service interface + input/output DTOs (the contract)
+service.go  → business rules, validation, orchestration
+store.go    → unexported store interface (repository)
+pgstore.go  → PostgreSQL SQL implementation
+handler.go  → HTTP handlers + route registration
+```
 
-- Xem tài liệu chi tiết tại [docs/backend-business-logic-vi.md](docs/backend-business-logic-vi.md).
+---
 
-## Hướng dẫn làm việc (Claude / Agent)
+## API Documentation
 
-- Xem hướng dẫn cho AI agent và contributors tại [CLAUDE.md](CLAUDE.md).
+Swagger UI: `http://localhost:8080/swagger/index.html`
 
-## Staging & CD
+Regenerate after changing handler annotations:
+```bash
+make swagger
+```
 
-- **Staging server**: `IP`
-- **Trigger**: Mỗi khi có push (merge PR) vào nhánh `dev` → GitHub Actions tự động build & deploy
-- **Thông báo**: Discord webhook sau mỗi sự kiện build/deploy
-- **Hướng dẫn setup**: [docs/runbooks/staging-cd.md](docs/runbooks/staging-cd.md)
+---
+
+## Business Logic Spec
+
+Full Vietnamese specification: [`docs/backend-business-logic-vi.md`](docs/backend-business-logic-vi.md)
+
+Architecture deep-dive: [`docs/architecture.md`](docs/architecture.md)
+
+---
+
+## CI/CD
+
+- **CI** (Pull Request to `dev`): `go test -race`, `golangci-lint`, `go build` — see `.github/workflows/ci.yml`
+- **CD** (Push to `dev`): builds + pushes Docker image to GitHub Container Registry — see `.github/workflows/cd.yml`
+
+---
 
 ## Branch Rules
 
-Quy tắc nhánh áp dụng chung:
+| Branch | Direct push | PR required | Approvals |
+|---|---|---|---|
+| `main` | Blocked | Yes | 1 |
+| `dev` | Blocked | Yes | 0 (self-merge allowed) |
 
-### Nhánh `main` (production)
+---
 
-- Cấm push trực tiếp.
-- Bắt buộc tạo Pull Request (PR) để merge.
-- Bắt buộc có ít nhất 1 approve trước khi merge.
-- Chặn force push.
+## License
 
-### Nhánh `dev` (integration)
+[MIT](LICENSE)
 
-- Cấm push trực tiếp.
-- Bắt buộc tạo PR để merge.
-- Không yêu cầu approve (có thể tự review và merge để giữ tốc độ).
-- Chặn force push.
+---
 
-## Quy trình làm việc nhanh
+## Tài liệu tiếng Việt
 
-1. Tạo nhánh tính năng từ `dev`.
-2. Hoàn thành code và push nhánh tính năng.
-3. Tạo PR vào `dev` và merge khi đạt yêu cầu kiểm tra.
-4. Khi đủ tính năng release, tạo PR từ `dev` sang `main`.
-5. Có approve hợp lệ rồi mới merge vào `main`.
+Backend cho hệ thống quản lý kho và sản xuất carcass tại xưởng gỗ.
+
+### Mục tiêu dự án
+
+- Quản lý luồng từ đơn hàng (PO) → kế hoạch sản xuất → cắt CNC → gia công → tính giá thành.
+- Theo dõi remnant (vật tư dư) với lineage đệ quy để tối ưu sử dụng ván ép.
+- Lịch ca sản xuất và phân công máy CNC (capacity-aware scheduling).
+- Cycle count và kiểm kê kho với audit log.
+- Chuẩn hóa dữ liệu để kế toán tính costing chính xác theo diện tích sử dụng (BR-C02/C03).
+
+### Cài đặt & Chạy
+
+```bash
+# 1. Copy env
+cp .env.example .env
+
+# 2. Khởi động Postgres + app (docker compose tự migrate và start server)
+docker compose up --build
+
+# Hoặc chạy từng bước thủ công:
+make docker-up      # chỉ postgres
+make migrate-up
+make run
+```
+
+### Hướng dẫn làm việc với AI Agent
+
+Xem [`CLAUDE.md`](CLAUDE.md) — hướng dẫn workflow và skills cho Claude Code agent.
