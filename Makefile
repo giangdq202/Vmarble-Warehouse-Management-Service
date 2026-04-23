@@ -1,4 +1,4 @@
-.PHONY: dev run build test test-integration lint swagger migrate-up migrate-down migrate-create docker-build docker-up docker-down docker-rebuild
+.PHONY: dev run build test test-integration lint swagger migrate-up migrate-down migrate-create docker-build docker-up docker-down docker-rebuild seed
 
 # Load .env if it exists
 ifneq (,$(wildcard ./.env))
@@ -68,3 +68,9 @@ docker-down:
 docker-rebuild:
 	docker-compose build --no-cache
 	docker-compose up -d --force-recreate
+
+# ── Demo seed ────────────────────────────────────────────────
+
+seed:
+	@echo "Seeding demo data (server must be running at http://localhost:8080)..."
+	@bash scripts/seed.sh
