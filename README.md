@@ -63,14 +63,19 @@ Key technical properties:
 cp .env.example .env
 docker compose up --build
 
-# 2. Swagger UI (in a separate terminal or browser)
-open http://localhost:8080/swagger/index.html
+# 2. Seed demo data (in a separate terminal once the server is healthy)
+make seed
 
-# 3. Health check
-curl http://localhost:8080/healthz
+# 3. Open Swagger UI
+open http://localhost:8080/swagger/index.html
 ```
 
-> Requires: Docker 24+ and Docker Compose v2.
+> Requires: Docker 24+, Docker Compose v2, `curl`, `jq`.
+>
+> `make seed` creates two complete work order lifecycles end-to-end:
+> SKUs → BOM → PO → Approved Plan → Work Orders → Board Sheet stock →
+> CNC Cutting → Processing → Costing → Barcode scans.
+> Demo credentials are printed at the end.
 
 ---
 
@@ -115,6 +120,7 @@ curl http://localhost:8080/healthz
 | `make build` | `go build -o bin/warehouse-server` |
 | `make test` | `go test ./... -race -count=1` |
 | `make lint` | golangci-lint |
+| `make seed` | Load end-to-end demo data (requires server running) |
 | `make swagger` | regenerate `docs/` from annotations |
 | `make migrate-up` | goose up |
 | `make migrate-down` | goose down |
@@ -222,10 +228,14 @@ cp .env.example .env
 # 2. Khởi động Postgres + app (docker compose tự migrate và start server)
 docker compose up --build
 
+# 3. Load demo data
+make seed
+
 # Hoặc chạy từng bước thủ công:
 make docker-up      # chỉ postgres
 make migrate-up
 make run
+make seed           # sau khi server sẵn sàng
 ```
 
 ### Hướng dẫn làm việc với AI Agent
