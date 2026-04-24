@@ -73,15 +73,56 @@
                 "tags": [
                     "admin"
                 ],
-                "summary": "List all users",
+                "summary": "List all users (paginated \u0026 filtered)",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "page number",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "items per page",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "search by username",
+                        "name": "search",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "filter by role (comma-separated)",
+                        "name": "role",
+                        "in": "query"
+                    },
+                    {
+                        "type": "boolean",
+                        "description": "filter by active status",
+                        "name": "is_active",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "sort by: username|role|created_at",
+                        "name": "sort_by",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "sort order: asc|desc",
+                        "name": "order",
+                        "in": "query"
+                    }
+                ],
                 "responses": {
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "type": "array",
-                            "items": {
-                                "$ref": "#/definitions/internal_module_authn.UserDetail"
-                            }
+                            "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_authn_UserDetail"
                         }
                     }
                 }
@@ -5011,6 +5052,29 @@
                 "WOCompleted",
                 "WOCosted"
             ]
+        },
+        "github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_authn_UserDetail": {
+            "type": "object",
+            "properties": {
+                "current_page": {
+                    "type": "integer"
+                },
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_module_authn.UserDetail"
+                    }
+                },
+                "limit": {
+                    "type": "integer"
+                },
+                "total_items": {
+                    "type": "integer"
+                },
+                "total_pages": {
+                    "type": "integer"
+                }
+            }
         },
         "github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_catalog_Material": {
             "type": "object",

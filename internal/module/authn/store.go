@@ -25,7 +25,7 @@ type user struct {
 type store interface {
 	selectUserByUsername(ctx context.Context, username string) (user, error)
 	selectUserByID(ctx context.Context, id uuid.UUID) (user, error)
-	selectAllUsers(ctx context.Context) ([]user, error)
+	selectUsers(ctx context.Context, params ListUsersParams) ([]user, int, error)
 	insertUser(ctx context.Context, u user) (user, error)
 	updateUser(ctx context.Context, u user) (user, error)
 	updatePassword(ctx context.Context, userID uuid.UUID, hash string) error

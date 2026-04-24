@@ -2,6 +2,7 @@ package authn
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -65,14 +66,34 @@ func (h *Handler) login(c *gin.Context) {
 
 // listUsers godoc
 //
-// @Summary      List all users
+// @Summary      List all users (paginated & filtered)
 // @Tags         admin
 // @Produce      json
-// @Success      200  {array}   UserDetail
+// @Param        page       query     int     false  "page number"
+// @Param        limit      query     int     false  "items per page"
+// @Param        search     query     string  false  "search by username"
+// @Param        role       query     string  false  "filter by role (comma-separated)"
+// @Param        is_active  query     bool    false  "filter by active status"
+// @Param        sort_by    query     string  false  "sort by: username|role|created_at"
+// @Param        order      query     string  false  "sort order: asc|desc"
+// @Success      200  {object}  httpkit.PagedResult[UserDetail]
 // @Security     BearerAuth
 // @Router       /api/v1/admin/users [get]
 func (h *Handler) listUsers(c *gin.Context) {
-	users, err := h.svc.ListUsers(c.Request.Context())
+	params := ListUsersParams{
+		PageParams: httpkit.BindPageParams(c),
+	}
+
+	if role := c.Query("role"); role != "" {
+		params.Roles = strings.Split(role, ",")
+	}
+
+	if isActive := c.Query("is_active"); isActive != "" {
+		val := isActive == "true"
+		params.IsActive = &val
+	}
+
+	users, err := h.svc.ListUsers(c.Request.Context(), params)
 	if err != nil {
 		httpkit.Error(c, err)
 		return

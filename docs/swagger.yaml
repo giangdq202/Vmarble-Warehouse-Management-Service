@@ -50,6 +50,21 @@ definitions:
     - WOInProcessing
     - WOCompleted
     - WOCosted
+  github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_authn_UserDetail:
+    properties:
+      current_page:
+        type: integer
+      items:
+        items:
+          $ref: '#/definitions/internal_module_authn.UserDetail'
+        type: array
+      limit:
+        type: integer
+      total_items:
+        type: integer
+      total_pages:
+        type: integer
+    type: object
   github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_catalog_Material:
     properties:
       current_page:
@@ -1263,18 +1278,45 @@ paths:
       - auth
   /api/v1/admin/users:
     get:
+      parameters:
+      - description: page number
+        in: query
+        name: page
+        type: integer
+      - description: items per page
+        in: query
+        name: limit
+        type: integer
+      - description: search by username
+        in: query
+        name: search
+        type: string
+      - description: filter by role (comma-separated)
+        in: query
+        name: role
+        type: string
+      - description: filter by active status
+        in: query
+        name: is_active
+        type: boolean
+      - description: 'sort by: username|role|created_at'
+        in: query
+        name: sort_by
+        type: string
+      - description: 'sort order: asc|desc'
+        in: query
+        name: order
+        type: string
       produces:
       - application/json
       responses:
         "200":
           description: OK
           schema:
-            items:
-              $ref: '#/definitions/internal_module_authn.UserDetail'
-            type: array
+            $ref: '#/definitions/github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_authn_UserDetail'
       security:
       - BearerAuth: []
-      summary: List all users
+      summary: List all users (paginated & filtered)
       tags:
       - admin
     post:

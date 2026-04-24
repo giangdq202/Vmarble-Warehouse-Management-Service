@@ -9,6 +9,7 @@ import (
 
 	"github.com/vmarble/warehouse-management-service/internal/domain"
 	"github.com/vmarble/warehouse-management-service/internal/platform/auth"
+	"github.com/vmarble/warehouse-management-service/internal/platform/httpkit"
 )
 
 const tokenTTL = 24 * time.Hour
@@ -63,16 +64,16 @@ func (s *service) GetUser(ctx context.Context, userID uuid.UUID) (UserInfo, erro
 	return UserInfo{ID: u.ID, Username: u.Username, Role: u.Role}, nil
 }
 
-func (s *service) ListUsers(ctx context.Context) ([]UserDetail, error) {
-	users, err := s.st.selectAllUsers(ctx)
+func (s *service) ListUsers(ctx context.Context, params ListUsersParams) (httpkit.PagedResult[UserDetail], error) {
+	users, total, err := s.st.selectUsers(ctx, params)
 	if err != nil {
-		return nil, err
+		return httpkit.PagedResult[UserDetail]{}, err
 	}
 	out := make([]UserDetail, len(users))
 	for i, u := range users {
 		out[i] = s.mapUserToDetail(u)
 	}
-	return out, nil
+	return httpkit.NewPagedResult(out, total, params.PageParams), nil
 }
 
 func (s *service) CreateUser(ctx context.Context, creatorID uuid.UUID, in CreateUserInput) (UserDetail, error) {
@@ -140,7 +141,7 @@ func (s *service) UpdatePassword(ctx context.Context, userID uuid.UUID, in Updat
 
 func (s *service) DeactivateUser(ctx context.Context, targetID uuid.UUID, actorID uuid.UUID) error {
 	if targetID == actorID {
-		return domain.NewBizError(domain.ErrPreconditionFailed, "admin cannot deactivate themselves")
+		return domain.NewBizError(domain.ErrInvalidInput, "không thể tự vô hiệu hóa tài khoản của chính bạn")
 	}
 	return s.st.deactivateUser(ctx, targetID)
 }
