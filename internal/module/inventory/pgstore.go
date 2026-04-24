@@ -487,6 +487,12 @@ func (s *pgStore) selectRemnantsByFilter(ctx context.Context, f RemnantFilter, p
 		status = domain.RemnantAvailable
 	}
 
+	// Default sort: FIFO (oldest stock first, BR-K02). FE can override with ?order=desc.
+	orderDir := "ASC"
+	if p.Order == "desc" {
+		orderDir = "DESC"
+	}
+
 	const baseWhere = `
 	WHERE status = $1
 	  AND ($2 = 0 OR COALESCE(bounding_box_length_mm, length_mm) >= $2)
@@ -500,13 +506,16 @@ func (s *pgStore) selectRemnantsByFilter(ctx context.Context, f RemnantFilter, p
 		return nil, 0, fmt.Errorf("count remnants by filter: %w", err)
 	}
 
-	rows, err := s.pool.Query(ctx,
+	query := fmt.Sprintf(
 		`SELECT id, parent_board_id, parent_remnant_id, length_mm, width_mm, status, shape_type, allocated_to_wo_id, allocated_at,
 		        supplier_code, lot_batch, grain_pattern, quality_grade,
 		        bounding_box_length_mm, bounding_box_width_mm, bin_location_id, created_at
 		 FROM remnants`+baseWhere+`
-		 ORDER BY (COALESCE(bounding_box_length_mm, length_mm) * COALESCE(bounding_box_width_mm, width_mm)) ASC
+		 ORDER BY created_at %s, (COALESCE(bounding_box_length_mm, length_mm) * COALESCE(bounding_box_width_mm, width_mm)) ASC
 		 LIMIT $4 OFFSET $5`,
+		orderDir,
+	)
+	rows, err := s.pool.Query(ctx, query,
 		string(status), f.MinLengthMM, f.MinWidthMM, p.Limit, p.Offset(),
 	)
 	if err != nil {
