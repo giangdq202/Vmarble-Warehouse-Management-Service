@@ -25,9 +25,9 @@ func (m *mockStore) selectUserByID(ctx context.Context, id uuid.UUID) (user, err
 	return args.Get(0).(user), args.Error(1)
 }
 
-func (m *mockStore) selectAllUsers(ctx context.Context) ([]user, error) {
-	args := m.Called(ctx)
-	return args.Get(0).([]user), args.Error(1)
+func (m *mockStore) selectUsers(ctx context.Context, params ListUsersParams) ([]user, int, error) {
+	args := m.Called(ctx, params)
+	return args.Get(0).([]user), args.Int(1), args.Error(2)
 }
 
 func (m *mockStore) insertUser(ctx context.Context, u user) (user, error) {
@@ -115,6 +115,29 @@ func TestService_DeactivateUser(t *testing.T) {
 		assert.Error(t, err)
 		bizErr, ok := err.(*domain.BizError)
 		assert.True(t, ok)
-		assert.Equal(t, domain.ErrPreconditionFailed, bizErr.Sentinel)
+		assert.Equal(t, domain.ErrInvalidInput, bizErr.Sentinel)
+	})
+}
+
+func TestService_ListUsers(t *testing.T) {
+	st := new(mockStore)
+	svc := NewService(st, "secret")
+	ctx := context.Background()
+
+	t.Run("success with filters", func(t *testing.T) {
+		params := ListUsersParams{
+			Roles: []string{string(auth.RolePlanner)},
+		}
+		expectedUsers := []user{
+			{ID: uuid.New(), Username: "planner1", Role: string(auth.RolePlanner), IsActive: true},
+		}
+
+		st.On("selectUsers", ctx, params).Return(expectedUsers, 1, nil).Once()
+
+		result, err := svc.ListUsers(ctx, params)
+		assert.NoError(t, err)
+		assert.Equal(t, 1, result.TotalItems)
+		assert.Equal(t, "planner1", result.Items[0].Username)
+		st.AssertExpectations(t)
 	})
 }

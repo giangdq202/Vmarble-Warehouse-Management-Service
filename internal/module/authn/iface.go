@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/vmarble/warehouse-management-service/internal/platform/httpkit"
 )
 
 // LoginInput holds the credentials supplied by the caller.
@@ -60,13 +61,20 @@ type UpdatePasswordInput struct {
 	NewPassword string `json:"new_password" binding:"required,min=6"`
 }
 
+// ListUsersParams holds filtering and pagination for user listing.
+type ListUsersParams struct {
+	httpkit.PageParams
+	Roles    []string `json:"roles"`
+	IsActive *bool    `json:"is_active"`
+}
+
 // Service is the public contract for the authn module.
 type Service interface {
 	Login(ctx context.Context, in LoginInput) (LoginResult, error)
 	GetUser(ctx context.Context, userID uuid.UUID) (UserInfo, error)
 
 	// Admin CRUD operations
-	ListUsers(ctx context.Context) ([]UserDetail, error)
+	ListUsers(ctx context.Context, params ListUsersParams) (httpkit.PagedResult[UserDetail], error)
 	CreateUser(ctx context.Context, creatorID uuid.UUID, in CreateUserInput) (UserDetail, error)
 	GetUserDetail(ctx context.Context, userID uuid.UUID) (UserDetail, error)
 	UpdateUser(ctx context.Context, userID uuid.UUID, in UpdateUserInput) (UserDetail, error)

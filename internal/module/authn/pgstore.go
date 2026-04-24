@@ -3,6 +3,9 @@ package authn
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -51,22 +54,68 @@ func (s *pgStore) selectUserByID(ctx context.Context, id uuid.UUID) (user, error
 	return s.scanUser(row)
 }
 
-func (s *pgStore) selectAllUsers(ctx context.Context) ([]user, error) {
-	rows, err := s.pool.Query(ctx, `SELECT `+userSelectFields+` FROM users ORDER BY created_at DESC`)
+func (s *pgStore) selectUsers(ctx context.Context, params ListUsersParams) ([]user, int, error) {
+	query := `SELECT ` + userSelectFields + `, count(*) OVER() FROM users`
+	var where []string
+	var args []any
+
+	if params.Search != "" {
+		args = append(args, "%"+params.Search+"%")
+		where = append(where, "username ILIKE $"+strconv.Itoa(len(args)))
+	}
+
+	if params.IsActive != nil {
+		args = append(args, *params.IsActive)
+		where = append(where, "is_active = $"+strconv.Itoa(len(args)))
+	}
+
+	if len(params.Roles) > 0 {
+		args = append(args, params.Roles)
+		where = append(where, "role = ANY($"+strconv.Itoa(len(args))+")")
+	}
+
+	if len(where) > 0 {
+		query += " WHERE " + strings.Join(where, " AND ")
+	}
+
+	sortBy := "created_at"
+	if params.SortBy == "username" || params.SortBy == "role" || params.SortBy == "created_at" {
+		sortBy = params.SortBy
+	}
+
+	order := "DESC"
+	if params.Order == "asc" {
+		order = "ASC"
+	}
+
+	query += fmt.Sprintf(" ORDER BY %s %s", sortBy, order)
+
+	args = append(args, params.Limit)
+	query += " LIMIT $" + strconv.Itoa(len(args))
+	args = append(args, params.Offset())
+	query += " OFFSET $" + strconv.Itoa(len(args))
+
+	rows, err := s.pool.Query(ctx, query, args...)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	defer rows.Close()
 
 	var users []user
+	totalCount := 0
 	for rows.Next() {
-		u, err := s.scanUser(rows)
+		var u user
+		err := rows.Scan(
+			&u.ID, &u.Username, &u.PasswordHash, &u.Role, &u.FullName, &u.Email,
+			&u.IsActive, &u.CreatedAt, &u.UpdatedAt, &u.CreatedBy, &totalCount,
+		)
 		if err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		users = append(users, u)
 	}
-	return users, rows.Err()
+
+	return users, totalCount, rows.Err()
 }
 
 func (s *pgStore) insertUser(ctx context.Context, u user) (user, error) {
