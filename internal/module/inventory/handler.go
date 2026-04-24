@@ -35,7 +35,7 @@ func (h *Handler) Register(rg *gin.RouterGroup) {
 	inv.GET("/remnants/:id/lineage", h.getRemnantLineage)
 	inv.POST("/remnants/:id/allocate", auth.RequireRole(auth.RoleWarehouse, auth.RoleCNC, auth.RoleCNCManager), h.allocateRemnant)
 	inv.POST("/remnants/:id/waste", auth.RequireRole(auth.RoleWarehouse, auth.RoleAdmin), h.markWaste)
-	inv.POST("/remnants/:id/stock", auth.RequireRole(auth.RoleWarehouse), h.stockRemnant)
+	inv.POST("/remnants/:id/stock", auth.RequireRole(auth.RoleWarehouse, auth.RoleCNC, auth.RoleCNCManager), h.stockRemnant)
 
 	inv.POST("/transfers", auth.RequireRole(auth.RoleWarehouse, auth.RoleAdmin), h.transfer)
 	inv.GET("/audit-log/:entity_type/:entity_id", h.listAuditLog)
