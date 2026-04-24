@@ -3669,6 +3669,19 @@ func TestStockRemnant_HappyPath(t *testing.T) {
 	}
 }
 
+// TestStockRemnant_CNCRole_ServiceLayer confirms the service itself has no role
+// restriction — RBAC is enforced at the handler layer (handler.go route guard).
+// This test documents the fix for issue #180: route now allows RoleCNC and
+// RoleCNCManager in addition to RoleWarehouse.
+func TestStockRemnant_CNCRole_ServiceLayer(t *testing.T) {
+	st := &mockStore{}
+	svc := NewService(st, nil)
+	// Service must succeed regardless of caller role — role check happens in handler.
+	if err := svc.StockRemnant(context.Background(), uuid.New(), "ZONE-A-R1-S1"); err != nil {
+		t.Errorf("service should not restrict by role, got: %v", err)
+	}
+}
+
 func TestStockRemnant_LocationNotFound_ReturnsError(t *testing.T) {
 	storeErr := domain.ErrNotFound
 	st := &mockStore{selectStorageLocationByBarcodeErr: storeErr}
