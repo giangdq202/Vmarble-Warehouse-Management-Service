@@ -54,10 +54,60 @@ Recommended Codex workflow:
 
 ## Automation workflow
 
-**Trigger**: user says **"làm task tiếp theo"** / **"Start next task"** / picks an issue from GitHub Projects.
+**Primary triggers**: user says **"làm task tiếp theo"** / **"implement the next task"** / **"Start next task"** / picks an issue from GitHub Projects.
 
-1. **Fetch** — use `product-manager` and identify the highest-priority assigned open issue.
-2. **Analyze** — read the issue requirement and DoD.
+### Default GitHub project source
+- Owner: `giangdq202`
+- Project: `VWMS-project`
+- Assignee focus: `thdat-vu`
+- Preferred repo: `giangdq202/Vmarble-Warehouse-Management-Service`
+
+### Definition of “next task”
+When a trigger phrase is used, resolve the next task from GitHub Projects with these filters:
+1. issue is open
+2. issue belongs to `VWMS-project`
+3. issue is assigned to `thdat-vu`
+4. project Status is not `Done`
+
+If multiple items match, sort by:
+1. `Priority`: `P0` > `P1` > `P2`
+2. `Status`: `Ready` > `Backlog` > `In progress` > `In review`
+3. `Estimate`: smaller numeric value first when available
+4. lower issue number first as deterministic tie-breaker
+
+If no matching issue exists, say so clearly and stop rather than guessing.
+
+### Required execution flow for “next task”
+1. **Fetch** — use `product-manager` and locate the next issue from GitHub Projects.
+2. **Analyze** — read the issue body, linked context, and DoD.
 3. **Audit** — invoke `business-auditor`, map impacted BR-* rules from `docs/backend-business-logic-vi.md`, and block implementation if any rule is unclear.
 4. **Implement** — invoke `senior-workflow`, starting from Phase 1. Do not skip phases.
 5. **Architect** — invoke `integration-architect` if the task adds or changes endpoints, DTO contracts in `iface.go`, or cross-module interfaces in `deps.go`.
+6. **Update project state** — if possible, move the selected project item to `In progress` when implementation begins.
+7. **Create branch** — branch from latest `dev` using one of these patterns:
+   - `feat/issue-<number>-<slug>`
+   - `fix/issue-<number>-<slug>`
+   - `chore/issue-<number>-<slug>`
+8. **Validate** — run targeted tests first, then broader checks as needed (`gofmt`, `make test`, `make lint` when appropriate).
+9. **Commit** — use Conventional Commit style with issue context when possible.
+10. **Open PR** — create a PR against `dev` with:
+   - concise title
+   - summary of changes
+   - test evidence
+   - `Closes #<issue-number>` when the PR fully resolves the issue
+11. **Report back** — summarize branch, commit, validation, PR URL, and any remaining risks.
+
+### PR standard
+- Base branch: `dev`
+- Prefer PR title format: `[module] type: short summary`
+- PR body should include:
+  - Summary
+  - Scope / files changed
+  - Validation performed
+  - Business rules or issue link
+  - Risks / follow-ups
+
+### Safety rules
+- Do not auto-pick issues from other repositories unless the user explicitly asks.
+- Do not create a PR without at least one validation step unless the user explicitly waives validation.
+- Do not mark a project item `Done` until the implementation is merged or the user explicitly requests otherwise.
