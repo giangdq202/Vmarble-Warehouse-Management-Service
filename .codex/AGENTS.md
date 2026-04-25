@@ -61,13 +61,16 @@ Recommended Codex workflow:
 - Project: `VWMS-project`
 - Assignee focus: `thdat-vu`
 - Preferred repo: `giangdq202/Vmarble-Warehouse-Management-Service`
+- Hard repo boundary for this repository: when the user says `làm task tiếp theo` / `implement the next task` while working in this backend repo, only select issues from `giangdq202/Vmarble-Warehouse-Management-Service`. Never auto-pick issues from `giangdq202/Vmarble-Warehouse-Management-Client` unless the user explicitly asks to switch repositories.
 
 ### Definition of “next task”
 When a trigger phrase is used, resolve the next task from GitHub Projects with these filters:
 1. issue is open
 2. issue belongs to `VWMS-project`
 3. issue is assigned to `thdat-vu`
-4. project Status is not `Done`
+4. issue repository is exactly `giangdq202/Vmarble-Warehouse-Management-Service`
+5. project Status is not `Done`
+6. exclude stale project cards whose underlying GitHub issue is already closed or merged
 
 If multiple items match, sort by:
 1. `Priority`: `P0` > `P1` > `P2`

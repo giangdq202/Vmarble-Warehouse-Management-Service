@@ -12,6 +12,9 @@ Acts as a PM assistant to the Indie Hacker to automate Agile workflows on GitHub
 2. **Issue Automation**: Generate structured GitHub Issues with technical Definition of Done (DoD).
 3. **Sprint Planning**: Suggest task priority based on domain dependencies.
 
+## Backend-only next-task rule
+When the user says `làm task tiếp theo` / `implement the next task` inside this repository, only consider issues from `giangdq202/Vmarble-Warehouse-Management-Service`. Do not auto-select issues from the client/frontend repository unless the user explicitly asks to switch scope. Also exclude stale project items whose underlying GitHub issue is already closed.
+
 ## Task Breakdown Workflow
 
 ### 1. Gap Analysis

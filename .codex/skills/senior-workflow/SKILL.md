@@ -30,6 +30,7 @@ Before writing a single line of code, understand the *why*.
   - "What if the source entity is in the wrong status?"
   - "Does this touch area conservation (BR-K03) or costing (BR-C02)?"
 - Is there a Sprint issue number? (for commit/PR tagging)
+- If this task came from `làm task tiếp theo`, confirm the selected issue belongs to the backend repo `giangdq202/Vmarble-Warehouse-Management-Service` before implementation.
 
 **Output of this phase:** a short bullet list: *Why / DoD / Edge cases identified*
 
@@ -220,6 +221,7 @@ Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
 ## Summary
 - What was changed and why
 - Business rules impacted (BR-* references)
+- `Closes #<issue-number>` when this PR fully resolves the backend issue
 
 ## Technical notes
 - Migration: yes/no — describe if yes
@@ -232,3 +234,8 @@ Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
 - [ ] Coverage ≥ 80% for changed module
 - [ ] Tested manually: describe scenario
 ```
+
+### Issue-closing rule (mandatory)
+- If the work comes from a GitHub issue, the PR body must explicitly include `Closes #<issue-number>` (or `Fixes #<issue-number>`) when the PR fully resolves that backend issue.
+- If the PR is only partial work, use `Refs #<issue-number>` instead of `Closes`.
+- In the final handoff summary, explicitly say which issue number the PR closes.
