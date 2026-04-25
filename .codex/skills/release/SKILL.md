@@ -1,3 +1,8 @@
+---
+name: release
+description: Use to prepare a backend release, validate release readiness, check migrations and documentation, plan version bumps, and summarize release steps. Trigger when the user asks for release prep, tagging, versioning, go-live checklist, or release notes.
+---
+
 # Release Skill
 
 You are preparing a release for the VMARBLE Warehouse Management Service.

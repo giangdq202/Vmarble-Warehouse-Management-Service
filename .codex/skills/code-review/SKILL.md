@@ -1,3 +1,8 @@
+---
+name: code-review
+description: Use to review Go backend changes for correctness, security, modular-monolith boundaries, error handling, SQL safety, domain invariants, and missing tests. Trigger when the user asks for code review, PR review, audit findings, or correctness/security review.
+---
+
 # Code Review Skill
 
 You are reviewing Go code in the VMARBLE Warehouse Management Service (modular monolith).
