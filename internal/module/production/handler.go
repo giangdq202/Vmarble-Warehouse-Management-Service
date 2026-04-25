@@ -23,24 +23,24 @@ func (h *Handler) Register(rg *gin.RouterGroup) {
 	// /mine must be registered before /:id to avoid Gin treating "mine" as an id param.
 	rg.GET("/work-orders/mine", auth.RequireRole(auth.RoleCNC), h.listMine)
 	rg.GET("/work-orders/:id", h.get)
-	rg.POST("/work-orders/:id/advance", auth.RequireRole(auth.RoleCNC, auth.RoleCNCManager, auth.RoleWarehouse, auth.RoleForeman), h.advance)
-	rg.POST("/work-orders/:id/consumptions", auth.RequireRole(auth.RoleWarehouse, auth.RoleForeman), h.recordConsumption)
+	rg.POST("/work-orders/:id/advance", auth.RequireRole(auth.RoleCNC, auth.RoleCNCManager, auth.RoleWarehouse, auth.RoleForeman, auth.RoleAdmin), h.advance)
+	rg.POST("/work-orders/:id/consumptions", auth.RequireRole(auth.RoleWarehouse, auth.RoleForeman, auth.RoleAdmin), h.recordConsumption)
 	rg.GET("/work-orders/:id/consumptions", h.listConsumptions)
-	rg.POST("/work-orders/:id/assign", auth.RequireRole(auth.RoleCNCManager), h.assign)
-	rg.POST("/work-orders/:id/suggest-assignment", auth.RequireRole(auth.RoleCNCManager), h.suggestAssignment)
-	rg.POST("/work-orders/:id/estimated-hours", auth.RequireRole(auth.RoleCNCManager, auth.RolePlanner), h.setEstimatedHours)
-	rg.POST("/work-orders/:id/assign-slot", auth.RequireRole(auth.RoleCNCManager, auth.RolePlanner), h.assignSlot)
-	rg.POST("/work-orders/:id/unassign-slot", auth.RequireRole(auth.RoleCNCManager, auth.RolePlanner), h.unassignSlot)
-	rg.GET("/work-orders/:id/suggest-schedule", auth.RequireRole(auth.RoleCNCManager, auth.RolePlanner), h.suggestSchedule)
+	rg.POST("/work-orders/:id/assign", auth.RequireRole(auth.RoleCNCManager, auth.RoleAdmin), h.assign)
+	rg.POST("/work-orders/:id/suggest-assignment", auth.RequireRole(auth.RoleCNCManager, auth.RoleAdmin), h.suggestAssignment)
+	rg.POST("/work-orders/:id/estimated-hours", auth.RequireRole(auth.RoleCNCManager, auth.RolePlanner, auth.RoleAdmin), h.setEstimatedHours)
+	rg.POST("/work-orders/:id/assign-slot", auth.RequireRole(auth.RoleCNCManager, auth.RolePlanner, auth.RoleAdmin), h.assignSlot)
+	rg.POST("/work-orders/:id/unassign-slot", auth.RequireRole(auth.RoleCNCManager, auth.RolePlanner, auth.RoleAdmin), h.unassignSlot)
+	rg.GET("/work-orders/:id/suggest-schedule", auth.RequireRole(auth.RoleCNCManager, auth.RolePlanner, auth.RoleAdmin), h.suggestSchedule)
 
 	rg.POST("/machines", auth.RequireRole(auth.RoleAdmin, auth.RoleCNCManager), h.createMachine)
 	rg.GET("/machines", h.listMachines)
 	rg.GET("/machines/:id", h.getMachine)
 	rg.DELETE("/machines/:id", auth.RequireRole(auth.RoleAdmin), h.deactivateMachine)
-	rg.POST("/machines/:id/slots", auth.RequireRole(auth.RoleCNCManager, auth.RolePlanner), h.createSlot)
+	rg.POST("/machines/:id/slots", auth.RequireRole(auth.RoleCNCManager, auth.RolePlanner, auth.RoleAdmin), h.createSlot)
 	rg.GET("/machines/:id/slots", h.listSlots)
 	rg.GET("/slots/:slotID", h.getSlot)
-	rg.DELETE("/slots/:slotID", auth.RequireRole(auth.RoleCNCManager, auth.RolePlanner), h.deleteSlot)
+	rg.DELETE("/slots/:slotID", auth.RequireRole(auth.RoleCNCManager, auth.RolePlanner, auth.RoleAdmin), h.deleteSlot)
 }
 
 // createWorkOrder godoc
@@ -156,8 +156,10 @@ func (h *Handler) advance(c *gin.Context) {
 	if !httpkit.Bind(c, &in) {
 		return
 	}
-	// Populate CallerID from JWT so service can enforce operator identity check.
+	// Populate caller identity from JWT so service can enforce operator identity
+	// checks while still allowing admin super-user override.
 	if identity, ok := auth.FromContext(c); ok {
+		in.CallerRole = identity.Role
 		if callerID, err := uuid.Parse(identity.UserID); err == nil {
 			in.CallerID = &callerID
 		}

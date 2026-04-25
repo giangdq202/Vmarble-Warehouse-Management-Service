@@ -18,13 +18,13 @@ func NewHandler(s Service) *Handler {
 }
 
 func (h *Handler) Register(rg *gin.RouterGroup) {
-	rg.POST("/barcodes", auth.RequireRole(auth.RoleWarehouse, auth.RoleCNC, auth.RoleCNCManager), h.generate)
+	rg.POST("/barcodes", auth.RequireRole(auth.RoleWarehouse, auth.RoleCNC, auth.RoleCNCManager, auth.RoleAdmin), h.generate)
 	rg.GET("/barcodes", h.listByWorkOrder)
 	rg.GET("/barcodes/:id", h.lookup)
 	rg.GET("/barcodes/:id/qr", h.generateQR)
 	rg.GET("/barcodes/:id/label.pdf", h.generateLabelPDF)
-	rg.POST("/barcodes/batch-print", auth.RequireRole(auth.RoleWarehouse, auth.RoleCNC, auth.RoleCNCManager), h.generateBatchLabelPDF)
-	rg.POST("/barcodes/:id/scans", auth.RequireRole(auth.RoleCNC, auth.RoleWarehouse, auth.RoleForeman), h.recordScan)
+	rg.POST("/barcodes/batch-print", auth.RequireRole(auth.RoleWarehouse, auth.RoleCNC, auth.RoleCNCManager, auth.RoleAdmin), h.generateBatchLabelPDF)
+	rg.POST("/barcodes/:id/scans", auth.RequireRole(auth.RoleCNC, auth.RoleWarehouse, auth.RoleForeman, auth.RoleAdmin), h.recordScan)
 	rg.GET("/barcodes/:id/scans", h.listScans)
 }
 

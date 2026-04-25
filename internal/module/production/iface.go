@@ -6,6 +6,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/vmarble/warehouse-management-service/internal/domain"
+	"github.com/vmarble/warehouse-management-service/internal/platform/auth"
 	"github.com/vmarble/warehouse-management-service/internal/platform/httpkit"
 )
 
@@ -51,15 +52,15 @@ type CreateMachineInput struct {
 // MachineShiftSlot is a concrete scheduled block: one machine on one date in one named shift.
 // AssignedHours is computed at query time (SUM of estimated_hours of assigned WOs).
 type MachineShiftSlot struct {
-	ID             uuid.UUID `json:"id"`
-	MachineID      uuid.UUID `json:"machine_id"`
-	MachineCode    string    `json:"machine_code"`
-	MachineName    string    `json:"machine_name"`
-	ShiftDate      time.Time `json:"shift_date"`
-	ShiftName      string    `json:"shift_name"`
-	CapacityHours  float64   `json:"capacity_hours"`
-	AssignedHours  float64   `json:"assigned_hours"`
-	CreatedAt      time.Time `json:"created_at"`
+	ID            uuid.UUID `json:"id"`
+	MachineID     uuid.UUID `json:"machine_id"`
+	MachineCode   string    `json:"machine_code"`
+	MachineName   string    `json:"machine_name"`
+	ShiftDate     time.Time `json:"shift_date"`
+	ShiftName     string    `json:"shift_name"`
+	CapacityHours float64   `json:"capacity_hours"`
+	AssignedHours float64   `json:"assigned_hours"`
+	CreatedAt     time.Time `json:"created_at"`
 }
 
 // CreateSlotInput carries parameters to create a machine shift slot.
@@ -117,11 +118,13 @@ type AssignWorkOrderInput struct {
 // SheetID is optional — when provided and the target status is IN_CUTTING,
 // the sheet will be pre-assigned to the work order before the transition.
 // CallerID is optional — when provided and the target status is IN_CUTTING,
-// the caller must be the assigned CNC operator for this work order.
+// the caller must be the assigned CNC operator for this work order unless the
+// caller role is admin (super-admin override).
 type AdvanceStatusInput struct {
-	To       domain.WorkOrderStatus `json:"status"`
-	SheetID  *uuid.UUID             `json:"sheet_id,omitempty"`
-	CallerID *uuid.UUID             `json:"-"` // populated by handler from JWT claims, not from request body
+	To         domain.WorkOrderStatus `json:"status"`
+	SheetID    *uuid.UUID             `json:"sheet_id,omitempty"`
+	CallerID   *uuid.UUID             `json:"-"` // populated by handler from JWT claims, not from request body
+	CallerRole auth.Role              `json:"-"` // populated by handler from JWT claims, not from request body
 }
 
 type SuggestAssignmentResult struct {

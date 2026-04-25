@@ -262,7 +262,10 @@ Enum `ScanCheckpoint` có 3 giá trị: `CNC_COMPLETE`, `FINISHED_GOODS`, `SHIPP
 | Quản lý CNC (CNC Manager) | `cnc_manager` | Điều phối sản xuất CNC | Giao Work Order cho CNC, xem tiến độ toàn xưởng, ưu tiên lệnh cắt |
 | Vận hành CNC | `cnc` | Chạy máy, báo kết quả cắt | Xem danh sách Work Order được giao, cập nhật trạng thái cắt, scan barcode (Kiosk) |
 | Tổ trưởng SX | `foreman` | Quản lý gia công | Báo cáo tiêu hao vật tư phụ, cập nhật trạng thái Work Order (Dashboard) |
-| Admin / Sếp | `admin` | Xem toàn bộ hệ thống | Read-only trên tất cả module, xem dashboard tổng hợp |
+| Admin / Sếp | `admin` | Super-admin toàn hệ thống | Toàn quyền trên tất cả module, có quyền override mọi thao tác nghiệp vụ khi cần, xem dashboard tổng hợp |
+
+
+> Note: `admin` là super-admin. Trong trường hợp cần xử lý khẩn cấp hoặc override vận hành, admin được phép thực hiện mọi thao tác ghi dữ liệu trên tất cả module. Các role chuyên trách vẫn là luồng vận hành mặc định hằng ngày.
 
 ## 5.1 Quy tắc Giao việc (Assignment)
 
