@@ -2656,11 +2656,13 @@ func TestListStorageLocations_StoreError_Propagates(t *testing.T) {
 // depending on pgstore SQL behaviour.
 type filterCapturingMockStore struct {
 	mockStore
-	capturedFilter RemnantFilter
+	capturedFilter     RemnantFilter
+	capturedPageParams httpkit.PageParams
 }
 
-func (c *filterCapturingMockStore) selectRemnantsByFilter(_ context.Context, f RemnantFilter, _ httpkit.PageParams) ([]Remnant, int, error) {
+func (c *filterCapturingMockStore) selectRemnantsByFilter(_ context.Context, f RemnantFilter, p httpkit.PageParams) ([]Remnant, int, error) {
 	c.capturedFilter = f
+	c.capturedPageParams = p
 	return c.selectRemnantsByFilterResult, c.selectRemnantsByFilterTotal, c.selectRemnantsByFilterErr
 }
 
@@ -2755,6 +2757,50 @@ func TestListRemnants_NoFilter_ReturnsAll(t *testing.T) {
 	}
 	if st.capturedFilter.MinWidthMM != 0 {
 		t.Errorf("capturedFilter.MinWidthMM = %d, want 0 (no filter)", st.capturedFilter.MinWidthMM)
+	}
+}
+
+// ── Issue #183 — FIFO sort order ─────────────────────────────────────────────
+
+// TestListRemnants_DefaultOrder_ForwardsFIFO verifies that the service passes
+// the default PageParams (Order="") to the store unchanged — the actual
+// created_at ASC sort is enforced in pgstore (BR-K02 FIFO).
+func TestListRemnants_DefaultOrder_ForwardsFIFO(t *testing.T) {
+	st := &filterCapturingMockStore{
+		mockStore: mockStore{
+			selectRemnantsByFilterResult: []Remnant{},
+			selectRemnantsByFilterTotal:  0,
+		},
+	}
+	svc := NewService(st, nil)
+
+	_, err := svc.ListRemnants(context.Background(), RemnantFilter{}, httpkit.PageParams{Page: 1, Limit: 10})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Service must not override Order — pgstore defaults to ASC (FIFO).
+	if st.capturedPageParams.Order != "" {
+		t.Errorf("service must forward Order as-is, got %q", st.capturedPageParams.Order)
+	}
+}
+
+// TestListRemnants_OrderDescOverride verifies that a caller-supplied
+// order=desc is forwarded to the store without modification (FE override path).
+func TestListRemnants_OrderDescOverride(t *testing.T) {
+	st := &filterCapturingMockStore{
+		mockStore: mockStore{
+			selectRemnantsByFilterResult: []Remnant{},
+			selectRemnantsByFilterTotal:  0,
+		},
+	}
+	svc := NewService(st, nil)
+
+	_, err := svc.ListRemnants(context.Background(), RemnantFilter{}, httpkit.PageParams{Page: 1, Limit: 10, Order: "desc"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if st.capturedPageParams.Order != "desc" {
+		t.Errorf("expected order=desc forwarded to store, got %q", st.capturedPageParams.Order)
 	}
 }
 
