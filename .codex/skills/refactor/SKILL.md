@@ -1,3 +1,8 @@
+---
+name: refactor
+description: Use to refactor existing Go backend code while preserving modular-monolith boundaries, business invariants, handler-service-store separation, and public contracts. Trigger when the user asks to refactor, clean up, simplify, deduplicate, or restructure code.
+---
+
 # Refactor Skill
 
 You are refactoring Go code in the VMARBLE Warehouse Management Service.

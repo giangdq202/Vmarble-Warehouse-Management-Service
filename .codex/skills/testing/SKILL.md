@@ -1,3 +1,8 @@
+---
+name: testing
+description: Use to add, fix, or review tests for the Go backend, especially unit tests for service.go, integration tests for pgstore.go, and handler tests. Trigger when the user asks to write tests, improve coverage, reproduce a bug with tests, or validate behavior.
+---
+
 # Testing Skill
 
 You are writing tests for the VMARBLE Warehouse Management Service (Go 1.24).
