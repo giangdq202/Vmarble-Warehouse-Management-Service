@@ -99,7 +99,8 @@ func (svc *service) AdvanceStatus(ctx context.Context, woID uuid.UUID, in Advanc
 	// When advancing to IN_CUTTING, enforce assignment invariant (Spec 5.1):
 	// - WO must already be assigned to a CNC operator.
 	// - If a CallerID is provided (from JWT), it must match the assigned operator.
-	if in.To == domain.WOInCutting {
+	// - Admin is a super-user and may override these operator-specific guards.
+	if in.To == domain.WOInCutting && in.CallerRole != auth.RoleAdmin {
 		if wo.AssignedTo == nil {
 			return domain.NewBizError(domain.ErrPreconditionFailed, "work order must be assigned to a CNC operator before cutting starts")
 		}

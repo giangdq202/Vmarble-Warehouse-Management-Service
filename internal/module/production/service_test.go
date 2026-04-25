@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/vmarble/warehouse-management-service/internal/domain"
+	"github.com/vmarble/warehouse-management-service/internal/platform/auth"
 	"github.com/vmarble/warehouse-management-service/internal/platform/httpkit"
 )
 
@@ -63,27 +64,27 @@ type mockStore struct {
 	selectCNCUserIDsErr    error
 
 	// Machine methods
-	insertMachineErr       error
-	selectMachinesResult   []Machine
-	selectMachinesErr      error
+	insertMachineErr        error
+	selectMachinesResult    []Machine
+	selectMachinesErr       error
 	selectMachineByIDResult Machine
-	selectMachineByIDErr   error
-	deactivateMachineErr   error
+	selectMachineByIDErr    error
+	deactivateMachineErr    error
 
 	// Slot methods
-	insertSlotErr                  error
-	selectSlotByIDResult           MachineShiftSlot
-	selectSlotByIDErr              error
-	selectSlotsByMachineResult     []MachineShiftSlot
-	selectSlotsByMachineErr        error
-	selectFutureSlotsResult        []MachineShiftSlot
-	selectFutureSlotsErr           error
-	deleteSlotErr                  error
+	insertSlotErr              error
+	selectSlotByIDResult       MachineShiftSlot
+	selectSlotByIDErr          error
+	selectSlotsByMachineResult []MachineShiftSlot
+	selectSlotsByMachineErr    error
+	selectFutureSlotsResult    []MachineShiftSlot
+	selectFutureSlotsErr       error
+	deleteSlotErr              error
 
 	// Work order scheduling
-	updateEstimatedHoursErr    error
-	unassignWOFromSlotErr      error
-	assignSlotAtomicallyErr    error
+	updateEstimatedHoursErr error
+	unassignWOFromSlotErr   error
+	assignSlotAtomicallyErr error
 }
 
 func (m *mockStore) insertWorkOrder(_ context.Context, _ WorkOrder) error {
@@ -475,13 +476,13 @@ func TestGetWorkOrder_HappyPath(t *testing.T) {
 func TestGetWorkOrder_SKUFieldsPassThrough(t *testing.T) {
 	woID := uuid.New()
 	want := WorkOrder{
-		ID:      woID,
-		PlanID:  uuid.New(),
-		SKUID:   uuid.New(),
-		SKUCode: "TB-001",
-		SKUName: "Tủ bếp trên 1 cánh",
+		ID:       woID,
+		PlanID:   uuid.New(),
+		SKUID:    uuid.New(),
+		SKUCode:  "TB-001",
+		SKUName:  "Tủ bếp trên 1 cánh",
 		Quantity: 3,
-		Status:  domain.WOPlanned,
+		Status:   domain.WOPlanned,
 	}
 	st := &mockStore{selectWorkOrderByIDResult: want}
 	svc := newSvc(st, approvedPlan(uuid.New()), skuNoMetal(uuid.New()))
@@ -1047,6 +1048,43 @@ func TestAdvanceStatus_ToInCutting_CorrectCaller_Succeeds(t *testing.T) {
 	}
 }
 
+func TestAdvanceStatus_ToInCutting_AdminOverride_AllowsUnassignedWO(t *testing.T) {
+	woID := uuid.New()
+	st := &mockStore{selectWorkOrderByIDResult: woWithStatus(woID, domain.WOPlanned)}
+	svc := newSvc(st, approvedPlan(uuid.New()), skuNoMetal(uuid.New()))
+
+	err := svc.AdvanceStatus(context.Background(), woID, AdvanceStatusInput{
+		To:         domain.WOInCutting,
+		CallerRole: auth.RoleAdmin,
+	})
+	if err != nil {
+		t.Fatalf("admin override should allow unassigned WO, got: %v", err)
+	}
+	if !st.updateWorkOrderStatusCalled {
+		t.Error("updateWorkOrderStatus must be called for admin override")
+	}
+}
+
+func TestAdvanceStatus_ToInCutting_AdminOverride_AllowsWrongCaller(t *testing.T) {
+	woID := uuid.New()
+	wo, _ := assignedWO(woID, domain.WOPlanned)
+	wrongCaller := uuid.New()
+	st := &mockStore{selectWorkOrderByIDResult: wo}
+	svc := newSvc(st, approvedPlan(uuid.New()), skuNoMetal(uuid.New()))
+
+	err := svc.AdvanceStatus(context.Background(), woID, AdvanceStatusInput{
+		To:         domain.WOInCutting,
+		CallerID:   &wrongCaller,
+		CallerRole: auth.RoleAdmin,
+	})
+	if err != nil {
+		t.Fatalf("admin override should bypass caller match, got: %v", err)
+	}
+	if !st.updateWorkOrderStatusCalled {
+		t.Error("updateWorkOrderStatus must be called for admin override")
+	}
+}
+
 // AssignWorkOrder must propagate ErrPreconditionFailed when the store signals
 // the WO is already assigned (atomic guard fired 0 rows affected).
 func TestAssignWorkOrder_AlreadyAssigned_IsPreconditionFailed(t *testing.T) {
@@ -1236,7 +1274,7 @@ func TestListConsumptions_HappyPath(t *testing.T) {
 	cr1 := ConsumptionRecord{ID: uuid.New(), WorkOrderID: woID, MaterialType: "PLYWOOD", Quantity: 2, Unit: "sheet"}
 	cr2 := ConsumptionRecord{ID: uuid.New(), WorkOrderID: woID, MaterialType: "METAL", Quantity: 0.5, Unit: "kg"}
 	st := &mockStore{
-		selectWorkOrderByIDResult: woWithStatus(woID, domain.WOInProcessing),
+		selectWorkOrderByIDResult:    woWithStatus(woID, domain.WOInProcessing),
 		selectConsumptionsByWOResult: []ConsumptionRecord{cr1, cr2},
 	}
 	svc := newSvc(st, approvedPlan(uuid.New()), skuNoMetal(uuid.New()))
@@ -1264,8 +1302,8 @@ func TestListConsumptions_StoreQueryError_Propagates(t *testing.T) {
 	woID := uuid.New()
 	dbErr := errors.New("query failed")
 	st := &mockStore{
-		selectWorkOrderByIDResult:  woWithStatus(woID, domain.WOInProcessing),
-		selectConsumptionsByWOErr:  dbErr,
+		selectWorkOrderByIDResult: woWithStatus(woID, domain.WOInProcessing),
+		selectConsumptionsByWOErr: dbErr,
 	}
 	svc := newSvc(st, approvedPlan(uuid.New()), skuNoMetal(uuid.New()))
 
@@ -1278,7 +1316,7 @@ func TestListConsumptions_StoreQueryError_Propagates(t *testing.T) {
 func TestListConsumptions_EmptyList_ReturnsNil(t *testing.T) {
 	woID := uuid.New()
 	st := &mockStore{
-		selectWorkOrderByIDResult:   woWithStatus(woID, domain.WOPlanned),
+		selectWorkOrderByIDResult:    woWithStatus(woID, domain.WOPlanned),
 		selectConsumptionsByWOResult: nil,
 	}
 	svc := newSvc(st, approvedPlan(uuid.New()), skuNoMetal(uuid.New()))
@@ -1643,9 +1681,9 @@ func TestSuggestAssignment_StoreLoadError_Propagates(t *testing.T) {
 	woID := uuid.New()
 	dbErr := errors.New("db error")
 	st := &mockStore{
-		selectWorkOrderByIDResult:        plannedWO(woID, uuid.New(), uuid.New()),
-		selectCNCUserIDsResult:           []uuid.UUID{uuid.New()},
-		selectInCuttingCountByUserErr:    dbErr,
+		selectWorkOrderByIDResult:     plannedWO(woID, uuid.New(), uuid.New()),
+		selectCNCUserIDsResult:        []uuid.UUID{uuid.New()},
+		selectInCuttingCountByUserErr: dbErr,
 	}
 
 	svc := newSvc(st, approvedPlan(uuid.New()), skuNoMetal(uuid.New()))
