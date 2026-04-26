@@ -22,6 +22,7 @@ type mockStore struct {
 	// selectWorkOrders
 	selectWorkOrdersResult []WorkOrder
 	selectWorkOrdersErr    error
+	selectWorkOrdersFilter WorkOrderListFilter
 
 	// selectWorkOrderByID
 	selectWorkOrderByIDResult WorkOrder
@@ -90,7 +91,8 @@ type mockStore struct {
 func (m *mockStore) insertWorkOrder(_ context.Context, _ WorkOrder) error {
 	return m.insertWorkOrderErr
 }
-func (m *mockStore) selectWorkOrdersPaged(_ context.Context, _ httpkit.PageParams, _ string, _ *uuid.UUID) ([]WorkOrder, int, error) {
+func (m *mockStore) selectWorkOrdersPaged(_ context.Context, _ httpkit.PageParams, f WorkOrderListFilter) ([]WorkOrder, int, error) {
+	m.selectWorkOrdersFilter = f
 	return m.selectWorkOrdersResult, len(m.selectWorkOrdersResult), m.selectWorkOrdersErr
 }
 func (m *mockStore) selectWorkOrderByID(_ context.Context, _ uuid.UUID) (WorkOrder, error) {
@@ -547,7 +549,7 @@ func TestListWorkOrders_ReturnsAll(t *testing.T) {
 
 	svc := newSvc(st, approvedPlan(uuid.New()), skuNoMetal(uuid.New()))
 
-	wos, err := svc.ListWorkOrders(context.Background(), httpkit.PageParams{Page: 1, Limit: 10}, "", nil)
+	wos, err := svc.ListWorkOrders(context.Background(), httpkit.PageParams{Page: 1, Limit: 10}, WorkOrderListFilter{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -561,7 +563,7 @@ func TestListWorkOrders_StoreError_Propagates(t *testing.T) {
 	st := &mockStore{selectWorkOrdersErr: dbErr}
 	svc := newSvc(st, approvedPlan(uuid.New()), skuNoMetal(uuid.New()))
 
-	_, err := svc.ListWorkOrders(context.Background(), httpkit.PageParams{Page: 1, Limit: 10}, "", nil)
+	_, err := svc.ListWorkOrders(context.Background(), httpkit.PageParams{Page: 1, Limit: 10}, WorkOrderListFilter{})
 	if !errors.Is(err, dbErr) {
 		t.Errorf("expected store error, got %v", err)
 	}
@@ -573,7 +575,7 @@ func TestListWorkOrders_FilterByPlanID_ReturnsPaged(t *testing.T) {
 	st := &mockStore{selectWorkOrdersResult: []WorkOrder{wo1}}
 	svc := newSvc(st, approvedPlan(planID), skuNoMetal(uuid.New()))
 
-	result, err := svc.ListWorkOrders(context.Background(), httpkit.PageParams{Page: 1, Limit: 10}, "", &planID)
+	result, err := svc.ListWorkOrders(context.Background(), httpkit.PageParams{Page: 1, Limit: 10}, WorkOrderListFilter{PlanID: &planID})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -592,7 +594,7 @@ func TestListWorkOrders_FilterByPlanAndStatus_ReturnsSubset(t *testing.T) {
 	st := &mockStore{selectWorkOrdersResult: []WorkOrder{wo1}}
 	svc := newSvc(st, approvedPlan(planID), skuNoMetal(uuid.New()))
 
-	result, err := svc.ListWorkOrders(context.Background(), httpkit.PageParams{Page: 1, Limit: 10}, "PLANNED", &planID)
+	result, err := svc.ListWorkOrders(context.Background(), httpkit.PageParams{Page: 1, Limit: 10}, WorkOrderListFilter{Status: "PLANNED", PlanID: &planID})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1933,5 +1935,30 @@ func TestSuggestSchedule_HappyPath_ReturnsSuggestions(t *testing.T) {
 	}
 	if len(suggestions) != 2 {
 		t.Errorf("len = %d, want 2", len(suggestions))
+	}
+}
+
+func TestListWorkOrders_FilterByDateRange_ForwardsFilter(t *testing.T) {
+	from := time.Date(2026, 4, 26, 0, 0, 0, 0, time.UTC)
+	to := from.Add(24 * time.Hour)
+	st := &mockStore{}
+	svc := newSvc(st, approvedPlan(uuid.New()), skuNoMetal(uuid.New()))
+
+	_, err := svc.ListWorkOrders(context.Background(), httpkit.PageParams{Page: 1, Limit: 10}, WorkOrderListFilter{
+		Status:      "PLANNED",
+		CreatedFrom: &from,
+		CreatedTo:   &to,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if st.selectWorkOrdersFilter.Status != "PLANNED" {
+		t.Errorf("Status = %q, want PLANNED", st.selectWorkOrdersFilter.Status)
+	}
+	if st.selectWorkOrdersFilter.CreatedFrom == nil || !st.selectWorkOrdersFilter.CreatedFrom.Equal(from) {
+		t.Fatalf("CreatedFrom not forwarded correctly")
+	}
+	if st.selectWorkOrdersFilter.CreatedTo == nil || !st.selectWorkOrdersFilter.CreatedTo.Equal(to) {
+		t.Fatalf("CreatedTo not forwarded correctly")
 	}
 }

@@ -33,8 +33,9 @@ func (s *pgStore) insertWorkOrder(ctx context.Context, wo WorkOrder) error {
 
 // scanWorkOrder reads the 14-column projection used by all SELECT queries.
 // Columns: wo.id, wo.plan_id, wo.sku_id, s.code, s.name, s.length_mm, s.width_mm,
-//          wo.quantity, wo.status, wo.assigned_to, wo.assigned_at, wo.created_at,
-//          wo.estimated_hours, wo.machine_slot_id
+//
+//	wo.quantity, wo.status, wo.assigned_to, wo.assigned_at, wo.created_at,
+//	wo.estimated_hours, wo.machine_slot_id
 func scanWorkOrder(row interface {
 	Scan(...any) error
 }) (WorkOrder, error) {
@@ -70,7 +71,7 @@ const selectWOCols = `
 FROM work_orders wo
 LEFT JOIN skus s ON s.id = wo.sku_id`
 
-func (s *pgStore) selectWorkOrdersPaged(ctx context.Context, p httpkit.PageParams, status string, planID *uuid.UUID) ([]WorkOrder, int, error) {
+func (s *pgStore) selectWorkOrdersPaged(ctx context.Context, p httpkit.PageParams, f WorkOrderListFilter) ([]WorkOrder, int, error) {
 	sortCol := "created_at"
 	if p.SortBy == "status" {
 		sortCol = "status"
@@ -80,15 +81,14 @@ func (s *pgStore) selectWorkOrdersPaged(ctx context.Context, p httpkit.PageParam
 		orderDir = "ASC"
 	}
 
-	// planIDArg is passed as a UUID pointer; when nil the WHERE clause ($2::uuid IS NULL OR ...) is always true.
-	planIDArg := planID
-
 	var total int
 	if err := s.pool.QueryRow(ctx,
 		`SELECT COUNT(*) FROM work_orders
 		 WHERE ($1::text = '' OR status = $1)
-		   AND ($2::uuid IS NULL OR plan_id = $2)`,
-		status, planIDArg,
+		   AND ($2::uuid IS NULL OR plan_id = $2)
+		   AND ($3::timestamptz IS NULL OR created_at >= $3)
+		   AND ($4::timestamptz IS NULL OR created_at < $4)`,
+		f.Status, f.PlanID, f.CreatedFrom, f.CreatedTo,
 	).Scan(&total); err != nil {
 		return nil, 0, err
 	}
@@ -97,11 +97,13 @@ func (s *pgStore) selectWorkOrdersPaged(ctx context.Context, p httpkit.PageParam
 		`SELECT `+selectWOCols+`
 		 WHERE ($1::text = '' OR wo.status = $1)
 		   AND ($2::uuid IS NULL OR wo.plan_id = $2)
+		   AND ($3::timestamptz IS NULL OR wo.created_at >= $3)
+		   AND ($4::timestamptz IS NULL OR wo.created_at < $4)
 		 ORDER BY wo.%s %s
-		 LIMIT $3 OFFSET $4`,
+		 LIMIT $5 OFFSET $6`,
 		sortCol, orderDir,
 	)
-	rows, err := s.pool.Query(ctx, query, status, planIDArg, p.Limit, p.Offset())
+	rows, err := s.pool.Query(ctx, query, f.Status, f.PlanID, f.CreatedFrom, f.CreatedTo, p.Limit, p.Offset())
 	if err != nil {
 		return nil, 0, err
 	}
