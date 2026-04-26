@@ -16,8 +16,8 @@ type CreateLineItemInput struct {
 }
 
 type CreatePOInput struct {
-	Code             string               `json:"code"`
-	ExpectedDelivery time.Time            `json:"expected_delivery"`
+	Code             string                `json:"code"`
+	ExpectedDelivery time.Time             `json:"expected_delivery"`
 	LineItems        []CreateLineItemInput `json:"line_items"`
 }
 
@@ -35,6 +35,9 @@ type PO struct {
 	ExpectedDelivery time.Time  `json:"expected_delivery"`
 	IsActive         bool       `json:"is_active"`
 	CreatedAt        time.Time  `json:"created_at"`
+	ItemCount        int        `json:"item_count,omitempty"`
+	TotalQuantity    int        `json:"total_quantity,omitempty"`
+	TotalSKUs        int        `json:"total_skus,omitempty"`
 	LineItems        []LineItem `json:"line_items,omitempty"`
 }
 

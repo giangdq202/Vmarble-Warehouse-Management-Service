@@ -70,10 +70,15 @@ func (s *pgStore) selectPOsPaged(ctx context.Context, p httpkit.PageParams) ([]P
 	}
 
 	query := fmt.Sprintf(
-		`SELECT id, code, expected_delivery, is_active, created_at
-		 FROM purchase_orders
-		 WHERE is_active = true AND code ILIKE $1
-		 ORDER BY %s %s
+		`SELECT po.id, po.code, po.expected_delivery, po.is_active, po.created_at,
+		        COALESCE(COUNT(li.id), 0) AS item_count,
+		        COALESCE(SUM(li.quantity), 0) AS total_quantity,
+		        COALESCE(COUNT(DISTINCT li.sku_id), 0) AS total_skus
+		 FROM purchase_orders po
+		 LEFT JOIN po_line_items li ON li.po_id = po.id
+		 WHERE po.is_active = true AND po.code ILIKE $1
+		 GROUP BY po.id, po.code, po.expected_delivery, po.is_active, po.created_at
+		 ORDER BY po.%s %s
 		 LIMIT $2 OFFSET $3`,
 		sortCol, orderDir,
 	)
@@ -86,7 +91,7 @@ func (s *pgStore) selectPOsPaged(ctx context.Context, p httpkit.PageParams) ([]P
 	var pos []PO
 	for rows.Next() {
 		var po PO
-		if err := rows.Scan(&po.ID, &po.Code, &po.ExpectedDelivery, &po.IsActive, &po.CreatedAt); err != nil {
+		if err := rows.Scan(&po.ID, &po.Code, &po.ExpectedDelivery, &po.IsActive, &po.CreatedAt, &po.ItemCount, &po.TotalQuantity, &po.TotalSKUs); err != nil {
 			return nil, 0, err
 		}
 		pos = append(pos, po)

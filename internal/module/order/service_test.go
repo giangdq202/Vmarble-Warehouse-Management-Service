@@ -428,3 +428,33 @@ func TestGetLineItemsBySKU_StoreError_Propagates(t *testing.T) {
 		t.Errorf("expected error to propagate, got %v", err)
 	}
 }
+
+func TestListPOs_ReturnsSummaryMetadata(t *testing.T) {
+	stored := []PO{{
+		ID:            uuid.New(),
+		Code:          "PO-001",
+		ItemCount:     3,
+		TotalQuantity: 42,
+		TotalSKUs:     2,
+	}}
+	st := &mockStore{selectPOsResult: stored}
+
+	svc := NewService(st)
+	pos, err := svc.ListPOs(context.Background(), httpkit.PageParams{Page: 1, Limit: 10})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(pos.Items) != 1 {
+		t.Fatalf("len = %d, want 1", len(pos.Items))
+	}
+	po := pos.Items[0]
+	if po.ItemCount != 3 {
+		t.Errorf("ItemCount = %d, want 3", po.ItemCount)
+	}
+	if po.TotalQuantity != 42 {
+		t.Errorf("TotalQuantity = %d, want 42", po.TotalQuantity)
+	}
+	if po.TotalSKUs != 2 {
+		t.Errorf("TotalSKUs = %d, want 2", po.TotalSKUs)
+	}
+}
