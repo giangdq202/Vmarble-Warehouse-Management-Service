@@ -10,7 +10,7 @@ import (
 
 type store interface {
 	insertWorkOrder(ctx context.Context, wo WorkOrder) error
-	selectWorkOrdersPaged(ctx context.Context, p httpkit.PageParams, status string, planID *uuid.UUID) ([]WorkOrder, int, error)
+	selectWorkOrdersPaged(ctx context.Context, p httpkit.PageParams, f WorkOrderListFilter) ([]WorkOrder, int, error)
 	selectWorkOrderByID(ctx context.Context, id uuid.UUID) (WorkOrder, error)
 	selectWorkOrdersByPlan(ctx context.Context, planID uuid.UUID) ([]WorkOrder, error)
 	selectWorkOrdersByAssignee(ctx context.Context, userID uuid.UUID) ([]WorkOrder, error)
@@ -52,4 +52,3 @@ type assignSlotOp struct {
 	SlotID         uuid.UUID
 	EstimatedHours float64
 }
-

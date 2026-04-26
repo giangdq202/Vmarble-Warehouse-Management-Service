@@ -32,6 +32,13 @@ type WorkOrder struct {
 	CreatedAt      time.Time              `json:"created_at"`
 }
 
+type WorkOrderListFilter struct {
+	Status      string     `json:"status,omitempty"`
+	PlanID      *uuid.UUID `json:"plan_id,omitempty"`
+	CreatedFrom *time.Time `json:"created_from,omitempty"`
+	CreatedTo   *time.Time `json:"created_to,omitempty"` // exclusive upper bound
+}
+
 // Machine represents a CNC machine that can be scheduled for work orders.
 type Machine struct {
 	ID                    uuid.UUID `json:"id"`
@@ -135,7 +142,7 @@ type SuggestAssignmentResult struct {
 type Service interface {
 	CreateWorkOrder(ctx context.Context, in CreateWOInput) (WorkOrder, error)
 	GetWorkOrder(ctx context.Context, woID uuid.UUID) (WorkOrder, error)
-	ListWorkOrders(ctx context.Context, p httpkit.PageParams, status string, planID *uuid.UUID) (httpkit.PagedResult[WorkOrder], error)
+	ListWorkOrders(ctx context.Context, p httpkit.PageParams, f WorkOrderListFilter) (httpkit.PagedResult[WorkOrder], error)
 	ListWorkOrdersByPlan(ctx context.Context, planID uuid.UUID) ([]WorkOrder, error)
 	ListWorkOrdersByAssignee(ctx context.Context, userID uuid.UUID) ([]WorkOrder, error)
 	AdvanceStatus(ctx context.Context, woID uuid.UUID, in AdvanceStatusInput) error

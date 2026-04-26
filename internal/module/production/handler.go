@@ -2,6 +2,7 @@ package production
 
 import (
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -15,6 +16,74 @@ type Handler struct {
 
 func NewHandler(s Service) *Handler {
 	return &Handler{svc: s}
+}
+
+var workOrderFilterLoc = func() *time.Location {
+	loc, err := time.LoadLocation("Asia/Ho_Chi_Minh")
+	if err != nil {
+		return time.FixedZone("Asia/Ho_Chi_Minh", 7*60*60)
+	}
+	return loc
+}()
+
+func parseWorkOrderCreatedAtFilter(c *gin.Context) (from, to *time.Time, ok bool) {
+	dateStr := c.Query("date")
+	fromStr := c.Query("from")
+	toStr := c.Query("to")
+
+	if dateStr != "" && (fromStr != "" || toStr != "") {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "date cannot be combined with from/to"})
+		return nil, nil, false
+	}
+	if dateStr != "" {
+		start, end, err := parseLocalDateBounds(dateStr, workOrderFilterLoc)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid date, use YYYY-MM-DD"})
+			return nil, nil, false
+		}
+		return &start, &end, true
+	}
+	if fromStr == "" && toStr == "" {
+		return nil, nil, true
+	}
+	if fromStr == "" || toStr == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "from and to query parameters are required together"})
+		return nil, nil, false
+	}
+
+	start, err := parseDateFilterBoundary(fromStr, workOrderFilterLoc, false)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid from date, use YYYY-MM-DD or RFC3339"})
+		return nil, nil, false
+	}
+	end, err := parseDateFilterBoundary(toStr, workOrderFilterLoc, true)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid to date, use YYYY-MM-DD or RFC3339"})
+		return nil, nil, false
+	}
+	if !start.Before(end) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "from must be before to"})
+		return nil, nil, false
+	}
+	return &start, &end, true
+}
+
+func parseLocalDateBounds(s string, loc *time.Location) (time.Time, time.Time, error) {
+	day, err := time.ParseInLocation(time.DateOnly, s, loc)
+	if err != nil {
+		return time.Time{}, time.Time{}, err
+	}
+	return day, day.AddDate(0, 0, 1), nil
+}
+
+func parseDateFilterBoundary(s string, loc *time.Location, inclusiveDayEnd bool) (time.Time, error) {
+	if day, err := time.ParseInLocation(time.DateOnly, s, loc); err == nil {
+		if inclusiveDayEnd {
+			return day.AddDate(0, 0, 1), nil
+		}
+		return day, nil
+	}
+	return time.Parse(time.RFC3339, s)
 }
 
 func (h *Handler) Register(rg *gin.RouterGroup) {
@@ -77,6 +146,9 @@ func (h *Handler) create(c *gin.Context) {
 // @Param        page     query     int     false  "page number (default 1)"
 // @Param        limit    query     int     false  "items per page (default 10, max 100)"
 // @Param        status   query     string  false  "filter by status: PLANNED, IN_CUTTING, IN_PROCESSING, COMPLETED, COSTED"
+// @Param        date     query     string  false  "filter by local created date (Asia/Ho_Chi_Minh), format YYYY-MM-DD"
+// @Param        from     query     string  false  "filter created_at from (RFC3339 or YYYY-MM-DD)"
+// @Param        to       query     string  false  "filter created_at to (RFC3339 or YYYY-MM-DD); date-only means inclusive local day end"
 // @Param        sort_by  query     string  false  "sort column: created_at, status (default created_at)"
 // @Param        order    query     string  false  "sort direction: asc, desc (default desc)"
 // @Success      200      {object}  httpkit.PagedResult[WorkOrder]
@@ -96,9 +168,18 @@ func (h *Handler) list(c *gin.Context) {
 		planID = &parsed
 	}
 
+	createdFrom, createdTo, ok := parseWorkOrderCreatedAtFilter(c)
+	if !ok {
+		return
+	}
+
 	p := httpkit.BindPageParams(c)
-	status := c.Query("status")
-	result, err := h.svc.ListWorkOrders(c.Request.Context(), p, status, planID)
+	result, err := h.svc.ListWorkOrders(c.Request.Context(), p, WorkOrderListFilter{
+		Status:      c.Query("status"),
+		PlanID:      planID,
+		CreatedFrom: createdFrom,
+		CreatedTo:   createdTo,
+	})
 	if err != nil {
 		httpkit.Error(c, err)
 		return
