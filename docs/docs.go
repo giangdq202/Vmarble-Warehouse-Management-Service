@@ -3075,6 +3075,12 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
+                        "description": "search by plan code or PO code (ILIKE)",
+                        "name": "search",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
                         "description": "filter by status: DRAFT, APPROVED, CANCELED",
                         "name": "status",
                         "in": "query"
@@ -6613,6 +6619,9 @@ const docTemplate = `{
                     "items": {
                         "$ref": "#/definitions/internal_module_planning.PlanItem"
                     }
+                },
+                "po_code": {
+                    "type": "string"
                 },
                 "po_id": {
                     "type": "string"

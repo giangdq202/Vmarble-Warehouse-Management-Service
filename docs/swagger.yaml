@@ -1064,6 +1064,8 @@ definitions:
         items:
           $ref: '#/definitions/internal_module_planning.PlanItem'
         type: array
+      po_code:
+        type: string
       po_id:
         type: string
       status:
@@ -3176,6 +3178,10 @@ paths:
         in: query
         name: limit
         type: integer
+      - description: search by plan code or PO code (ILIKE)
+        in: query
+        name: search
+        type: string
       - description: 'filter by status: DRAFT, APPROVED, CANCELED'
         in: query
         name: status
