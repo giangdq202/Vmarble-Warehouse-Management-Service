@@ -12,7 +12,7 @@ type store interface {
 	// It draws from the production_plan_code_seq sequence so concurrent inserts are safe.
 	nextPlanCode(ctx context.Context, year int) (string, error)
 	insertPlan(ctx context.Context, p Plan) error
-	selectPlansPaged(ctx context.Context, p httpkit.PageParams, status string) ([]Plan, int, error)
+	selectPlansPaged(ctx context.Context, p httpkit.PageParams, status string) ([]Plan, int, error) // search uses p.Search against plan code and PO code
 	selectPlanByID(ctx context.Context, id uuid.UUID) (Plan, error)
 	updatePlanStatus(ctx context.Context, id uuid.UUID, status string) error
 	insertPlanItems(ctx context.Context, items []PlanItem) error

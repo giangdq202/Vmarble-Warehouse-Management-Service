@@ -24,6 +24,7 @@ type Plan struct {
 	ID        uuid.UUID         `json:"id"`
 	Code      string            `json:"code"`
 	POID      uuid.UUID         `json:"po_id"`
+	POCode    string            `json:"po_code,omitempty"`
 	Status    domain.PlanStatus `json:"status"`
 	Deadline  *time.Time        `json:"deadline,omitempty"`
 	Items     []PlanItem        `json:"items"`
@@ -31,10 +32,10 @@ type Plan struct {
 }
 
 type PlanItem struct {
-	ID     uuid.UUID `json:"id"`
-	PlanID uuid.UUID `json:"plan_id"`
-	SKUID  uuid.UUID `json:"sku_id"`
-	Quantity int     `json:"quantity"`
+	ID       uuid.UUID `json:"id"`
+	PlanID   uuid.UUID `json:"plan_id"`
+	SKUID    uuid.UUID `json:"sku_id"`
+	Quantity int       `json:"quantity"`
 }
 
 type Service interface {

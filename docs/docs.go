@@ -4196,6 +4196,24 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
+                        "description": "filter by local created date (Asia/Ho_Chi_Minh), format YYYY-MM-DD",
+                        "name": "date",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "filter created_at from (RFC3339 or YYYY-MM-DD)",
+                        "name": "from",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "filter created_at to (RFC3339 or YYYY-MM-DD); date-only means inclusive local day end",
+                        "name": "to",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
                         "description": "sort column: created_at, status (default created_at)",
                         "name": "sort_by",
                         "in": "query"
@@ -6541,11 +6559,20 @@ const docTemplate = `{
                 "is_active": {
                     "type": "boolean"
                 },
+                "item_count": {
+                    "type": "integer"
+                },
                 "line_items": {
                     "type": "array",
                     "items": {
                         "$ref": "#/definitions/internal_module_order.LineItem"
                     }
+                },
+                "total_quantity": {
+                    "type": "integer"
+                },
+                "total_skus": {
+                    "type": "integer"
                 }
             }
         },

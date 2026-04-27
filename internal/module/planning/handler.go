@@ -57,6 +57,7 @@ func (h *Handler) create(c *gin.Context) {
 // @Produce      json
 // @Param        page     query     int     false  "page number (default 1)"
 // @Param        limit    query     int     false  "items per page (default 10, max 100)"
+// @Param        search   query     string  false  "search by plan code or PO code (ILIKE)"
 // @Param        status   query     string  false  "filter by status: DRAFT, APPROVED, CANCELED"
 // @Param        sort_by  query     string  false  "sort column: created_at, deadline (default created_at)"
 // @Param        order    query     string  false  "sort direction: asc, desc (default desc)"

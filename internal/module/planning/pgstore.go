@@ -40,32 +40,41 @@ func (s *pgStore) insertPlan(ctx context.Context, p Plan) error {
 }
 
 func (s *pgStore) selectPlansPaged(ctx context.Context, p httpkit.PageParams, status string) ([]Plan, int, error) {
-	sortCol := "created_at"
+	sortCol := "pp.created_at"
 	if p.SortBy == "deadline" {
-		sortCol = "deadline"
+		sortCol = "pp.deadline"
 	}
 	orderDir := "DESC"
 	if p.Order == "asc" {
 		orderDir = "ASC"
 	}
+	search := "%" + p.Search + "%"
 
 	var total int
 	if err := s.pool.QueryRow(ctx,
-		`SELECT COUNT(*) FROM production_plans WHERE ($1::text = '' OR status = $1)`,
-		status,
+		`SELECT COUNT(*)
+		   FROM production_plans pp
+		   JOIN purchase_orders po ON po.id = pp.po_id
+		  WHERE ($1::text = '' OR pp.status = $1)
+		    AND ($2::text = '' OR pp.code ILIKE $2 OR po.code ILIKE $2)`,
+		status, search,
 	).Scan(&total); err != nil {
 		return nil, 0, err
 	}
 
 	query := fmt.Sprintf(
-		`SELECT id, code, po_id, status, deadline, created_at
-		 FROM production_plans
-		 WHERE ($1::text = '' OR status = $1)
-		 ORDER BY %s %s
-		 LIMIT $2 OFFSET $3`,
+		`SELECT pp.id, pp.code, pp.po_id, po.code AS po_code, pp.status, pp.deadline, pp.created_at
+		   FROM production_plans pp
+		   JOIN purchase_orders po ON po.id = pp.po_id
+		  WHERE ($1::text = '' OR pp.status = $1)
+		    AND ($2::text = '' OR pp.code ILIKE $2 OR po.code ILIKE $2)
+		  ORDER BY CASE WHEN pp.status = 'APPROVED' THEN 0 ELSE 1 END,
+		           CASE WHEN pp.deadline IS NULL THEN 1 ELSE 0 END,
+		           %s %s
+		 LIMIT $3 OFFSET $4`,
 		sortCol, orderDir,
 	)
-	rows, err := s.pool.Query(ctx, query, status, p.Limit, p.Offset())
+	rows, err := s.pool.Query(ctx, query, status, search, p.Limit, p.Offset())
 	if err != nil {
 		return nil, 0, err
 	}
@@ -74,7 +83,7 @@ func (s *pgStore) selectPlansPaged(ctx context.Context, p httpkit.PageParams, st
 	var plans []Plan
 	for rows.Next() {
 		var plan Plan
-		if err := rows.Scan(&plan.ID, &plan.Code, &plan.POID, &plan.Status, &plan.Deadline, &plan.CreatedAt); err != nil {
+		if err := rows.Scan(&plan.ID, &plan.Code, &plan.POID, &plan.POCode, &plan.Status, &plan.Deadline, &plan.CreatedAt); err != nil {
 			return nil, 0, err
 		}
 		plans = append(plans, plan)
@@ -85,9 +94,12 @@ func (s *pgStore) selectPlansPaged(ctx context.Context, p httpkit.PageParams, st
 func (s *pgStore) selectPlanByID(ctx context.Context, id uuid.UUID) (Plan, error) {
 	var p Plan
 	err := s.pool.QueryRow(ctx,
-		`SELECT id, code, po_id, status, deadline, created_at FROM production_plans WHERE id = $1`,
+		`SELECT pp.id, pp.code, pp.po_id, po.code AS po_code, pp.status, pp.deadline, pp.created_at
+		   FROM production_plans pp
+		   JOIN purchase_orders po ON po.id = pp.po_id
+		  WHERE pp.id = $1`,
 		id,
-	).Scan(&p.ID, &p.Code, &p.POID, &p.Status, &p.Deadline, &p.CreatedAt)
+	).Scan(&p.ID, &p.Code, &p.POID, &p.POCode, &p.Status, &p.Deadline, &p.CreatedAt)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return Plan{}, domain.ErrNotFound
