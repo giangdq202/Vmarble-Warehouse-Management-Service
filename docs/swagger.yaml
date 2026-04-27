@@ -1028,10 +1028,16 @@ definitions:
         type: string
       is_active:
         type: boolean
+      item_count:
+        type: integer
       line_items:
         items:
           $ref: '#/definitions/internal_module_order.LineItem'
         type: array
+      total_quantity:
+        type: integer
+      total_skus:
+        type: integer
     type: object
   internal_module_planning.CreatePlanInput:
     properties:
@@ -1058,6 +1064,8 @@ definitions:
         items:
           $ref: '#/definitions/internal_module_planning.PlanItem'
         type: array
+      po_code:
+        type: string
       po_id:
         type: string
       status:
@@ -3170,6 +3178,10 @@ paths:
         in: query
         name: limit
         type: integer
+      - description: search by plan code or PO code (ILIKE)
+        in: query
+        name: search
+        type: string
       - description: 'filter by status: DRAFT, APPROVED, CANCELED'
         in: query
         name: status
@@ -3881,6 +3893,19 @@ paths:
           COSTED'
         in: query
         name: status
+        type: string
+      - description: filter by local created date (Asia/Ho_Chi_Minh), format YYYY-MM-DD
+        in: query
+        name: date
+        type: string
+      - description: filter created_at from (RFC3339 or YYYY-MM-DD)
+        in: query
+        name: from
+        type: string
+      - description: filter created_at to (RFC3339 or YYYY-MM-DD); date-only means
+          inclusive local day end
+        in: query
+        name: to
         type: string
       - description: 'sort column: created_at, status (default created_at)'
         in: query

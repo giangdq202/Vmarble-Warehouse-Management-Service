@@ -26,6 +26,8 @@ type mockStore struct {
 	// selectPlans
 	selectPlansResult []Plan
 	selectPlansErr    error
+	selectPlansSearch string
+	selectPlansStatus string
 
 	// selectPlanByID
 	selectPlanByIDResult Plan
@@ -57,7 +59,9 @@ func (m *mockStore) insertPlan(_ context.Context, _ Plan) error {
 	return m.insertPlanErr
 }
 
-func (m *mockStore) selectPlansPaged(_ context.Context, _ httpkit.PageParams, _ string) ([]Plan, int, error) {
+func (m *mockStore) selectPlansPaged(_ context.Context, p httpkit.PageParams, status string) ([]Plan, int, error) {
+	m.selectPlansSearch = p.Search
+	m.selectPlansStatus = status
 	return m.selectPlansResult, len(m.selectPlansResult), m.selectPlansErr
 }
 
@@ -332,8 +336,8 @@ func TestGetPlan_NotFound_PropagatesError(t *testing.T) {
 func TestGetPlan_SelectItemsError_Propagates(t *testing.T) {
 	dbErr := errors.New("items query failed")
 	st := &mockStore{
-		selectPlanByIDResult:         draftPlan(uuid.New()),
-		selectPlanItemsByPlanIDErr:   dbErr,
+		selectPlanByIDResult:       draftPlan(uuid.New()),
+		selectPlanItemsByPlanIDErr: dbErr,
 	}
 
 	svc := NewService(st)
@@ -596,10 +600,10 @@ func TestStatusLifecycle_AllTransitionsTable(t *testing.T) {
 	)
 
 	tests := []struct {
-		from        domain.PlanStatus
-		act         action
-		wantErr     error // nil means success
-		wantStatus  string // only checked when wantErr == nil
+		from       domain.PlanStatus
+		act        action
+		wantErr    error  // nil means success
+		wantStatus string // only checked when wantErr == nil
 	}{
 		// Valid transitions (happy paths)
 		{domain.PlanDraft, approve, nil, string(domain.PlanApproved)},
@@ -652,5 +656,41 @@ func TestStatusLifecycle_AllTransitionsTable(t *testing.T) {
 				t.Errorf("status written = %q, want %q", st.updatePlanStatusValue, tc.wantStatus)
 			}
 		})
+	}
+}
+
+func TestListPlans_SearchAndPOCodeContract(t *testing.T) {
+	planID := uuid.New()
+	st := &mockStore{
+		selectPlansResult: []Plan{{
+			ID:        planID,
+			Code:      "KH-2026-001",
+			POID:      uuid.New(),
+			POCode:    "PO-001",
+			Status:    domain.PlanApproved,
+			CreatedAt: time.Now().UTC(),
+		}},
+		selectPlanItemsByPlanIDResult: []PlanItem{{ID: uuid.New(), PlanID: planID, SKUID: uuid.New(), Quantity: 2}},
+	}
+
+	svc := NewService(st)
+	plans, err := svc.ListPlans(context.Background(), httpkit.PageParams{Page: 1, Limit: 20, Search: "PO-001"}, "APPROVED")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if st.selectPlansSearch != "PO-001" {
+		t.Errorf("Search = %q, want PO-001", st.selectPlansSearch)
+	}
+	if st.selectPlansStatus != "APPROVED" {
+		t.Errorf("Status = %q, want APPROVED", st.selectPlansStatus)
+	}
+	if len(plans.Items) != 1 {
+		t.Fatalf("len(plans.Items) = %d, want 1", len(plans.Items))
+	}
+	if plans.Items[0].POCode != "PO-001" {
+		t.Errorf("POCode = %q, want PO-001", plans.Items[0].POCode)
+	}
+	if len(plans.Items[0].Items) == 0 {
+		t.Error("Items must still be populated")
 	}
 }

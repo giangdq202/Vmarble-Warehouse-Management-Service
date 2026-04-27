@@ -3075,6 +3075,12 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
+                        "description": "search by plan code or PO code (ILIKE)",
+                        "name": "search",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
                         "description": "filter by status: DRAFT, APPROVED, CANCELED",
                         "name": "status",
                         "in": "query"
@@ -4192,6 +4198,24 @@ const docTemplate = `{
                         "type": "string",
                         "description": "filter by status: PLANNED, IN_CUTTING, IN_PROCESSING, COMPLETED, COSTED",
                         "name": "status",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "filter by local created date (Asia/Ho_Chi_Minh), format YYYY-MM-DD",
+                        "name": "date",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "filter created_at from (RFC3339 or YYYY-MM-DD)",
+                        "name": "from",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "filter created_at to (RFC3339 or YYYY-MM-DD); date-only means inclusive local day end",
+                        "name": "to",
                         "in": "query"
                     },
                     {
@@ -6541,11 +6565,20 @@ const docTemplate = `{
                 "is_active": {
                     "type": "boolean"
                 },
+                "item_count": {
+                    "type": "integer"
+                },
                 "line_items": {
                     "type": "array",
                     "items": {
                         "$ref": "#/definitions/internal_module_order.LineItem"
                     }
+                },
+                "total_quantity": {
+                    "type": "integer"
+                },
+                "total_skus": {
+                    "type": "integer"
                 }
             }
         },
@@ -6586,6 +6619,9 @@ const docTemplate = `{
                     "items": {
                         "$ref": "#/definitions/internal_module_planning.PlanItem"
                     }
+                },
+                "po_code": {
+                    "type": "string"
                 },
                 "po_id": {
                     "type": "string"
