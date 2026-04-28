@@ -4229,6 +4229,12 @@ const docTemplate = `{
                         "description": "sort direction: asc, desc (default desc)",
                         "name": "order",
                         "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "operational preset: dashboard_default — shows PLANNED today/yesterday then active, excludes COMPLETED/COSTED; mutually exclusive with status/date/from/to filters",
+                        "name": "preset",
+                        "in": "query"
                     }
                 ],
                 "responses": {
