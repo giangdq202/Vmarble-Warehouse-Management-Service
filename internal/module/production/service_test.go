@@ -603,6 +603,35 @@ func TestListWorkOrders_FilterByPlanAndStatus_ReturnsSubset(t *testing.T) {
 	}
 }
 
+func TestListWorkOrders_DashboardPreset_FilterPassedThrough(t *testing.T) {
+	st := &mockStore{}
+	svc := newSvc(st, approvedPlan(uuid.New()), skuNoMetal(uuid.New()))
+
+	loc, _ := time.LoadLocation("Asia/Ho_Chi_Minh")
+	now := time.Now().In(loc)
+	todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc)
+	todayEnd := todayStart.AddDate(0, 0, 1)
+
+	f := WorkOrderListFilter{
+		DashboardPreset: true,
+		TodayStart:      todayStart,
+		TodayEnd:        todayEnd,
+	}
+	_, err := svc.ListWorkOrders(context.Background(), httpkit.PageParams{Page: 1, Limit: 10}, f)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !st.selectWorkOrdersFilter.DashboardPreset {
+		t.Errorf("DashboardPreset not forwarded to store")
+	}
+	if !st.selectWorkOrdersFilter.TodayStart.Equal(todayStart) {
+		t.Errorf("TodayStart not forwarded: got %v, want %v", st.selectWorkOrdersFilter.TodayStart, todayStart)
+	}
+	if !st.selectWorkOrdersFilter.TodayEnd.Equal(todayEnd) {
+		t.Errorf("TodayEnd not forwarded: got %v, want %v", st.selectWorkOrdersFilter.TodayEnd, todayEnd)
+	}
+}
+
 func TestListWorkOrdersByPlan_ReturnsFiltered(t *testing.T) {
 	planID := uuid.New()
 	wo1 := plannedWO(uuid.New(), planID, uuid.New())

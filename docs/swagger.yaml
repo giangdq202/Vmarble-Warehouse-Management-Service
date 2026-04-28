@@ -3915,6 +3915,12 @@ paths:
         in: query
         name: order
         type: string
+      - description: 'operational preset: dashboard_default — shows PLANNED today/yesterday
+          then active, excludes COMPLETED/COSTED; mutually exclusive with status/date/from/to
+          filters'
+        in: query
+        name: preset
+        type: string
       produces:
       - application/json
       responses:
