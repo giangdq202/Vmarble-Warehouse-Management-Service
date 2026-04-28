@@ -161,3 +161,61 @@ func TestListRoute_DateFilter_SupportsLocalTodayDate(t *testing.T) {
 		t.Fatalf("status = %d, want 200", w.Code)
 	}
 }
+
+func newListHandler() *gin.Engine {
+	gin.SetMode(gin.TestMode)
+	h := NewHandler(stubService{listResult: httpkit.PagedResult[WorkOrder]{Items: []WorkOrder{}, TotalItems: 0, TotalPages: 1, CurrentPage: 1, Limit: 10}})
+	r := gin.New()
+	h.Register(r.Group("/api/v1"))
+	return r
+}
+
+func TestListRoute_DashboardPreset_Returns200(t *testing.T) {
+	r := newListHandler()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/work-orders?preset=dashboard_default", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 for dashboard_default preset", w.Code)
+	}
+}
+
+func TestListRoute_DashboardPreset_UnknownPreset_Returns400(t *testing.T) {
+	r := newListHandler()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/work-orders?preset=invalid_preset", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 for unknown preset", w.Code)
+	}
+}
+
+func TestListRoute_DashboardPreset_CannotCombineWithStatus_Returns400(t *testing.T) {
+	r := newListHandler()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/work-orders?preset=dashboard_default&status=PLANNED", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 when preset combined with status", w.Code)
+	}
+}
+
+func TestListRoute_DashboardPreset_CannotCombineWithDate_Returns400(t *testing.T) {
+	r := newListHandler()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/work-orders?preset=dashboard_default&date=2026-04-26", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 when preset combined with date", w.Code)
+	}
+}
+
+func TestListRoute_DashboardPreset_CannotCombineWithFromTo_Returns400(t *testing.T) {
+	r := newListHandler()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/work-orders?preset=dashboard_default&from=2026-04-25&to=2026-04-26", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 when preset combined with from/to", w.Code)
+	}
+}

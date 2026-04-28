@@ -37,6 +37,16 @@ type WorkOrderListFilter struct {
 	PlanID      *uuid.UUID `json:"plan_id,omitempty"`
 	CreatedFrom *time.Time `json:"created_from,omitempty"`
 	CreatedTo   *time.Time `json:"created_to,omitempty"` // exclusive upper bound
+
+	// DashboardPreset enables the operational queue: PLANNED-today first, then
+	// PLANNED-yesterday, then active (IN_CUTTING/IN_PROCESSING), then older PLANNED.
+	// COMPLETED and COSTED records are excluded. Mutually exclusive with Status /
+	// CreatedFrom / CreatedTo filters.
+	// TodayStart and TodayEnd must span [start-of-today, start-of-tomorrow) in
+	// the caller's chosen timezone (Asia/Ho_Chi_Minh for production handlers).
+	DashboardPreset bool
+	TodayStart      time.Time
+	TodayEnd        time.Time
 }
 
 // Machine represents a CNC machine that can be scheduled for work orders.

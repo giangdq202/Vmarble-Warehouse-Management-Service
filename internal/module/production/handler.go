@@ -151,6 +151,7 @@ func (h *Handler) create(c *gin.Context) {
 // @Param        to       query     string  false  "filter created_at to (RFC3339 or YYYY-MM-DD); date-only means inclusive local day end"
 // @Param        sort_by  query     string  false  "sort column: created_at, status (default created_at)"
 // @Param        order    query     string  false  "sort direction: asc, desc (default desc)"
+// @Param        preset   query     string  false  "operational preset: dashboard_default — shows PLANNED today/yesterday then active, excludes COMPLETED/COSTED; mutually exclusive with status/date/from/to filters"
 // @Success      200      {object}  httpkit.PagedResult[WorkOrder]
 // @Failure      400      {object}  map[string]string
 // @Failure      500      {object}  map[string]string
@@ -166,6 +167,35 @@ func (h *Handler) list(c *gin.Context) {
 			return
 		}
 		planID = &parsed
+	}
+
+	preset := c.Query("preset")
+	if preset != "" && preset != "dashboard_default" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "unknown preset, supported values: dashboard_default"})
+		return
+	}
+
+	if preset == "dashboard_default" {
+		if c.Query("status") != "" || c.Query("date") != "" || c.Query("from") != "" || c.Query("to") != "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "preset=dashboard_default cannot be combined with status, date, from, or to filters"})
+			return
+		}
+		now := time.Now().In(workOrderFilterLoc)
+		todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, workOrderFilterLoc)
+		todayEnd := todayStart.AddDate(0, 0, 1)
+		p := httpkit.BindPageParams(c)
+		result, err := h.svc.ListWorkOrders(c.Request.Context(), p, WorkOrderListFilter{
+			PlanID:          planID,
+			DashboardPreset: true,
+			TodayStart:      todayStart,
+			TodayEnd:        todayEnd,
+		})
+		if err != nil {
+			httpkit.Error(c, err)
+			return
+		}
+		c.JSON(http.StatusOK, result)
+		return
 	}
 
 	createdFrom, createdTo, ok := parseWorkOrderCreatedAtFilter(c)

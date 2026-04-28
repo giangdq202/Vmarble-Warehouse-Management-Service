@@ -72,6 +72,10 @@ FROM work_orders wo
 LEFT JOIN skus s ON s.id = wo.sku_id`
 
 func (s *pgStore) selectWorkOrdersPaged(ctx context.Context, p httpkit.PageParams, f WorkOrderListFilter) ([]WorkOrder, int, error) {
+	if f.DashboardPreset {
+		return s.selectWorkOrdersDashboard(ctx, p, f)
+	}
+
 	sortCol := "created_at"
 	if p.SortBy == "status" {
 		sortCol = "status"
@@ -104,6 +108,61 @@ func (s *pgStore) selectWorkOrdersPaged(ctx context.Context, p httpkit.PageParam
 		sortCol, orderDir,
 	)
 	rows, err := s.pool.Query(ctx, query, f.Status, f.PlanID, f.CreatedFrom, f.CreatedTo, p.Limit, p.Offset())
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+
+	var out []WorkOrder
+	for rows.Next() {
+		wo, err := scanWorkOrder(rows)
+		if err != nil {
+			return nil, 0, err
+		}
+		out = append(out, wo)
+	}
+	return out, total, rows.Err()
+}
+
+// selectWorkOrdersDashboard implements the operational queue preset:
+//
+//	bucket 0 — PLANNED created today (Asia/Ho_Chi_Minh)
+//	bucket 1 — PLANNED created yesterday
+//	bucket 2 — IN_CUTTING or IN_PROCESSING (active)
+//	bucket 3 — PLANNED created before yesterday
+//
+// COMPLETED and COSTED records are excluded.
+// Within each bucket records are ordered by created_at ASC (FIFO).
+func (s *pgStore) selectWorkOrdersDashboard(ctx context.Context, p httpkit.PageParams, f WorkOrderListFilter) ([]WorkOrder, int, error) {
+	yesterdayStart := f.TodayStart.AddDate(0, 0, -1)
+
+	var total int
+	if err := s.pool.QueryRow(ctx,
+		`SELECT COUNT(*) FROM work_orders
+		 WHERE status NOT IN ('COMPLETED', 'COSTED')
+		   AND ($1::uuid IS NULL OR plan_id = $1)`,
+		f.PlanID,
+	).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+
+	// $1=plan_id $2=today_start $3=today_end $4=yesterday_start $5=limit $6=offset
+	const dashboardQuery = `SELECT ` + selectWOCols + `
+		 WHERE wo.status NOT IN ('COMPLETED', 'COSTED')
+		   AND ($1::uuid IS NULL OR wo.plan_id = $1)
+		 ORDER BY
+		   CASE
+		     WHEN wo.status = 'PLANNED' AND wo.created_at >= $2 AND wo.created_at < $3 THEN 0
+		     WHEN wo.status = 'PLANNED' AND wo.created_at >= $4 AND wo.created_at < $2 THEN 1
+		     WHEN wo.status IN ('IN_CUTTING', 'IN_PROCESSING')                         THEN 2
+		     ELSE 3
+		   END ASC,
+		   wo.created_at ASC
+		 LIMIT $5 OFFSET $6`
+
+	rows, err := s.pool.Query(ctx, dashboardQuery,
+		f.PlanID, f.TodayStart, f.TodayEnd, yesterdayStart, p.Limit, p.Offset(),
+	)
 	if err != nil {
 		return nil, 0, err
 	}
