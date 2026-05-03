@@ -2543,6 +2543,48 @@ paths:
       summary: Allocate remnant to work order
       tags:
       - inventory
+  /api/v1/inventory/remnants/{id}/label.pdf:
+    get:
+      parameters:
+      - description: remnant id (uuid)
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: 'label size: 50x30 or 100x70 (default 50x30)'
+        in: query
+        name: size
+        type: string
+      produces:
+      - application/pdf
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: file
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Generate printable PDF label for a remnant (stock label)
+      tags:
+      - inventory
   /api/v1/inventory/remnants/{id}/lineage:
     get:
       description: Returns all remnants that share the same parent board as the given

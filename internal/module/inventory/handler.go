@@ -33,6 +33,7 @@ func (h *Handler) Register(rg *gin.RouterGroup) {
 	inv.GET("/remnants/suggestions", h.suggestRemnants)
 	inv.GET("/remnants/:id", h.getRemnant)
 	inv.GET("/remnants/:id/lineage", h.getRemnantLineage)
+	inv.GET("/remnants/:id/label.pdf", h.getRemnantLabelPDF)
 	inv.POST("/remnants/:id/allocate", auth.RequireRole(auth.RoleWarehouse, auth.RoleCNC, auth.RoleCNCManager, auth.RoleAdmin), h.allocateRemnant)
 	inv.POST("/remnants/:id/waste", auth.RequireRole(auth.RoleWarehouse, auth.RoleAdmin), h.markWaste)
 	inv.POST("/remnants/:id/stock", auth.RequireRole(auth.RoleWarehouse, auth.RoleCNC, auth.RoleCNCManager, auth.RoleAdmin), h.stockRemnant)
@@ -731,4 +732,39 @@ func (h *Handler) cancelCycleCount(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"status": "cancelled"})
+}
+
+// getRemnantLabelPDF godoc
+//
+// @Summary      Generate printable PDF label for a remnant (stock label)
+// @Tags         inventory
+// @Produce      application/pdf
+// @Param        id    path      string  true   "remnant id (uuid)"
+// @Param        size  query     string  false  "label size: 50x30 or 100x70 (default 50x30)"
+// @Success      200   {file}    binary
+// @Failure      400   {object}  map[string]string
+// @Failure      404   {object}  map[string]string
+// @Security     BearerAuth
+// @Failure      401   {object}  map[string]string
+// @Router       /api/v1/inventory/remnants/{id}/label.pdf [get]
+func (h *Handler) getRemnantLabelPDF(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+	size := RemnantLabelSize(c.Query("size"))
+	if size == "" {
+		size = RemnantLabelSize50x30
+	}
+	pdf, err := h.svc.GenerateRemnantLabelPDF(c.Request.Context(), RemnantLabelInput{
+		RemnantID: id,
+		Size:      size,
+	})
+	if err != nil {
+		httpkit.Error(c, err)
+		return
+	}
+	c.Header("Content-Disposition", "inline; filename=remnant-label-"+id.String()+"-"+string(size)+".pdf")
+	c.Data(http.StatusOK, "application/pdf", pdf)
 }

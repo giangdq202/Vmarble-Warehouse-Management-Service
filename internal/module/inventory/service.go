@@ -1,13 +1,17 @@
 package inventory
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jung-kurt/gofpdf"
+	qrcode "github.com/skip2/go-qrcode"
 	"github.com/vmarble/warehouse-management-service/internal/domain"
 	"github.com/vmarble/warehouse-management-service/internal/platform/httpkit"
 )
@@ -707,4 +711,132 @@ func uuidPtrEqual(a, b *uuid.UUID) bool {
 
 func now() time.Time {
 	return time.Now().UTC()
+}
+
+// ── Remnant label PDF ─────────────────────────────────────────────────────────
+
+// remnantLabelLayout mirrors barcode.labelLayout but is private to this module.
+type remnantLabelLayout struct {
+	pageWidthMM  float64
+	pageHeightMM float64
+	qrXMM        float64
+	qrYMM        float64
+	qrSizeMM     float64
+	textXMM      float64
+	textYMM      float64
+	textWidthMM  float64
+	lineHeightMM float64
+	titleFontPt  float64
+	bodyFontPt   float64
+}
+
+func resolveRemnantLabelLayout(size RemnantLabelSize) (remnantLabelLayout, error) {
+	switch size {
+	case RemnantLabelSize50x30:
+		return remnantLabelLayout{
+			pageWidthMM:  50,
+			pageHeightMM: 30,
+			qrXMM:        2,
+			qrYMM:        4,
+			qrSizeMM:     20,
+			textXMM:      24,
+			textYMM:      5,
+			textWidthMM:  24,
+			lineHeightMM: 4,
+			titleFontPt:  7,
+			bodyFontPt:   6,
+		}, nil
+	case RemnantLabelSize100x70:
+		return remnantLabelLayout{
+			pageWidthMM:  100,
+			pageHeightMM: 70,
+			qrXMM:        5,
+			qrYMM:        8,
+			qrSizeMM:     34,
+			textXMM:      42,
+			textYMM:      10,
+			textWidthMM:  54,
+			lineHeightMM: 8,
+			titleFontPt:  12,
+			bodyFontPt:   10,
+		}, nil
+	default:
+		return remnantLabelLayout{}, domain.NewBizError(domain.ErrInvalidInput, "size must be one of: 50x30, 100x70")
+	}
+}
+
+// remnantQRPayload is the JSON content encoded into the remnant label QR code.
+type remnantQRPayload struct {
+	Type          string `json:"type"`
+	ID            string `json:"id"`
+	ParentBoardID string `json:"parent_board_id"`
+}
+
+func buildRemnantQRBytes(r Remnant) ([]byte, error) {
+	payload := remnantQRPayload{
+		Type:          "remnant",
+		ID:            r.ID.String(),
+		ParentBoardID: r.ParentBoardID.String(),
+	}
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("marshal remnant qr payload: %w", err)
+	}
+	return raw, nil
+}
+
+func shortID(id uuid.UUID) string {
+	s := id.String()
+	return s[:8]
+}
+
+func (s *service) GenerateRemnantLabelPDF(ctx context.Context, in RemnantLabelInput) ([]byte, error) {
+	layout, err := resolveRemnantLabelLayout(in.Size)
+	if err != nil {
+		return nil, err
+	}
+
+	r, err := s.st.selectRemnantByID(ctx, in.RemnantID)
+	if err != nil {
+		return nil, err
+	}
+
+	raw, err := buildRemnantQRBytes(r)
+	if err != nil {
+		return nil, err
+	}
+	qrPNG, err := qrcode.Encode(string(raw), qrcode.High, 1024)
+	if err != nil {
+		return nil, fmt.Errorf("encode remnant qr: %w", err)
+	}
+
+	pdf := gofpdf.NewCustom(&gofpdf.InitType{
+		UnitStr: "mm",
+		Size:    gofpdf.SizeType{Wd: layout.pageWidthMM, Ht: layout.pageHeightMM},
+	})
+	pdf.SetMargins(0, 0, 0)
+	pdf.SetAutoPageBreak(false, 0)
+	pdf.AddPageFormat("P", gofpdf.SizeType{Wd: layout.pageWidthMM, Ht: layout.pageHeightMM})
+
+	imgOpts := gofpdf.ImageOptions{ImageType: "PNG"}
+	pdf.RegisterImageOptionsReader("qr", imgOpts, bytes.NewReader(qrPNG))
+	pdf.ImageOptions("qr", layout.qrXMM, layout.qrYMM, layout.qrSizeMM, layout.qrSizeMM, false, imgOpts, 0, "")
+
+	dimText := fmt.Sprintf("%dx%d mm", r.Dimensions.LengthMM, r.Dimensions.WidthMM)
+
+	pdf.SetFont("Arial", "B", layout.titleFontPt)
+	pdf.SetXY(layout.textXMM, layout.textYMM)
+	pdf.CellFormat(layout.textWidthMM, layout.lineHeightMM, "REM: "+shortID(r.ID), "", 1, "L", false, 0, "")
+
+	pdf.SetFont("Arial", "", layout.bodyFontPt)
+	pdf.SetX(layout.textXMM)
+	pdf.CellFormat(layout.textWidthMM, layout.lineHeightMM, "Board: "+shortID(r.ParentBoardID), "", 1, "L", false, 0, "")
+	pdf.SetX(layout.textXMM)
+	pdf.CellFormat(layout.textWidthMM, layout.lineHeightMM, dimText, "", 1, "L", false, 0, "")
+
+	var out bytes.Buffer
+	if err := pdf.Output(&out); err != nil {
+		return nil, fmt.Errorf("render remnant label pdf: %w", err)
+	}
+	return out.Bytes(), nil
 }

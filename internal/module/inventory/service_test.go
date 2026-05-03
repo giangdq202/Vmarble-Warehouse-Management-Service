@@ -3999,3 +3999,79 @@ func TestCancelCycleCountSession_SessionNotOpen_ReturnsError(t *testing.T) {
 		t.Errorf("want ErrInvalidTransition, got %v", err)
 	}
 }
+
+// ── GenerateRemnantLabelPDF ───────────────────────────────────────────────────
+
+func TestGenerateRemnantLabelPDF_HappyPath_50x30_ReturnsPDF(t *testing.T) {
+	remnantID := uuid.New()
+	boardID := uuid.New()
+	st := &mockStore{
+		selectRemnantByIDResult: Remnant{
+			ID:            remnantID,
+			ParentBoardID: boardID,
+			Dimensions:    domain.Dimension{LengthMM: 600, WidthMM: 400},
+			Status:        domain.RemnantAvailable,
+		},
+	}
+	svc := NewService(st, nil)
+	pdf, err := svc.GenerateRemnantLabelPDF(context.Background(), RemnantLabelInput{
+		RemnantID: remnantID,
+		Size:      RemnantLabelSize50x30,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(pdf) == 0 {
+		t.Error("expected non-empty PDF bytes")
+	}
+}
+
+func TestGenerateRemnantLabelPDF_HappyPath_100x70_ReturnsPDF(t *testing.T) {
+	remnantID := uuid.New()
+	boardID := uuid.New()
+	st := &mockStore{
+		selectRemnantByIDResult: Remnant{
+			ID:            remnantID,
+			ParentBoardID: boardID,
+			Dimensions:    domain.Dimension{LengthMM: 1200, WidthMM: 800},
+			Status:        domain.RemnantAvailable,
+		},
+	}
+	svc := NewService(st, nil)
+	pdf, err := svc.GenerateRemnantLabelPDF(context.Background(), RemnantLabelInput{
+		RemnantID: remnantID,
+		Size:      RemnantLabelSize100x70,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(pdf) == 0 {
+		t.Error("expected non-empty PDF bytes")
+	}
+}
+
+func TestGenerateRemnantLabelPDF_RemnantNotFound_ReturnsError(t *testing.T) {
+	st := &mockStore{
+		selectRemnantByIDErr: domain.ErrNotFound,
+	}
+	svc := NewService(st, nil)
+	_, err := svc.GenerateRemnantLabelPDF(context.Background(), RemnantLabelInput{
+		RemnantID: uuid.New(),
+		Size:      RemnantLabelSize50x30,
+	})
+	if !errors.Is(err, domain.ErrNotFound) {
+		t.Errorf("want ErrNotFound, got %v", err)
+	}
+}
+
+func TestGenerateRemnantLabelPDF_InvalidSize_ReturnsError(t *testing.T) {
+	st := &mockStore{}
+	svc := NewService(st, nil)
+	_, err := svc.GenerateRemnantLabelPDF(context.Background(), RemnantLabelInput{
+		RemnantID: uuid.New(),
+		Size:      RemnantLabelSize("invalid"),
+	})
+	if !errors.Is(err, domain.ErrInvalidInput) {
+		t.Errorf("want ErrInvalidInput, got %v", err)
+	}
+}

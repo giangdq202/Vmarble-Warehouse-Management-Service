@@ -128,6 +128,19 @@ type SuggestRemnantsInput struct {
 	Limit             int // defaults to 3; clamped to [1, 10]
 }
 
+type RemnantLabelSize string
+
+const (
+	RemnantLabelSize50x30  RemnantLabelSize = "50x30"
+	RemnantLabelSize100x70 RemnantLabelSize = "100x70"
+)
+
+// RemnantLabelInput carries the parameters for generating a remnant stock label.
+type RemnantLabelInput struct {
+	RemnantID uuid.UUID
+	Size      RemnantLabelSize
+}
+
 type OverflowLevel string
 
 const (
@@ -286,4 +299,10 @@ type Service interface {
 	PostCycleCount(ctx context.Context, in PostCycleCountInput) error
 	// CancelCycleCountSession cancels an OPEN session without applying any changes.
 	CancelCycleCountSession(ctx context.Context, sessionID uuid.UUID, actorID uuid.UUID) error
+
+	// GenerateRemnantLabelPDF renders a compact stock label PDF for a remnant.
+	// The label contains a QR code encoding the remnant identity and a short
+	// text block with the remnant ID, parent board ID, and dimensions.
+	// Size must be one of RemnantLabelSize50x30 or RemnantLabelSize100x70.
+	GenerateRemnantLabelPDF(ctx context.Context, in RemnantLabelInput) ([]byte, error)
 }
