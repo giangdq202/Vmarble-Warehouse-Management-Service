@@ -18,3 +18,4 @@ server
 
 # Local planning artifacts (GSD - not shared with team)
 .planning/
+.claude/settings.json
