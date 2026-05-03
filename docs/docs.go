@@ -2122,6 +2122,72 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/inventory/remnants/{id}/label.pdf": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/pdf"
+                ],
+                "tags": [
+                    "inventory"
+                ],
+                "summary": "Generate printable PDF label for a remnant (stock label)",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "remnant id (uuid)",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "label size: 50x30 or 100x70 (default 50x30)",
+                        "name": "size",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "file"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/inventory/remnants/{id}/lineage": {
             "get": {
                 "security": [
