@@ -15,7 +15,7 @@
 set -euo pipefail
 
 # ── Config ────────────────────────────────────────────────────────────────────
-DEPLOY_DIR="/opt/vwms-staging"
+DEPLOY_DIR="/home/deploy_vwms/projects/vwms-staging"
 COMPOSE_FILE="${DEPLOY_DIR}/docker-compose.staging.yml"
 ENV_FILE="${DEPLOY_DIR}/.env.staging"
 STATE_FILE="${DEPLOY_DIR}/.last_good_image"     # Lưu image đang chạy tốt nhất
