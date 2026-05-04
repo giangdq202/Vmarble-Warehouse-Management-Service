@@ -29,6 +29,17 @@ type mockStore struct {
 	selectPlansSearch string
 	selectPlansStatus string
 
+	// selectPlansLookup
+	selectLookupResult       []PlanLookupItem
+	selectLookupTotal        int
+	selectLookupErr          error
+	selectLookupSearch       string
+	selectLookupStatus       string
+	selectLookupDeadlineFrom *time.Time
+	selectLookupDeadlineTo   *time.Time
+	selectLookupLimit        int
+	selectLookupOffset       int
+
 	// selectPlanByID
 	selectPlanByIDResult Plan
 	selectPlanByIDErr    error
@@ -63,6 +74,20 @@ func (m *mockStore) selectPlansPaged(_ context.Context, p httpkit.PageParams, st
 	m.selectPlansSearch = p.Search
 	m.selectPlansStatus = status
 	return m.selectPlansResult, len(m.selectPlansResult), m.selectPlansErr
+}
+
+func (m *mockStore) selectPlansLookup(_ context.Context, search, status string, deadlineFrom, deadlineTo *time.Time, limit, offset int) ([]PlanLookupItem, int, error) {
+	m.selectLookupSearch = search
+	m.selectLookupStatus = status
+	m.selectLookupDeadlineFrom = deadlineFrom
+	m.selectLookupDeadlineTo = deadlineTo
+	m.selectLookupLimit = limit
+	m.selectLookupOffset = offset
+	total := m.selectLookupTotal
+	if total == 0 {
+		total = len(m.selectLookupResult)
+	}
+	return m.selectLookupResult, total, m.selectLookupErr
 }
 
 func (m *mockStore) selectPlanByID(_ context.Context, _ uuid.UUID) (Plan, error) {
@@ -692,5 +717,151 @@ func TestListPlans_SearchAndPOCodeContract(t *testing.T) {
 	}
 	if len(plans.Items[0].Items) == 0 {
 		t.Error("Items must still be populated")
+	}
+}
+
+// ── TestLookupPlans ───────────────────────────────────────────────────────────
+
+func TestLookupPlans_HappyPath_ReturnsItems(t *testing.T) {
+	deadline := time.Date(2026, 6, 30, 0, 0, 0, 0, time.UTC)
+	st := &mockStore{
+		selectLookupResult: []PlanLookupItem{
+			{ID: uuid.New(), Code: "KH-2026-001", POCode: "PO-001", Status: domain.PlanApproved, Deadline: &deadline},
+		},
+	}
+
+	svc := NewService(st)
+	result, err := svc.LookupPlans(context.Background(), LookupPlansInput{Page: 1, Limit: 20})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(result.Items) != 1 {
+		t.Fatalf("len(Items) = %d, want 1", len(result.Items))
+	}
+	if result.Items[0].Code != "KH-2026-001" {
+		t.Errorf("Code = %q, want KH-2026-001", result.Items[0].Code)
+	}
+}
+
+func TestLookupPlans_SearchAndStatusPassedThrough(t *testing.T) {
+	st := &mockStore{selectLookupResult: nil}
+
+	svc := NewService(st)
+	_, err := svc.LookupPlans(context.Background(), LookupPlansInput{
+		Search: "KH-2026",
+		Status: "APPROVED",
+		Page:   1, Limit: 10,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if st.selectLookupSearch != "KH-2026" {
+		t.Errorf("search passed = %q, want KH-2026", st.selectLookupSearch)
+	}
+	if st.selectLookupStatus != "APPROVED" {
+		t.Errorf("status passed = %q, want APPROVED", st.selectLookupStatus)
+	}
+}
+
+func TestLookupPlans_DeadlineFilterPassedThrough(t *testing.T) {
+	from := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	to := time.Date(2026, 12, 31, 0, 0, 0, 0, time.UTC)
+	st := &mockStore{selectLookupResult: nil}
+
+	svc := NewService(st)
+	_, err := svc.LookupPlans(context.Background(), LookupPlansInput{
+		DeadlineFrom: &from,
+		DeadlineTo:   &to,
+		Page:         1, Limit: 20,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if st.selectLookupDeadlineFrom == nil || !st.selectLookupDeadlineFrom.Equal(from) {
+		t.Errorf("deadline_from not passed correctly")
+	}
+	if st.selectLookupDeadlineTo == nil || !st.selectLookupDeadlineTo.Equal(to) {
+		t.Errorf("deadline_to not passed correctly")
+	}
+}
+
+func TestLookupPlans_DeadlineFromAfterTo_ReturnsErrInvalidInput(t *testing.T) {
+	from := time.Date(2026, 12, 31, 0, 0, 0, 0, time.UTC)
+	to := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+
+	svc := NewService(&mockStore{})
+	_, err := svc.LookupPlans(context.Background(), LookupPlansInput{
+		DeadlineFrom: &from,
+		DeadlineTo:   &to,
+		Page:         1, Limit: 20,
+	})
+	if !errors.Is(err, domain.ErrInvalidInput) {
+		t.Errorf("expected ErrInvalidInput for inverted deadline range, got %v", err)
+	}
+}
+
+func TestLookupPlans_LimitCappedAt50(t *testing.T) {
+	st := &mockStore{selectLookupResult: nil}
+
+	svc := NewService(st)
+	_, err := svc.LookupPlans(context.Background(), LookupPlansInput{Page: 1, Limit: 9999})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if st.selectLookupLimit != maxLookupLimit {
+		t.Errorf("limit passed to store = %d, want %d", st.selectLookupLimit, maxLookupLimit)
+	}
+}
+
+func TestLookupPlans_ZeroLimitDefaultsTo50(t *testing.T) {
+	st := &mockStore{selectLookupResult: nil}
+
+	svc := NewService(st)
+	_, err := svc.LookupPlans(context.Background(), LookupPlansInput{Page: 1, Limit: 0})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if st.selectLookupLimit != maxLookupLimit {
+		t.Errorf("limit passed to store = %d, want %d", st.selectLookupLimit, maxLookupLimit)
+	}
+}
+
+func TestLookupPlans_PaginationOffset(t *testing.T) {
+	st := &mockStore{selectLookupResult: nil, selectLookupTotal: 100}
+
+	svc := NewService(st)
+	result, err := svc.LookupPlans(context.Background(), LookupPlansInput{Page: 3, Limit: 10})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if st.selectLookupOffset != 20 {
+		t.Errorf("offset = %d, want 20 (page 3, limit 10)", st.selectLookupOffset)
+	}
+	if result.CurrentPage != 3 {
+		t.Errorf("CurrentPage = %d, want 3", result.CurrentPage)
+	}
+}
+
+func TestLookupPlans_StoreError_Propagates(t *testing.T) {
+	dbErr := errors.New("lookup query failed")
+	st := &mockStore{selectLookupErr: dbErr}
+
+	svc := NewService(st)
+	_, err := svc.LookupPlans(context.Background(), LookupPlansInput{Page: 1, Limit: 20})
+	if !errors.Is(err, dbErr) {
+		t.Errorf("expected store error to propagate, got %v", err)
+	}
+}
+
+func TestLookupPlans_EmptyResult_ReturnsEmptySlice(t *testing.T) {
+	st := &mockStore{selectLookupResult: nil}
+
+	svc := NewService(st)
+	result, err := svc.LookupPlans(context.Background(), LookupPlansInput{Page: 1, Limit: 20})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(result.Items) != 0 {
+		t.Errorf("expected empty result, got %d items", len(result.Items))
 	}
 }

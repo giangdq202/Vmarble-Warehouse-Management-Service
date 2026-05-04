@@ -113,3 +113,29 @@ func (svc *service) CancelPlan(ctx context.Context, planID uuid.UUID) error {
 	}
 	return svc.s.updatePlanStatus(ctx, planID, string(domain.PlanCanceled))
 }
+
+const maxLookupLimit = 50
+
+func (svc *service) LookupPlans(ctx context.Context, in LookupPlansInput) (httpkit.PagedResult[PlanLookupItem], error) {
+	if in.DeadlineFrom != nil && in.DeadlineTo != nil && in.DeadlineFrom.After(*in.DeadlineTo) {
+		return httpkit.PagedResult[PlanLookupItem]{}, domain.NewBizError(domain.ErrInvalidInput, "deadline_from must not be after deadline_to")
+	}
+
+	limit := in.Limit
+	if limit <= 0 || limit > maxLookupLimit {
+		limit = maxLookupLimit
+	}
+	page := in.Page
+	if page < 1 {
+		page = 1
+	}
+	offset := (page - 1) * limit
+
+	items, total, err := svc.s.selectPlansLookup(ctx, in.Search, in.Status, in.DeadlineFrom, in.DeadlineTo, limit, offset)
+	if err != nil {
+		return httpkit.PagedResult[PlanLookupItem]{}, err
+	}
+
+	p := httpkit.PageParams{Page: page, Limit: limit}
+	return httpkit.NewPagedResult(items, total, p), nil
+}

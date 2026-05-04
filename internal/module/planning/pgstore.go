@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -151,4 +152,56 @@ func (s *pgStore) selectPlanItemsByPlanID(ctx context.Context, planID uuid.UUID)
 		items = append(items, item)
 	}
 	return items, rows.Err()
+}
+
+// selectPlansLookup returns a lightweight slice for the async combobox.
+// Filters are all optional; when nil/empty they are skipped. Ordering favours
+// APPROVED plans and nearest non-null deadline for the combobox default view.
+func (s *pgStore) selectPlansLookup(ctx context.Context, search, status string, deadlineFrom, deadlineTo *time.Time, limit, offset int) ([]PlanLookupItem, int, error) {
+	searchPat := "%" + search + "%"
+
+	var total int
+	if err := s.pool.QueryRow(ctx,
+		`SELECT COUNT(*)
+		   FROM production_plans pp
+		   JOIN purchase_orders po ON po.id = pp.po_id
+		  WHERE ($1::text = '' OR pp.status = $1)
+		    AND ($2::text = '' OR pp.code ILIKE $2 OR po.code ILIKE $2)
+		    AND ($3::date IS NULL OR pp.deadline >= $3)
+		    AND ($4::date IS NULL OR pp.deadline <= $4)`,
+		status, searchPat, deadlineFrom, deadlineTo,
+	).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+
+	rows, err := s.pool.Query(ctx,
+		`SELECT pp.id, pp.code, po.code AS po_code, pp.status, pp.deadline
+		   FROM production_plans pp
+		   JOIN purchase_orders po ON po.id = pp.po_id
+		  WHERE ($1::text = '' OR pp.status = $1)
+		    AND ($2::text = '' OR pp.code ILIKE $2 OR po.code ILIKE $2)
+		    AND ($3::date IS NULL OR pp.deadline >= $3)
+		    AND ($4::date IS NULL OR pp.deadline <= $4)
+		  ORDER BY
+		    CASE WHEN pp.status = 'APPROVED' THEN 0 ELSE 1 END,
+		    CASE WHEN pp.deadline IS NULL THEN 1 ELSE 0 END,
+		    pp.deadline ASC,
+		    pp.created_at DESC
+		 LIMIT $5 OFFSET $6`,
+		status, searchPat, deadlineFrom, deadlineTo, limit, offset,
+	)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+
+	var items []PlanLookupItem
+	for rows.Next() {
+		var item PlanLookupItem
+		if err := rows.Scan(&item.ID, &item.Code, &item.POCode, &item.Status, &item.Deadline); err != nil {
+			return nil, 0, err
+		}
+		items = append(items, item)
+	}
+	return items, total, rows.Err()
 }
