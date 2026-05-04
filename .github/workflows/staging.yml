@@ -224,14 +224,14 @@ jobs:
           GHCR_TOKEN:  ${{ secrets.GITHUB_TOKEN }}
         with:
           host:     ${{ secrets.STAGING_HOST }}
-          username: root
-          password: ${{ secrets.STAGING_SSH_PASSWORD }}
+          username: deploy_vwms
+          key: ${{ secrets.STAGING_SSH_KEY }}
           port:     ${{ secrets.STAGING_SSH_PORT }}
           timeout:  180s
           envs:     FULL_IMAGE,GHCR_USER,GHCR_TOKEN
           script: |
             echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
-            /opt/vwms-staging/deploy.sh "$FULL_IMAGE"
+            /home/deploy_vwms/projects/vwms-staging/deploy.sh "$FULL_IMAGE"
 
       # ── Thông báo Discord ─────────────────────────────────────────────────
       - name: "[Discord] 🚀 Deploy thành công"
