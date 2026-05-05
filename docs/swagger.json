@@ -3238,6 +3238,87 @@
                 }
             }
         },
+        "/api/v1/plans/lookup": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Lightweight endpoint for async searchable dropdown. Returns plan id, code, po_code, status, deadline only (no items).",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "planning"
+                ],
+                "summary": "Lookup plans for async combobox",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "ILIKE search on plan code or PO code",
+                        "name": "search",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "filter by status: DRAFT, APPROVED, CANCELED",
+                        "name": "status",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "inclusive lower bound on deadline (YYYY-MM-DD)",
+                        "name": "deadline_from",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "inclusive upper bound on deadline (YYYY-MM-DD)",
+                        "name": "deadline_to",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "page number (default 1)",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "items per page (default 20, max 50)",
+                        "name": "limit",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_planning_PlanLookupItem"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/plans/{id}": {
             "get": {
                 "security": [
@@ -5356,6 +5437,29 @@
                 }
             }
         },
+        "github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_planning_PlanLookupItem": {
+            "type": "object",
+            "properties": {
+                "current_page": {
+                    "type": "integer"
+                },
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_module_planning.PlanLookupItem"
+                    }
+                },
+                "limit": {
+                    "type": "integer"
+                },
+                "total_items": {
+                    "type": "integer"
+                },
+                "total_pages": {
+                    "type": "integer"
+                }
+            }
+        },
         "github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_production_WorkOrder": {
             "type": "object",
             "properties": {
@@ -6720,6 +6824,26 @@
                 },
                 "sku_id": {
                     "type": "string"
+                }
+            }
+        },
+        "internal_module_planning.PlanLookupItem": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "type": "string"
+                },
+                "deadline": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "po_code": {
+                    "type": "string"
+                },
+                "status": {
+                    "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.PlanStatus"
                 }
             }
         },

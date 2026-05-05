@@ -185,6 +185,21 @@ definitions:
       total_pages:
         type: integer
     type: object
+  github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_planning_PlanLookupItem:
+    properties:
+      current_page:
+        type: integer
+      items:
+        items:
+          $ref: '#/definitions/internal_module_planning.PlanLookupItem'
+        type: array
+      limit:
+        type: integer
+      total_items:
+        type: integer
+      total_pages:
+        type: integer
+    type: object
   github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_production_WorkOrder:
     properties:
       current_page:
@@ -1088,6 +1103,19 @@ definitions:
         type: integer
       sku_id:
         type: string
+    type: object
+  internal_module_planning.PlanLookupItem:
+    properties:
+      code:
+        type: string
+      deadline:
+        type: string
+      id:
+        type: string
+      po_code:
+        type: string
+      status:
+        $ref: '#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.PlanStatus'
     type: object
   internal_module_production.AdvanceStatusInput:
     properties:
@@ -3410,6 +3438,59 @@ paths:
       security:
       - BearerAuth: []
       summary: Cancel production plan
+      tags:
+      - planning
+  /api/v1/plans/lookup:
+    get:
+      description: Lightweight endpoint for async searchable dropdown. Returns plan
+        id, code, po_code, status, deadline only (no items).
+      parameters:
+      - description: ILIKE search on plan code or PO code
+        in: query
+        name: search
+        type: string
+      - description: 'filter by status: DRAFT, APPROVED, CANCELED'
+        in: query
+        name: status
+        type: string
+      - description: inclusive lower bound on deadline (YYYY-MM-DD)
+        in: query
+        name: deadline_from
+        type: string
+      - description: inclusive upper bound on deadline (YYYY-MM-DD)
+        in: query
+        name: deadline_to
+        type: string
+      - description: page number (default 1)
+        in: query
+        name: page
+        type: integer
+      - description: items per page (default 20, max 50)
+        in: query
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_planning_PlanLookupItem'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Lookup plans for async combobox
       tags:
       - planning
   /api/v1/pos:
