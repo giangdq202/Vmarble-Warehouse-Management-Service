@@ -1,6 +1,3 @@
-# docker-compose.staging.yml
-# Updated with Double Binding (Localhost & VPN)
-
 services:
   postgres:
     image: postgres:17-alpine
@@ -13,18 +10,8 @@ services:
       driver: "journald"
       options:
         tag: "vwms-staging-postgres"
-    environment:
-      POSTGRES_USER:     ${POSTGRES_USER:-vmarble}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DB:       ${POSTGRES_DB:-vmarble}
-    volumes:
-      - pgdata_staging:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-vmarble} -d ${POSTGRES_DB:-vmarble}"]
-      interval: 5s
-      timeout:  3s
-      retries:  20
-      start_period: 5s
+    env_file:
+      - .env.staging
 
   app:
     image: ${APP_IMAGE:-ghcr.io/giangdq202/vmarble-warehouse-management-service:staging-latest}
@@ -35,13 +22,8 @@ services:
     logging:
       driver: "journald"
       options:
-        tag: "vwms-staging-app" # Cần sửa thủ công postgres thành tag riêng sau khi replace
+        tag: "vwms-staging-app"
     env_file:
       - .env.staging
     depends_on:
-      postgres:
-        condition: service_healthy
-
-volumes:
-  pgdata_staging:
-    name: vwms_staging_pgdata
+      - postgres
