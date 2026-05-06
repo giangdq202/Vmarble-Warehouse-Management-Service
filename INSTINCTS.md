@@ -13,3 +13,5 @@ This file serves as the Dynamic Memory for the AI Agent. It records patterns, pi
 ## Session Lessons
 
 (New lessons will be appended here at the end of every task by the AI Agent)
+
+- [SQL Guards] When a store UPDATE uses a WHERE guard (e.g. `AND assigned_to IS NULL`), ensure it encodes the **business invariant**, not an implementation assumption. `AND assigned_to IS NULL` silently blocks reassignment; `AND status = 'PLANNED'` correctly expresses mutability. When `RowsAffected() == 0`, always audit whether the WHERE clause is too tight before assuming a real conflict.
