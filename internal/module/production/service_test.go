@@ -1116,24 +1116,27 @@ func TestAdvanceStatus_ToInCutting_AdminOverride_AllowsWrongCaller(t *testing.T)
 	}
 }
 
-// AssignWorkOrder must propagate ErrPreconditionFailed when the store signals
-// the WO is already assigned (atomic guard fired 0 rows affected).
-func TestAssignWorkOrder_AlreadyAssigned_IsPreconditionFailed(t *testing.T) {
+// A PLANNED WO that already has an assignee can be reassigned to a different CNC operator.
+func TestAssignWorkOrder_Reassign_Succeeds(t *testing.T) {
 	woID := uuid.New()
-	userID := uuid.New()
-	st := &mockStore{
-		selectWorkOrderByIDResult:    plannedWO(woID, uuid.New(), uuid.New()),
-		updateWorkOrderAssignmentErr: domain.NewBizError(domain.ErrPreconditionFailed, "work order is already assigned to another operator"),
-	}
-	uc := &mockUserChecker{result: UserInfo{ID: userID, Role: "cnc"}}
+	newUserID := uuid.New()
+	existingWO, _ := assignedWO(woID, domain.WOPlanned) // already has an assignee
+	st := &mockStore{selectWorkOrderByIDResult: existingWO}
+	uc := &mockUserChecker{result: UserInfo{ID: newUserID, Role: "cnc"}}
 	svc := newSvcWithUser(st, approvedPlan(uuid.New()), skuNoMetal(uuid.New()), uc)
 
-	_, err := svc.AssignWorkOrder(context.Background(), AssignWorkOrderInput{
+	result, err := svc.AssignWorkOrder(context.Background(), AssignWorkOrderInput{
 		WorkOrderID: woID,
-		UserID:      userID,
+		UserID:      newUserID,
 	})
-	if !errors.Is(err, domain.ErrPreconditionFailed) {
-		t.Errorf("expected ErrPreconditionFailed for already-assigned WO, got %v", err)
+	if err != nil {
+		t.Fatalf("reassign must succeed for PLANNED WO, got: %v", err)
+	}
+	if result.AssignedTo == nil || *result.AssignedTo != newUserID {
+		t.Errorf("AssignedTo = %v, want %v", result.AssignedTo, newUserID)
+	}
+	if !st.updateWorkOrderAssignmentCalled {
+		t.Error("store.updateWorkOrderAssignment must be called on reassign")
 	}
 }
 

@@ -247,14 +247,14 @@ func (s *pgStore) updateWorkOrderStatus(ctx context.Context, id uuid.UUID, statu
 func (s *pgStore) updateWorkOrderAssignment(ctx context.Context, woID uuid.UUID, userID uuid.UUID, assignedAt time.Time) error {
 	tag, err := s.pool.Exec(ctx,
 		`UPDATE work_orders SET assigned_to = $1, assigned_at = $2
-		 WHERE id = $3 AND assigned_to IS NULL`,
+		 WHERE id = $3 AND status = 'PLANNED'`,
 		userID, assignedAt, woID,
 	)
 	if err != nil {
 		return err
 	}
 	if tag.RowsAffected() == 0 {
-		return domain.NewBizError(domain.ErrPreconditionFailed, "work order is already assigned to another operator")
+		return domain.NewBizError(domain.ErrPreconditionFailed, "work order has already started cutting and cannot be reassigned")
 	}
 	return nil
 }
