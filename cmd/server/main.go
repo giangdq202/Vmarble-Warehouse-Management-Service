@@ -23,6 +23,7 @@ import (
 	"github.com/vmarble/warehouse-management-service/internal/module/order"
 	"github.com/vmarble/warehouse-management-service/internal/module/planning"
 	"github.com/vmarble/warehouse-management-service/internal/module/production"
+	"github.com/vmarble/warehouse-management-service/internal/module/purchasing"
 	"github.com/vmarble/warehouse-management-service/internal/platform/auth"
 	"github.com/vmarble/warehouse-management-service/internal/platform/config"
 	"github.com/vmarble/warehouse-management-service/internal/platform/events"
@@ -80,6 +81,7 @@ func main() {
 	costingStore := costing.NewPGStore(pool)
 	dashboardStore := dashboard.NewPGStore(pool)
 	barcodeStore := barcode.NewPGStore(pool)
+	purchasingStore := purchasing.NewPGStore(pool)
 
 	// ── Module services ─────────────────────────────────────
 	authnSvc := authn.NewService(authnStore, cfg.AuthSecret)
@@ -124,6 +126,11 @@ func main() {
 		&consumptionAdapter{pool: pool},
 	)
 	dashboardSvc := dashboard.NewService(dashboardStore)
+	purchasingSvc := purchasing.NewService(
+		purchasingStore,
+		&purchasingMaterialAdapter{svc: catalogSvc},
+		&purchasingStockAdapter{svc: inventorySvc},
+	)
 
 	// ── Background: auto-release expired remnant allocations ─────────────────
 	// Ticks every cfg.RemnantAllocCheckInterval. Remnants that have been
@@ -177,6 +184,7 @@ func main() {
 	dashboard.NewHandler(dashboardSvc).Register(api)
 	barcode.NewHandler(barcodeSvc).Register(api)
 	events.NewHandler(eventBroker).Register(api)
+	purchasing.NewHandler(purchasingSvc).Register(api)
 
 	srv := &http.Server{
 		Addr:         ":" + cfg.Port,
@@ -410,4 +418,34 @@ func (a *consumptionAdapter) GetConsumptionCostForWO(ctx context.Context, woID u
 		return domain.Money{}, err
 	}
 	return domain.VND(total), nil
+}
+
+type purchasingMaterialAdapter struct {
+	svc catalog.Service
+}
+
+func (a *purchasingMaterialAdapter) GetMaterial(ctx context.Context, materialID uuid.UUID) (purchasing.MaterialInfo, error) {
+	m, err := a.svc.GetMaterial(ctx, materialID)
+	if err != nil {
+		return purchasing.MaterialInfo{}, err
+	}
+	return purchasing.MaterialInfo{ID: m.ID, Name: m.Name, Unit: m.Unit}, nil
+}
+
+type purchasingStockAdapter struct {
+	svc inventory.Service
+}
+
+func (a *purchasingStockAdapter) ReceiveStock(ctx context.Context, in purchasing.ReceiveStockInput) (uuid.UUID, error) {
+	lot, err := a.svc.ReceiveStock(ctx, inventory.ReceiveStockInput{
+		MaterialID:  in.MaterialID,
+		Dimensions:  domain.Dimension{LengthMM: in.LengthMM, WidthMM: in.WidthMM},
+		CostPerSheet: in.UnitCost,
+		Quantity:    in.Quantity,
+		SupplierRef: in.SupplierRef,
+	})
+	if err != nil {
+		return uuid.Nil, err
+	}
+	return lot.ID, nil
 }
