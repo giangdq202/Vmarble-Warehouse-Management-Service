@@ -215,6 +215,21 @@ definitions:
       total_pages:
         type: integer
     type: object
+  github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_purchasing_PurchaseOrder:
+    properties:
+      current_page:
+        type: integer
+      items:
+        items:
+          $ref: '#/definitions/internal_module_purchasing.PurchaseOrder'
+        type: array
+      limit:
+        type: integer
+      total_items:
+        type: integer
+      total_pages:
+        type: integer
+    type: object
   internal_module_authn.CreateUserInput:
     properties:
       email:
@@ -1271,6 +1286,86 @@ definitions:
         type: string
       status:
         $ref: '#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.WorkOrderStatus'
+    type: object
+  internal_module_purchasing.AddPOItemInput:
+    properties:
+      length_mm:
+        type: integer
+      quantity:
+        type: integer
+      unit_cost:
+        $ref: '#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.Money'
+      width_mm:
+        type: integer
+    type: object
+  internal_module_purchasing.CreatePOInput:
+    properties:
+      code:
+        type: string
+      material_id:
+        type: string
+      note:
+        type: string
+      supplier:
+        type: string
+    type: object
+  internal_module_purchasing.POItem:
+    properties:
+      created_at:
+        type: string
+      id:
+        type: string
+      length_mm:
+        type: integer
+      lot_id:
+        type: string
+      po_id:
+        type: string
+      quantity:
+        type: integer
+      unit_cost:
+        $ref: '#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.Money'
+      width_mm:
+        type: integer
+    type: object
+  internal_module_purchasing.POStatus:
+    enum:
+    - DRAFT
+    - ORDERED
+    - RECEIVED
+    - CANCELLED
+    type: string
+    x-enum-varnames:
+    - StatusDraft
+    - StatusOrdered
+    - StatusReceived
+    - StatusCancelled
+  internal_module_purchasing.PurchaseOrder:
+    properties:
+      code:
+        type: string
+      created_at:
+        type: string
+      created_by:
+        type: string
+      id:
+        type: string
+      items:
+        items:
+          $ref: '#/definitions/internal_module_purchasing.POItem'
+        type: array
+      material_id:
+        type: string
+      note:
+        type: string
+      ordered_at:
+        type: string
+      received_at:
+        type: string
+      status:
+        $ref: '#/definitions/internal_module_purchasing.POStatus'
+      supplier:
+        type: string
     type: object
 info:
   contact: {}
@@ -3687,6 +3782,256 @@ paths:
       summary: List PO line items
       tags:
       - order
+  /api/v1/purchase-orders:
+    get:
+      parameters:
+      - description: filter by status (DRAFT|ORDERED|RECEIVED|CANCELLED)
+        in: query
+        name: status
+        type: string
+      - description: filter by material UUID
+        in: query
+        name: material_id
+        type: string
+      - description: page number
+        in: query
+        name: page
+        type: integer
+      - description: items per page
+        in: query
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_purchasing_PurchaseOrder'
+      security:
+      - BearerAuth: []
+      summary: List purchase orders
+      tags:
+      - purchasing
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: payload
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_module_purchasing.CreatePOInput'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/internal_module_purchasing.PurchaseOrder'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Create a purchase order (DRAFT)
+      tags:
+      - purchasing
+  /api/v1/purchase-orders/{id}:
+    get:
+      parameters:
+      - description: PO UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_module_purchasing.PurchaseOrder'
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Get a purchase order by ID
+      tags:
+      - purchasing
+  /api/v1/purchase-orders/{id}/cancel:
+    post:
+      parameters:
+      - description: PO UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_module_purchasing.PurchaseOrder'
+        "409":
+          description: Conflict
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Cancel a DRAFT or ORDERED purchase order
+      tags:
+      - purchasing
+  /api/v1/purchase-orders/{id}/items:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: PO UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: item payload
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_module_purchasing.AddPOItemInput'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/internal_module_purchasing.POItem'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "412":
+          description: Precondition Failed
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Add an item to a DRAFT purchase order
+      tags:
+      - purchasing
+  /api/v1/purchase-orders/{id}/items/{item_id}:
+    delete:
+      parameters:
+      - description: PO UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Item UUID
+        in: path
+        name: item_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "204":
+          description: No Content
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "412":
+          description: Precondition Failed
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Remove an item from a DRAFT purchase order
+      tags:
+      - purchasing
+  /api/v1/purchase-orders/{id}/order:
+    post:
+      parameters:
+      - description: PO UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_module_purchasing.PurchaseOrder'
+        "409":
+          description: Conflict
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "412":
+          description: Precondition Failed
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Transition a DRAFT PO to ORDERED
+      tags:
+      - purchasing
+  /api/v1/purchase-orders/{id}/receive:
+    post:
+      parameters:
+      - description: PO UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_module_purchasing.PurchaseOrder'
+        "409":
+          description: Conflict
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Mark an ORDERED PO as RECEIVED and create inventory lots
+      tags:
+      - purchasing
   /api/v1/skus:
     get:
       parameters:
@@ -3997,6 +4342,20 @@ paths:
       summary: List active storage locations
       tags:
       - inventory
+  /api/v1/users/me:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_module_authn.UserDetail'
+      security:
+      - BearerAuth: []
+      summary: Get current user profile
+      tags:
+      - auth
   /api/v1/work-orders:
     get:
       parameters:
