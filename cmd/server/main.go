@@ -179,7 +179,8 @@ func main() {
 	api.Use(auth.Middleware(cfg.AuthSecret))
 
 	authnHandler := authn.NewHandler(authnSvc)
-	authnHandler.RegisterAdmin(api.Group("/admin"))
+	authnHandler.RegisterProtected(api.Group("/users"))
+        authnHandler.RegisterAdmin(api.Group("/admin"))
 
 	catalog.NewHandler(catalogSvc).Register(api)
 	order.NewHandler(orderSvc).Register(api)

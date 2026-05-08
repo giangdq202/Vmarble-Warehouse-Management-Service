@@ -3819,6 +3819,405 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/purchase-orders": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "purchasing"
+                ],
+                "summary": "List purchase orders",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "filter by status (DRAFT|ORDERED|RECEIVED|CANCELLED)",
+                        "name": "status",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "filter by material UUID",
+                        "name": "material_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "page number",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "items per page",
+                        "name": "limit",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_purchasing_PurchaseOrder"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "purchasing"
+                ],
+                "summary": "Create a purchase order (DRAFT)",
+                "parameters": [
+                    {
+                        "description": "payload",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_module_purchasing.CreatePOInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/internal_module_purchasing.PurchaseOrder"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/purchase-orders/{id}": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "purchasing"
+                ],
+                "summary": "Get a purchase order by ID",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "PO UUID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_module_purchasing.PurchaseOrder"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/purchase-orders/{id}/cancel": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "purchasing"
+                ],
+                "summary": "Cancel a DRAFT or ORDERED purchase order",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "PO UUID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_module_purchasing.PurchaseOrder"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/purchase-orders/{id}/items": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "purchasing"
+                ],
+                "summary": "Add an item to a DRAFT purchase order",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "PO UUID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "item payload",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_module_purchasing.AddPOItemInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/internal_module_purchasing.POItem"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "412": {
+                        "description": "Precondition Failed",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/purchase-orders/{id}/items/{item_id}": {
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "purchasing"
+                ],
+                "summary": "Remove an item from a DRAFT purchase order",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "PO UUID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Item UUID",
+                        "name": "item_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "412": {
+                        "description": "Precondition Failed",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/purchase-orders/{id}/order": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "purchasing"
+                ],
+                "summary": "Transition a DRAFT PO to ORDERED",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "PO UUID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_module_purchasing.PurchaseOrder"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "412": {
+                        "description": "Precondition Failed",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/purchase-orders/{id}/receive": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "purchasing"
+                ],
+                "summary": "Mark an ORDERED PO as RECEIVED and create inventory lots",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "PO UUID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_module_purchasing.PurchaseOrder"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/skus": {
             "get": {
                 "security": [
@@ -4303,6 +4702,30 @@ const docTemplate = `{
                             "additionalProperties": {
                                 "type": "string"
                             }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/users/me": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "auth"
+                ],
+                "summary": "Get current user profile",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_module_authn.UserDetail"
                         }
                     }
                 }
@@ -5478,6 +5901,29 @@ const docTemplate = `{
                     "type": "array",
                     "items": {
                         "$ref": "#/definitions/internal_module_production.WorkOrder"
+                    }
+                },
+                "limit": {
+                    "type": "integer"
+                },
+                "total_items": {
+                    "type": "integer"
+                },
+                "total_pages": {
+                    "type": "integer"
+                }
+            }
+        },
+        "github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_purchasing_PurchaseOrder": {
+            "type": "object",
+            "properties": {
+                "current_page": {
+                    "type": "integer"
+                },
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_module_purchasing.PurchaseOrder"
                     }
                 },
                 "limit": {
@@ -7091,6 +7537,125 @@ const docTemplate = `{
                 },
                 "status": {
                     "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.WorkOrderStatus"
+                }
+            }
+        },
+        "internal_module_purchasing.AddPOItemInput": {
+            "type": "object",
+            "properties": {
+                "length_mm": {
+                    "type": "integer"
+                },
+                "quantity": {
+                    "type": "integer"
+                },
+                "unit_cost": {
+                    "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.Money"
+                },
+                "width_mm": {
+                    "type": "integer"
+                }
+            }
+        },
+        "internal_module_purchasing.CreatePOInput": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "type": "string"
+                },
+                "material_id": {
+                    "type": "string"
+                },
+                "note": {
+                    "type": "string"
+                },
+                "supplier": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_module_purchasing.POItem": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "length_mm": {
+                    "type": "integer"
+                },
+                "lot_id": {
+                    "type": "string"
+                },
+                "po_id": {
+                    "type": "string"
+                },
+                "quantity": {
+                    "type": "integer"
+                },
+                "unit_cost": {
+                    "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.Money"
+                },
+                "width_mm": {
+                    "type": "integer"
+                }
+            }
+        },
+        "internal_module_purchasing.POStatus": {
+            "type": "string",
+            "enum": [
+                "DRAFT",
+                "ORDERED",
+                "RECEIVED",
+                "CANCELLED"
+            ],
+            "x-enum-varnames": [
+                "StatusDraft",
+                "StatusOrdered",
+                "StatusReceived",
+                "StatusCancelled"
+            ]
+        },
+        "internal_module_purchasing.PurchaseOrder": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "created_by": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_module_purchasing.POItem"
+                    }
+                },
+                "material_id": {
+                    "type": "string"
+                },
+                "note": {
+                    "type": "string"
+                },
+                "ordered_at": {
+                    "type": "string"
+                },
+                "received_at": {
+                    "type": "string"
+                },
+                "status": {
+                    "$ref": "#/definitions/internal_module_purchasing.POStatus"
+                },
+                "supplier": {
+                    "type": "string"
                 }
             }
         }

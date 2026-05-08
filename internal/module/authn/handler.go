@@ -25,6 +25,12 @@ func (h *Handler) Register(rg *gin.RouterGroup) {
 	rg.POST("/login", h.login)
 }
 
+// RegisterProtected mounts the protected non-admin routes on rg.
+// rg should already have auth.Middleware applied.
+func (h *Handler) RegisterProtected(rg *gin.RouterGroup) {
+	rg.GET("/me", h.getMe)
+}
+
 // RegisterAdmin mounts the protected administrative routes on rg.
 // rg should already have auth.Middleware applied.
 func (h *Handler) RegisterAdmin(rg *gin.RouterGroup) {
@@ -62,6 +68,34 @@ func (h *Handler) login(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, result)
+}
+
+// getMe godoc
+//
+// @Summary      Get current user profile
+// @Tags         auth
+// @Produce      json
+// @Success      200  {object}  UserDetail
+// @Security     BearerAuth
+// @Router       /api/v1/users/me [get]
+func (h *Handler) getMe(c *gin.Context) {
+	idInfo, ok := auth.FromContext(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		return
+	}
+	userID, err := uuid.Parse(idInfo.UserID)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid token"})
+		return
+	}
+
+	u, err := h.svc.GetUserDetail(c.Request.Context(), userID)
+	if err != nil {
+		httpkit.Error(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, u)
 }
 
 // listUsers godoc
