@@ -50,3 +50,9 @@ type WorkOrderNotifier interface {
 type SheetAssigner interface {
 	PreAssignSheet(ctx context.Context, sheetID uuid.UUID, workOrderID uuid.UUID) error
 }
+
+// CostingChecker verifies whether a costing record exists for a work order.
+// Implementation lives in the costing module; wired in main.go.
+type CostingChecker interface {
+	HasCostingRecord(ctx context.Context, workOrderID uuid.UUID) (bool, error)
+}

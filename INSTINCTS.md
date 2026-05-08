@@ -20,4 +20,6 @@ This file serves as the Dynamic Memory for the AI Agent. It records patterns, pi
 
 - [Cross-module ReceiveStock] When purchasing drives inventory creation, the adapter returns only `lot.ID` (not sheet IDs) because `inventory.ReceiveStock` does not expose individual sheet IDs. Design PO item → lot relationship, not PO item → individual sheet. Individual sheets are queryable later via `inventory_lots` join.
 
-- [POStatus typed string] Always define status enums as typed strings (`type POStatus string`) in the module's `iface.go`. This prevents accidental comparison with untyped string literals and makes exhaustive switch statements easier to verify during review.
+- [Cross-module Late-binding Cycle] When module A needs to check module B, but B also depends on A (A→B→A cycle), use a late-binding adapter with an empty `svc` field (like `woAdvanceAdapter`). Wire `adapter.svc = bSvc` after both services are constructed. Guard the adapter's method with `if a.svc == nil { return safeDefault }` to avoid nil panics during startup ordering edge cases.
+
+- [CostingType Enum] When a record can represent two semantically different states (ESTIMATED vs ACTUAL), model this as a `type CostingType string` enum in `iface.go`, not as a boolean flag. This allows exhaustive switch in the future and makes the API self-documenting.

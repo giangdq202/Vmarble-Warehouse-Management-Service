@@ -31,6 +31,10 @@ type mockStore struct {
 	finalizeCalled bool
 	finalizeErr    error
 
+	// hasCostingRecord
+	hasRecordResult bool
+	hasRecordErr    error
+
 	// selectCostingRecords
 	listResult []CostingRecord
 	listErr    error
@@ -65,6 +69,10 @@ func (m *mockStore) selectCostingRecordsPaged(_ context.Context, _ httpkit.PageP
 func (m *mockStore) finalizeCostingRecord(_ context.Context, _ uuid.UUID, _ uuid.UUID) error {
 	m.finalizeCalled = true
 	return m.finalizeErr
+}
+
+func (m *mockStore) hasCostingRecord(_ context.Context, _ uuid.UUID) (bool, error) {
+	return m.hasRecordResult, m.hasRecordErr
 }
 
 func (m *mockStore) insertCostingAdjustment(_ context.Context, _ CostingAdjustment) error {
@@ -115,6 +123,10 @@ func completedWO(woID, skuID uuid.UUID) WOInfo {
 	return WOInfo{ID: woID, SKUID: skuID, Status: domain.WOCompleted}
 }
 
+func plannedWO(woID, skuID uuid.UUID) WOInfo {
+	return WOInfo{ID: woID, SKUID: skuID, Status: domain.WOPlanned}
+}
+
 func newSvc(st *mockStore, wor *mockWOR, cdr *mockCDR, conr *mockCONR) Service {
 	return NewService(st, wor, cdr, conr)
 }
@@ -133,15 +145,16 @@ func notFoundStore() *mockStore {
 
 // ── TestComputeCost: BR-C01 status check ─────────────────────────────────────
 
-func TestComputeCost_WONotCompleted_ReturnsPreconditionFailed(t *testing.T) {
-	nonCompletedStatuses := []domain.WorkOrderStatus{
-		domain.WOPlanned,
+func TestComputeCost_InvalidStatus_ReturnsPreconditionFailed(t *testing.T) {
+	// Only IN_CUTTING, IN_PROCESSING, and COSTED are invalid for costing.
+	// PLANNED → ESTIMATED and COMPLETED → ACTUAL are both allowed.
+	invalidStatuses := []domain.WorkOrderStatus{
 		domain.WOInCutting,
 		domain.WOInProcessing,
 		domain.WOCosted,
 	}
 
-	for _, status := range nonCompletedStatuses {
+	for _, status := range invalidStatuses {
 		status := status
 		t.Run(string(status), func(t *testing.T) {
 			st := &mockStore{}
@@ -154,9 +167,44 @@ func TestComputeCost_WONotCompleted_ReturnsPreconditionFailed(t *testing.T) {
 				t.Errorf("status %s: expected ErrPreconditionFailed, got %v", status, err)
 			}
 			if st.insertCalled {
-				t.Error("store insert must NOT be called when WO is not completed")
+				t.Error("store insert must NOT be called for invalid status")
 			}
 		})
+	}
+}
+
+func TestComputeCost_PlannedWO_CreatesEstimatedRecord(t *testing.T) {
+	woID := uuid.New()
+	skuID := uuid.New()
+	st := notFoundStore()
+	wor := &mockWOR{result: plannedWO(woID, skuID)}
+	svc := newSvc(st, wor, &mockCDR{result: []CuttingData{}}, zeroCONR())
+
+	got, err := svc.ComputeCost(context.Background(), woID)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got.CostingType != CostingTypeEstimated {
+		t.Errorf("CostingType = %v, want ESTIMATED", got.CostingType)
+	}
+	if !st.insertCalled {
+		t.Error("store insert must be called for new estimated record")
+	}
+}
+
+func TestComputeCost_CompletedWO_CreatesActualRecord(t *testing.T) {
+	woID := uuid.New()
+	skuID := uuid.New()
+	st := notFoundStore()
+	wor := &mockWOR{result: completedWO(woID, skuID)}
+	svc := newSvc(st, wor, &mockCDR{result: []CuttingData{}}, zeroCONR())
+
+	got, err := svc.ComputeCost(context.Background(), woID)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got.CostingType != CostingTypeActual {
+		t.Errorf("CostingType = %v, want ACTUAL", got.CostingType)
 	}
 }
 
