@@ -15,3 +15,9 @@ This file serves as the Dynamic Memory for the AI Agent. It records patterns, pi
 (New lessons will be appended here at the end of every task by the AI Agent)
 
 - [SQL Guards] When a store UPDATE uses a WHERE guard (e.g. `AND assigned_to IS NULL`), ensure it encodes the **business invariant**, not an implementation assumption. `AND assigned_to IS NULL` silently blocks reassignment; `AND status = 'PLANNED'` correctly expresses mutability. When `RowsAffected() == 0`, always audit whether the WHERE clause is too tight before assuming a real conflict.
+
+- [New Module Wiring] When wiring a new module in `main.go`, `cmd/server` is gitignored (pattern `server` matches). Use `git add -f cmd/server/main.go` to force-stage it. Consider adding `!cmd/server/` to .gitignore to prevent this confusion.
+
+- [Cross-module ReceiveStock] When purchasing drives inventory creation, the adapter returns only `lot.ID` (not sheet IDs) because `inventory.ReceiveStock` does not expose individual sheet IDs. Design PO item → lot relationship, not PO item → individual sheet. Individual sheets are queryable later via `inventory_lots` join.
+
+- [POStatus typed string] Always define status enums as typed strings (`type POStatus string`) in the module's `iface.go`. This prevents accidental comparison with untyped string literals and makes exhaustive switch statements easier to verify during review.
