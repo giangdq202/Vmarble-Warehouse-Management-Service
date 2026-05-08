@@ -30,6 +30,8 @@ type mockStore struct {
 	completedWorkOrdersErr    error
 	costingFinalizations      []RecentCostingFinalizationItem
 	costingFinalizationsErr   error
+	boardStockSummary         []BoardStockSummaryItem
+	boardStockSummaryErr      error
 
 	costAllocationLimitSeen   int
 	recentCutsLimitSeen       int
@@ -79,6 +81,10 @@ func (m *mockStore) selectCompletedWorkOrders(_ context.Context, limit int) ([]R
 func (m *mockStore) selectCostingFinalizations(_ context.Context, limit int) ([]RecentCostingFinalizationItem, error) {
 	m.costingFinalLimitSeen = limit
 	return m.costingFinalizations, m.costingFinalizationsErr
+}
+
+func (m *mockStore) selectBoardStockSummary(_ context.Context) ([]BoardStockSummaryItem, error) {
+	return m.boardStockSummary, m.boardStockSummaryErr
 }
 
 func TestGetOverview_HappyPath(t *testing.T) {
@@ -167,5 +173,55 @@ func TestGetOverview_SelectRecentCutsError_Propagates(t *testing.T) {
 	_, err := svc.GetOverview(context.Background())
 	if !errors.Is(err, expectedErr) {
 		t.Errorf("expected recent cuts error to propagate, got %v", err)
+	}
+}
+
+// ── GetBoardStockSummary ──────────────────────────────────────────────────────
+
+func TestGetBoardStockSummary_HappyPath(t *testing.T) {
+	matID := uuid.New()
+	st := &mockStore{
+		boardStockSummary: []BoardStockSummaryItem{
+			{MaterialID: matID, MaterialName: "Đá marble trắng", Available: 12, Allocated: 3, AreaMM2: 86_400_000},
+		},
+	}
+	svc := NewService(st)
+	out, err := svc.GetBoardStockSummary(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(out) != 1 {
+		t.Fatalf("expected 1 item, got %d", len(out))
+	}
+	if out[0].Available != 12 {
+		t.Errorf("Available = %d, want 12", out[0].Available)
+	}
+	if out[0].AreaMM2 != 86_400_000 {
+		t.Errorf("AreaMM2 = %d, want 86400000", out[0].AreaMM2)
+	}
+}
+
+func TestGetBoardStockSummary_Empty_ReturnsEmptySlice(t *testing.T) {
+	st := &mockStore{boardStockSummary: []BoardStockSummaryItem{}}
+	svc := NewService(st)
+	out, err := svc.GetBoardStockSummary(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out == nil {
+		t.Error("expected non-nil empty slice, got nil")
+	}
+	if len(out) != 0 {
+		t.Errorf("expected 0 items, got %d", len(out))
+	}
+}
+
+func TestGetBoardStockSummary_StoreError_Propagates(t *testing.T) {
+	storeErr := errors.New("db error")
+	st := &mockStore{boardStockSummaryErr: storeErr}
+	svc := NewService(st)
+	_, err := svc.GetBoardStockSummary(context.Background())
+	if !errors.Is(err, storeErr) {
+		t.Errorf("expected store error to propagate, got %v", err)
 	}
 }

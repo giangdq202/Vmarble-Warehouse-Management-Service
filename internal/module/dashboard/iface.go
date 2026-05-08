@@ -81,6 +81,16 @@ type RecentCostingFinalizationItem struct {
 	CreatedAt   time.Time `json:"created_at"`
 }
 
+// BoardStockSummaryItem aggregates whole board sheet counts and area per material.
+type BoardStockSummaryItem struct {
+	MaterialID   uuid.UUID `json:"material_id"`
+	MaterialName string    `json:"material_name"`
+	Available    int       `json:"available"`
+	Allocated    int       `json:"allocated"`
+	AreaMM2      int64     `json:"area_mm2"`
+}
+
 type Service interface {
 	GetOverview(ctx context.Context) (OverviewOutput, error)
+	GetBoardStockSummary(ctx context.Context) ([]BoardStockSummaryItem, error)
 }

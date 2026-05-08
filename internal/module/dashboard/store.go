@@ -13,4 +13,5 @@ type store interface {
 	selectRecentCuts(ctx context.Context, limit int) ([]RecentCutItem, error)
 	selectCompletedWorkOrders(ctx context.Context, limit int) ([]RecentWorkOrderItem, error)
 	selectCostingFinalizations(ctx context.Context, limit int) ([]RecentCostingFinalizationItem, error)
+	selectBoardStockSummary(ctx context.Context) ([]BoardStockSummaryItem, error)
 }

@@ -330,3 +330,41 @@ func (s *pgStore) selectCostingFinalizations(ctx context.Context, limit int) ([]
 	return out, nil
 }
 
+
+func (s *pgStore) selectBoardStockSummary(ctx context.Context) ([]BoardStockSummaryItem, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT
+			il.material_id,
+			COALESCE(m.name, 'Unknown') AS material_name,
+			COUNT(*) FILTER (WHERE bs.status = 'AVAILABLE')              AS available,
+			COUNT(*) FILTER (WHERE bs.status = 'ALLOCATED')              AS allocated,
+			COALESCE(SUM(CAST(bs.length_mm AS bigint) * CAST(bs.width_mm AS bigint))
+				FILTER (WHERE bs.status = 'AVAILABLE'), 0)               AS area_mm2
+		FROM board_sheets bs
+		JOIN inventory_lots il ON il.id = bs.lot_id
+		LEFT JOIN materials m ON m.id = il.material_id
+		WHERE bs.status IN ('AVAILABLE', 'ALLOCATED')
+		GROUP BY il.material_id, m.name
+		ORDER BY m.name NULLS LAST
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := make([]BoardStockSummaryItem, 0)
+	for rows.Next() {
+		var item BoardStockSummaryItem
+		if err := rows.Scan(
+			&item.MaterialID,
+			&item.MaterialName,
+			&item.Available,
+			&item.Allocated,
+			&item.AreaMM2,
+		); err != nil {
+			return nil, err
+		}
+		out = append(out, item)
+	}
+	return out, rows.Err()
+}
