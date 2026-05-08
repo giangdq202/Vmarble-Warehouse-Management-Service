@@ -17,11 +17,12 @@ type service struct {
 	sc       SKUChecker
 	uc       UserChecker
 	sa       SheetAssigner
+	cc       CostingChecker
 	notifier WorkOrderNotifier
 }
 
-func NewService(s store, pc PlanChecker, sc SKUChecker, uc UserChecker, sa SheetAssigner, notifier WorkOrderNotifier) Service {
-	return &service{s: s, pc: pc, sc: sc, uc: uc, sa: sa, notifier: notifier}
+func NewService(s store, pc PlanChecker, sc SKUChecker, uc UserChecker, sa SheetAssigner, cc CostingChecker, notifier WorkOrderNotifier) Service {
+	return &service{s: s, pc: pc, sc: sc, uc: uc, sa: sa, cc: cc, notifier: notifier}
 }
 
 func (svc *service) CreateWorkOrder(ctx context.Context, in CreateWOInput) (WorkOrder, error) {
@@ -106,6 +107,17 @@ func (svc *service) AdvanceStatus(ctx context.Context, woID uuid.UUID, in Advanc
 		}
 		if in.CallerID != nil && *in.CallerID != *wo.AssignedTo {
 			return domain.NewBizError(domain.ErrPreconditionFailed, "only the assigned CNC operator can start cutting this work order")
+		}
+	}
+
+	// When advancing to IN_CUTTING, an estimated costing record must exist.
+	if in.To == domain.WOInCutting && svc.cc != nil {
+		hasCost, err := svc.cc.HasCostingRecord(ctx, woID)
+		if err != nil {
+			return err
+		}
+		if !hasCost {
+			return domain.NewBizError(domain.ErrPreconditionFailed, "estimated cost must be computed before cutting starts")
 		}
 	}
 

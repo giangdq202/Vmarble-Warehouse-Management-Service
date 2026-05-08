@@ -26,8 +26,13 @@ func (s *service) ComputeCost(ctx context.Context, workOrderID uuid.UUID) (Costi
 	if err != nil {
 		return CostingRecord{}, err
 	}
-	if wo.Status != domain.WOCompleted {
-		return CostingRecord{}, domain.NewBizError(domain.ErrPreconditionFailed, "work order must be completed before costing")
+	if wo.Status != domain.WOPlanned && wo.Status != domain.WOCompleted {
+		return CostingRecord{}, domain.NewBizError(domain.ErrPreconditionFailed, "costing can only be computed for PLANNED (estimated) or COMPLETED (actual) work orders")
+	}
+
+	costingType := CostingTypeActual
+	if wo.Status == domain.WOPlanned {
+		costingType = CostingTypeEstimated
 	}
 
 	cuttingData, err := s.cdr.GetCuttingDataForWO(ctx, workOrderID)
@@ -55,6 +60,7 @@ func (s *service) ComputeCost(ctx context.Context, workOrderID uuid.UUID) (Costi
 	record := CostingRecord{
 		WorkOrderID:   workOrderID,
 		SKUID:         wo.SKUID,
+		CostingType:   costingType,
 		MaterialCost:  materialCost,
 		AuxiliaryCost: auxiliaryCost,
 		LaborCost:     laborCost,
@@ -142,6 +148,10 @@ func (s *service) ListAdjustments(ctx context.Context, workOrderID uuid.UUID) ([
 
 func (s *service) GetCostingRecord(ctx context.Context, workOrderID uuid.UUID) (CostingRecord, error) {
 	return s.st.selectCostingRecordByWO(ctx, workOrderID)
+}
+
+func (s *service) HasCostingRecord(ctx context.Context, workOrderID uuid.UUID) (bool, error) {
+	return s.st.hasCostingRecord(ctx, workOrderID)
 }
 
 func (s *service) ListCostingRecords(ctx context.Context, p httpkit.PageParams, finalized *bool) (httpkit.PagedResult[CostingRecord], error) {

@@ -90,7 +90,10 @@ func main() {
 	planningSvc := planning.NewService(planningStore)
 	// woAdvanceAdapter is wired after productionSvc is constructed to avoid a
 	// construction-time cycle (inventory → production → inventory).
+	// costingChecker is similarly wired after costingSvc is constructed to avoid
+	// production → costing → production cycle.
 	woAdvance := &woAdvanceAdapter{}
+	costingChecker := &costingCheckerAdapter{}
 	barcodeGen := &cutBarcodeAdapter{planSvc: planningSvc}
 	inventorySvc := inventory.NewServiceWithOverflowThreshold(
 		inventoryStore,
@@ -105,6 +108,7 @@ func main() {
 		&skuAdapter{svc: catalogSvc},
 		&userAdapter{svc: authnSvc},
 		&sheetAssignAdapter{svc: inventorySvc},
+		costingChecker,
 		eventPublisher,
 	)
 	barcodeSvc := barcode.NewService(
@@ -125,6 +129,8 @@ func main() {
 		&cuttingAdapter{pool: pool},
 		&consumptionAdapter{pool: pool},
 	)
+	// Wire costing into the checker adapter now that it exists.
+	costingChecker.svc = costingSvc
 	dashboardSvc := dashboard.NewService(dashboardStore)
 	purchasingSvc := purchasing.NewService(
 		purchasingStore,
@@ -448,4 +454,18 @@ func (a *purchasingStockAdapter) ReceiveStock(ctx context.Context, in purchasing
 		return uuid.Nil, err
 	}
 	return lot.ID, nil
+}
+
+// costingCheckerAdapter implements production.CostingChecker.
+// The svc field is set after costingSvc is constructed to break the
+// production → costing → production construction cycle.
+type costingCheckerAdapter struct {
+	svc costing.Service
+}
+
+func (a *costingCheckerAdapter) HasCostingRecord(ctx context.Context, workOrderID uuid.UUID) (bool, error) {
+	if a.svc == nil {
+		return false, nil
+	}
+	return a.svc.HasCostingRecord(ctx, workOrderID)
 }
