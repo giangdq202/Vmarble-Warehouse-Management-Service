@@ -137,11 +137,16 @@ type AssignWorkOrderInput struct {
 // CallerID is optional — when provided and the target status is IN_CUTTING,
 // the caller must be the assigned CNC operator for this work order unless the
 // caller role is admin (super-admin override).
+// BypassOverflow=true asks the inventory module to skip the remnant-overflow
+// guard when issuing a new sheet. It is honoured only for callers with the
+// admin role and requires a non-empty BypassReason; the bypass is audit-logged.
 type AdvanceStatusInput struct {
-	To         domain.WorkOrderStatus `json:"status"`
-	SheetID    *uuid.UUID             `json:"sheet_id,omitempty"`
-	CallerID   *uuid.UUID             `json:"-"` // populated by handler from JWT claims, not from request body
-	CallerRole auth.Role              `json:"-"` // populated by handler from JWT claims, not from request body
+	To             domain.WorkOrderStatus `json:"status"`
+	SheetID        *uuid.UUID             `json:"sheet_id,omitempty"`
+	BypassOverflow bool                   `json:"bypass_overflow,omitempty"`
+	BypassReason   string                 `json:"bypass_reason,omitempty"`
+	CallerID       *uuid.UUID             `json:"-"` // populated by handler from JWT claims, not from request body
+	CallerRole     auth.Role              `json:"-"` // populated by handler from JWT claims, not from request body
 }
 
 type SuggestAssignmentResult struct {

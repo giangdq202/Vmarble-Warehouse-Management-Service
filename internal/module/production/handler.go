@@ -246,14 +246,21 @@ func (h *Handler) get(c *gin.Context) {
 // advanceWorkOrder godoc
 //
 // @Summary      Advance work order status
+// @Description  Transitions a work order. When advancing PLANNED→IN_CUTTING with `sheet_id`,
+// @Description  the inventory module pre-assigns the sheet and rejects the call with 412 if
+// @Description  remnant overflow is RED (≥15% of total stock). Admin callers may force the
+// @Description  bypass by setting `bypass_overflow=true` together with a non-empty
+// @Description  `bypass_reason`; the bypass is recorded in `inventory_audit_log` with
+// @Description  action=OVERFLOW_BYPASSED.
 // @Tags         production
 // @Accept       json
 // @Produce      json
 // @Param        id    path      string             true  "work order id (uuid)"
 // @Param        body  body      AdvanceStatusInput true  "payload"
 // @Success      200   {object}  map[string]string
-// @Failure      400   {object}  map[string]string
-// @Failure      409   {object}  map[string]string
+// @Failure      400   {object}  map[string]string  "invalid input (e.g. bypass_overflow=true without bypass_reason)"
+// @Failure      409   {object}  map[string]string  "invalid status transition"
+// @Failure      412   {object}  map[string]string  "precondition failed (operator mismatch, costing missing, remnant overflow lock, non-admin bypass)"
 // @Security     BearerAuth
 // @Failure      401  {object}  map[string]string
 // @Router       /api/v1/work-orders/{id}/advance [post]

@@ -46,9 +46,22 @@ type WorkOrderNotifier interface {
 // SheetAssigner pre-assigns a board sheet to a work order when the work order
 // transitions to IN_CUTTING. The sheet must be AVAILABLE; if it is not,
 // ErrPreconditionFailed is returned and the advance is aborted.
+// BypassOverflow=true allows an admin to issue a new sheet even when the
+// remnant overflow status is RED — the bypass is recorded in inventory_audit_log.
 // Implementation lives in the inventory module; wired in main.go.
 type SheetAssigner interface {
-	PreAssignSheet(ctx context.Context, sheetID uuid.UUID, workOrderID uuid.UUID) error
+	PreAssignSheet(ctx context.Context, in PreAssignSheetRequest) error
+}
+
+// PreAssignSheetRequest is the production module's view of the cross-module
+// PreAssignSheet call. Mirrors inventory.PreAssignSheetInput but kept local
+// so production does not import the inventory package.
+type PreAssignSheetRequest struct {
+	SheetID        uuid.UUID
+	WorkOrderID    uuid.UUID
+	BypassOverflow bool
+	ActorID        uuid.UUID
+	Reason         string
 }
 
 // CostingChecker verifies whether a costing record exists for a work order.

@@ -157,6 +157,19 @@ type OverflowStatus struct {
 	TotalSheetAreaMM2   int64         `json:"total_sheet_area_mm2"`
 }
 
+// PreAssignSheetInput carries the parameters for reserving a board sheet to a
+// work order. BypassOverflow=true allows an admin (or other authorised caller)
+// to issue a new sheet even when the remnant overflow status is RED — the
+// caller must supply a non-empty Reason and ActorID, which are recorded in
+// inventory_audit_log under action OVERFLOW_BYPASSED.
+type PreAssignSheetInput struct {
+	SheetID        uuid.UUID
+	WorkOrderID    uuid.UUID
+	BypassOverflow bool
+	ActorID        uuid.UUID
+	Reason         string
+}
+
 // TransferInput carries a request to move a Remnant or BoardSheet to a new bin location.
 type TransferInput struct {
 	EntityType    string    `json:"entity_type"`
@@ -246,8 +259,10 @@ type Service interface {
 	GetOverflowStatus(ctx context.Context) (OverflowStatus, error)
 	// PreAssignSheet stamps issued_to_work_order_id on a board sheet that is still
 	// AVAILABLE, reserving it for a work order before cutting begins.
-	// Returns ErrPreconditionFailed if the sheet is not AVAILABLE.
-	PreAssignSheet(ctx context.Context, sheetID uuid.UUID, workOrderID uuid.UUID) error
+	// Returns ErrPreconditionFailed if the sheet is not AVAILABLE, or if remnant
+	// overflow is RED and BypassOverflow is not set.
+	// When BypassOverflow=true under RED, an OVERFLOW_BYPASSED audit row is written.
+	PreAssignSheet(ctx context.Context, in PreAssignSheetInput) error
 
 	RecordCut(ctx context.Context, in RecordCutInput) (CutResult, error)
 
