@@ -16,4 +16,5 @@ type store interface {
 	hasCostingRecord(ctx context.Context, woID uuid.UUID) (bool, error)
 	insertCostingAdjustment(ctx context.Context, a CostingAdjustment) error
 	selectAdjustmentsByRecord(ctx context.Context, costingRecordID uuid.UUID) ([]CostingAdjustment, error)
+	selectWasteReport(ctx context.Context, filter WasteReportFilter) ([]WasteReportRow, error)
 }

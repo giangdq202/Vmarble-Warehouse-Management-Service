@@ -161,3 +161,17 @@ func (s *service) ListCostingRecords(ctx context.Context, p httpkit.PageParams, 
 	}
 	return httpkit.NewPagedResult(records, total, p), nil
 }
+
+func (s *service) ListWasteReport(ctx context.Context, filter WasteReportFilter) ([]WasteReportRow, error) {
+	if filter.From != nil && filter.To != nil && filter.From.After(*filter.To) {
+		return nil, domain.NewBizError(domain.ErrInvalidInput, "from must be before to")
+	}
+	rows, err := s.st.selectWasteReport(ctx, filter)
+	if err != nil {
+		return nil, err
+	}
+	if rows == nil {
+		rows = []WasteReportRow{}
+	}
+	return rows, nil
+}

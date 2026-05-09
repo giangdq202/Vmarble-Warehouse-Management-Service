@@ -194,6 +194,114 @@ func (s *pgStore) insertCostingAdjustment(ctx context.Context, a CostingAdjustme
 	return err
 }
 
+// selectWasteReport aggregates per-cut waste area into a per-material ledger.
+//
+// Per-cut waste = source_area - used_area - new_remnant_area, where:
+//   - source_area is the area of the immediate source (sheet for direct cuts,
+//     remnant for nested cuts);
+//   - new_remnant_area is the area of the at-most-one remnant produced by the
+//     cut (sheet/remnant becomes ISSUED/CONSUMED after a cut, so the source is
+//     a one-shot — guaranteeing 1:0..1 between cut and new_remnant via the
+//     parent_board_id / parent_remnant_id linkage).
+//
+// Cost is allocated per-cut using the originating board_sheet's cost_per_mm²
+// (sheet_cost / sheet_area), independent of the immediate source — every
+// remnant in the lineage shares the original sheet's per-area cost.
+//
+// Date filter is applied on cutting_records.created_at (half-open [from, to)).
+func (s *pgStore) selectWasteReport(ctx context.Context, filter WasteReportFilter) ([]WasteReportRow, error) {
+	const query = `
+WITH cuts_with_waste AS (
+    SELECT
+        cr.id AS cut_id,
+        COALESCE(cr.sheet_id, r.parent_board_id) AS root_sheet_id,
+        CAST(cr.used_length_mm AS bigint) * CAST(cr.used_width_mm AS bigint) AS used_area_mm2,
+        CASE
+            WHEN cr.sheet_id IS NOT NULL THEN
+                CAST(bs_direct.length_mm AS bigint) * CAST(bs_direct.width_mm AS bigint)
+            ELSE
+                CAST(r.length_mm AS bigint) * CAST(r.width_mm AS bigint)
+        END AS source_area_mm2,
+        COALESCE((
+            SELECT CAST(nr.length_mm AS bigint) * CAST(nr.width_mm AS bigint)
+            FROM remnants nr
+            WHERE (
+                (cr.sheet_id IS NOT NULL AND nr.parent_board_id = cr.sheet_id AND nr.parent_remnant_id IS NULL)
+                OR
+                (cr.remnant_source_id IS NOT NULL AND nr.parent_remnant_id = cr.remnant_source_id)
+            )
+            LIMIT 1
+        ), 0) AS new_remnant_area_mm2
+    FROM cutting_records cr
+    LEFT JOIN board_sheets bs_direct ON bs_direct.id = cr.sheet_id
+    LEFT JOIN remnants r ON r.id = cr.remnant_source_id
+    WHERE ($1::timestamptz IS NULL OR cr.created_at >= $1)
+      AND ($2::timestamptz IS NULL OR cr.created_at < $2)
+),
+sheet_costs_per_material AS (
+    SELECT
+        il.material_id,
+        AVG(bs.cost_amount)::bigint AS avg_sheet_cost,
+        MAX(bs.cost_currency) AS currency
+    FROM (SELECT DISTINCT root_sheet_id FROM cuts_with_waste WHERE root_sheet_id IS NOT NULL) ds
+    JOIN board_sheets bs ON bs.id = ds.root_sheet_id
+    JOIN inventory_lots il ON il.id = bs.lot_id
+    GROUP BY il.material_id
+)
+SELECT
+    il.material_id,
+    COALESCE(m.name, 'Unknown') AS material_name,
+    COUNT(DISTINCT cwnr.root_sheet_id) AS sheets_consumed,
+    COALESCE(SUM(GREATEST(cwnr.source_area_mm2 - cwnr.used_area_mm2 - cwnr.new_remnant_area_mm2, 0)), 0) AS waste_area_mm2,
+    COALESCE(scpm.avg_sheet_cost, 0) AS avg_sheet_cost,
+    COALESCE(scpm.currency, 'VND') AS currency,
+    COALESCE(SUM(
+        CASE
+            WHEN CAST(bs.length_mm AS bigint) * CAST(bs.width_mm AS bigint) > 0 THEN
+                GREATEST(cwnr.source_area_mm2 - cwnr.used_area_mm2 - cwnr.new_remnant_area_mm2, 0)
+                * bs.cost_amount
+                / (CAST(bs.length_mm AS bigint) * CAST(bs.width_mm AS bigint))
+            ELSE 0
+        END
+    ), 0) AS total_waste_cost
+FROM cuts_with_waste cwnr
+JOIN board_sheets bs ON bs.id = cwnr.root_sheet_id
+JOIN inventory_lots il ON il.id = bs.lot_id
+LEFT JOIN materials m ON m.id = il.material_id
+LEFT JOIN sheet_costs_per_material scpm ON scpm.material_id = il.material_id
+WHERE ($3::uuid IS NULL OR il.material_id = $3)
+GROUP BY il.material_id, m.name, scpm.avg_sheet_cost, scpm.currency
+ORDER BY total_waste_cost DESC, material_name ASC NULLS LAST
+`
+	rows, err := s.pool.Query(ctx, query, filter.From, filter.To, filter.MaterialID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := make([]WasteReportRow, 0)
+	for rows.Next() {
+		var r WasteReportRow
+		var avgAmount, totalAmount int64
+		var currency string
+		if err := rows.Scan(
+			&r.MaterialID,
+			&r.MaterialName,
+			&r.SheetsConsumed,
+			&r.WasteAreaMM2,
+			&avgAmount,
+			&currency,
+			&totalAmount,
+		); err != nil {
+			return nil, err
+		}
+		r.AvgSheetCost = domain.Money{Amount: avgAmount, Currency: currency}
+		r.TotalWasteCost = domain.Money{Amount: totalAmount, Currency: currency}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
 func (s *pgStore) selectAdjustmentsByRecord(ctx context.Context, costingRecordID uuid.UUID) ([]CostingAdjustment, error) {
 	rows, err := s.pool.Query(ctx,
 		`SELECT id, costing_record_id, reason,

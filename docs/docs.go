@@ -887,6 +887,78 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/costing/waste-report": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Aggregates per-cut waste area into a per-material report.\nWaste cost is allocated using the originating board sheet's\ncost-per-mm² (sheet_cost / sheet_area).",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "costing"
+                ],
+                "summary": "Per-material waste-cost ledger (BR-C03)",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "from date (Asia/Ho_Chi_Minh, YYYY-MM-DD)",
+                        "name": "from",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "to date inclusive (Asia/Ho_Chi_Minh, YYYY-MM-DD)",
+                        "name": "to",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "filter by material id (uuid)",
+                        "name": "material_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "response format: json (default) or csv",
+                        "name": "format",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/internal_module_costing.WasteReportRow"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/costing/{workOrderID}": {
             "get": {
                 "security": [
@@ -6616,6 +6688,29 @@ const docTemplate = `{
                 },
                 "reason": {
                     "type": "string"
+                }
+            }
+        },
+        "internal_module_costing.WasteReportRow": {
+            "type": "object",
+            "properties": {
+                "avg_sheet_cost": {
+                    "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.Money"
+                },
+                "material_id": {
+                    "type": "string"
+                },
+                "material_name": {
+                    "type": "string"
+                },
+                "sheets_consumed": {
+                    "type": "integer"
+                },
+                "total_waste_cost": {
+                    "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.Money"
+                },
+                "waste_area_mm2": {
+                    "type": "integer"
                 }
             }
         },
