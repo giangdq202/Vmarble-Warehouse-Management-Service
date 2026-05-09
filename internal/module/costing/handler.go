@@ -303,7 +303,7 @@ func writeWasteReportCSV(c *gin.Context, rows []WasteReportRow) {
 	if err := w.Error(); err != nil {
 		// Headers already written; best-effort log via standard error response is no longer possible.
 		// Append a comment line so downstream tooling sees the failure rather than a silently truncated file.
-		fmt.Fprintf(c.Writer, "# csv flush error: %s\n", err.Error())
+		_, _ = fmt.Fprintf(c.Writer, "# csv flush error: %s\n", err.Error())
 	}
 }
 
