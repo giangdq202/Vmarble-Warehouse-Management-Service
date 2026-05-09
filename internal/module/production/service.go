@@ -141,7 +141,29 @@ func (svc *service) AdvanceStatus(ctx context.Context, woID uuid.UUID, in Advanc
 	// The SheetAssigner validates the sheet is AVAILABLE and stamps
 	// issued_to_work_order_id on the board_sheets row before the status changes.
 	if in.To == domain.WOInCutting && in.SheetID != nil && svc.sa != nil {
-		if err := svc.sa.PreAssignSheet(ctx, *in.SheetID, woID); err != nil {
+		req := PreAssignSheetRequest{
+			SheetID:     *in.SheetID,
+			WorkOrderID: woID,
+		}
+		// BypassOverflow is admin-only — the route guard already restricts
+		// who can pass it, but defence-in-depth check here too. A reason is
+		// required so the audit row is meaningful.
+		if in.BypassOverflow {
+			if in.CallerRole != auth.RoleAdmin {
+				return domain.NewBizError(domain.ErrPreconditionFailed,
+					"only admin may bypass remnant overflow lock")
+			}
+			if in.BypassReason == "" {
+				return domain.NewBizError(domain.ErrInvalidInput,
+					"bypass_reason is required when bypass_overflow=true")
+			}
+			req.BypassOverflow = true
+			req.Reason = in.BypassReason
+			if in.CallerID != nil {
+				req.ActorID = *in.CallerID
+			}
+		}
+		if err := svc.sa.PreAssignSheet(ctx, req); err != nil {
 			return err
 		}
 	}

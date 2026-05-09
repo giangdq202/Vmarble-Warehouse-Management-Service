@@ -208,16 +208,22 @@ func (m *mockWorkOrderNotifier) NotifyAssignment(_ context.Context, _, _, _ stri
 
 // mockSheetAssigner satisfies SheetAssigner.
 type mockSheetAssigner struct {
-	called      bool
-	calledSheet uuid.UUID
-	calledWO    uuid.UUID
-	err         error
+	called         bool
+	calledSheet    uuid.UUID
+	calledWO       uuid.UUID
+	calledBypass   bool
+	calledActorID  uuid.UUID
+	calledReason   string
+	err            error
 }
 
-func (m *mockSheetAssigner) PreAssignSheet(_ context.Context, sheetID uuid.UUID, woID uuid.UUID) error {
+func (m *mockSheetAssigner) PreAssignSheet(_ context.Context, in PreAssignSheetRequest) error {
 	m.called = true
-	m.calledSheet = sheetID
-	m.calledWO = woID
+	m.calledSheet = in.SheetID
+	m.calledWO = in.WorkOrderID
+	m.calledBypass = in.BypassOverflow
+	m.calledActorID = in.ActorID
+	m.calledReason = in.Reason
 	return m.err
 }
 
@@ -1032,6 +1038,90 @@ func TestAdvanceStatus_SheetID_OnNonCuttingTransition_IsIgnored(t *testing.T) {
 	}
 	if sa.called {
 		t.Error("PreAssignSheet must NOT be called for non-IN_CUTTING transitions")
+	}
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// AdvanceStatus — overflow bypass (Issue #222)
+// ═════════════════════════════════════════════════════════════════════════════
+
+func TestAdvanceStatus_ToInCutting_BypassByAdmin_PassesBypassToInventory(t *testing.T) {
+	woID := uuid.New()
+	sheetID := uuid.New()
+	adminID := uuid.New()
+	wo, _ := assignedWO(woID, domain.WOPlanned)
+	st := &mockStore{selectWorkOrderByIDResult: wo}
+	sa := &mockSheetAssigner{}
+	svc := NewService(st, approvedPlan(uuid.New()), skuNoMetal(uuid.New()), &mockUserChecker{}, sa, nil, nil)
+
+	err := svc.AdvanceStatus(context.Background(), woID, AdvanceStatusInput{
+		To:             domain.WOInCutting,
+		SheetID:        &sheetID,
+		BypassOverflow: true,
+		BypassReason:   "urgent customer order",
+		CallerID:       &adminID,
+		CallerRole:     auth.RoleAdmin,
+	})
+	if err != nil {
+		t.Fatalf("admin bypass must succeed, got %v", err)
+	}
+	if !sa.calledBypass {
+		t.Error("BypassOverflow must be propagated to inventory")
+	}
+	if sa.calledReason != "urgent customer order" {
+		t.Errorf("reason = %q, want %q", sa.calledReason, "urgent customer order")
+	}
+	if sa.calledActorID != adminID {
+		t.Errorf("actor = %v, want %v", sa.calledActorID, adminID)
+	}
+}
+
+func TestAdvanceStatus_ToInCutting_BypassByNonAdmin_IsPreconditionFailed(t *testing.T) {
+	woID := uuid.New()
+	sheetID := uuid.New()
+	wo, callerID := assignedWO(woID, domain.WOPlanned)
+	st := &mockStore{selectWorkOrderByIDResult: wo}
+	sa := &mockSheetAssigner{}
+	svc := NewService(st, approvedPlan(uuid.New()), skuNoMetal(uuid.New()), &mockUserChecker{}, sa, nil, nil)
+
+	err := svc.AdvanceStatus(context.Background(), woID, AdvanceStatusInput{
+		To:             domain.WOInCutting,
+		SheetID:        &sheetID,
+		BypassOverflow: true,
+		BypassReason:   "force",
+		CallerID:       &callerID,
+		CallerRole:     auth.RoleCNC,
+	})
+	if !errors.Is(err, domain.ErrPreconditionFailed) {
+		t.Errorf("non-admin bypass must be rejected, got %v", err)
+	}
+	if sa.called {
+		t.Error("PreAssignSheet must NOT be called when non-admin bypass is rejected")
+	}
+}
+
+func TestAdvanceStatus_ToInCutting_BypassWithoutReason_IsInvalidInput(t *testing.T) {
+	woID := uuid.New()
+	sheetID := uuid.New()
+	adminID := uuid.New()
+	wo, _ := assignedWO(woID, domain.WOPlanned)
+	st := &mockStore{selectWorkOrderByIDResult: wo}
+	sa := &mockSheetAssigner{}
+	svc := NewService(st, approvedPlan(uuid.New()), skuNoMetal(uuid.New()), &mockUserChecker{}, sa, nil, nil)
+
+	err := svc.AdvanceStatus(context.Background(), woID, AdvanceStatusInput{
+		To:             domain.WOInCutting,
+		SheetID:        &sheetID,
+		BypassOverflow: true,
+		BypassReason:   "",
+		CallerID:       &adminID,
+		CallerRole:     auth.RoleAdmin,
+	})
+	if !errors.Is(err, domain.ErrInvalidInput) {
+		t.Errorf("missing bypass_reason must be ErrInvalidInput, got %v", err)
+	}
+	if sa.called {
+		t.Error("PreAssignSheet must NOT be called when reason is missing")
 	}
 }
 

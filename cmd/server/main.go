@@ -276,8 +276,14 @@ type sheetAssignAdapter struct {
 	svc inventory.Service
 }
 
-func (a *sheetAssignAdapter) PreAssignSheet(ctx context.Context, sheetID uuid.UUID, workOrderID uuid.UUID) error {
-	return a.svc.PreAssignSheet(ctx, sheetID, workOrderID)
+func (a *sheetAssignAdapter) PreAssignSheet(ctx context.Context, in production.PreAssignSheetRequest) error {
+	return a.svc.PreAssignSheet(ctx, inventory.PreAssignSheetInput{
+		SheetID:        in.SheetID,
+		WorkOrderID:    in.WorkOrderID,
+		BypassOverflow: in.BypassOverflow,
+		ActorID:        in.ActorID,
+		Reason:         in.Reason,
+	})
 }
 
 // woAdvanceAdapter implements inventory.WorkOrderAdvancer.

@@ -1221,6 +1221,61 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/dashboard/board-stock-summary": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns available and allocated whole board sheet counts and total area per material type",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "dashboard"
+                ],
+                "summary": "Get whole board sheet stock summary by material",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/internal_module_dashboard.BoardStockSummaryItem"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/dashboard/overview": {
             "get": {
                 "security": [
@@ -5010,6 +5065,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
+                "description": "Transitions a work order. When advancing PLANNED→IN_CUTTING with ` + "`" + `sheet_id` + "`" + `,\nthe inventory module pre-assigns the sheet and rejects the call with 412 if\nremnant overflow is RED (≥15% of total stock). Admin callers may force the\nbypass by setting ` + "`" + `bypass_overflow=true` + "`" + ` together with a non-empty\n` + "`" + `bypass_reason` + "`" + `; the bypass is recorded in ` + "`" + `inventory_audit_log` + "`" + ` with\naction=OVERFLOW_BYPASSED.",
                 "consumes": [
                     "application/json"
                 ],
@@ -5049,7 +5105,7 @@ const docTemplate = `{
                         }
                     },
                     "400": {
-                        "description": "Bad Request",
+                        "description": "invalid input (e.g. bypass_overflow=true without bypass_reason)",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -5067,7 +5123,16 @@ const docTemplate = `{
                         }
                     },
                     "409": {
-                        "description": "Conflict",
+                        "description": "invalid status transition",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "412": {
+                        "description": "precondition failed (operator mismatch, costing missing, remnant overflow lock, non-admin bypass)",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -6444,6 +6509,9 @@ const docTemplate = `{
                 "auxiliary_cost": {
                     "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.Money"
                 },
+                "costing_type": {
+                    "$ref": "#/definitions/internal_module_costing.CostingType"
+                },
                 "created_at": {
                     "type": "string"
                 },
@@ -6476,6 +6544,17 @@ const docTemplate = `{
                 }
             }
         },
+        "internal_module_costing.CostingType": {
+            "type": "string",
+            "enum": [
+                "ESTIMATED",
+                "ACTUAL"
+            ],
+            "x-enum-varnames": [
+                "CostingTypeEstimated",
+                "CostingTypeActual"
+            ]
+        },
         "internal_module_costing.CreateAdjustmentInput": {
             "type": "object",
             "properties": {
@@ -6489,6 +6568,26 @@ const docTemplate = `{
                     "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.Money"
                 },
                 "reason": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_module_dashboard.BoardStockSummaryItem": {
+            "type": "object",
+            "properties": {
+                "allocated": {
+                    "type": "integer"
+                },
+                "area_mm2": {
+                    "type": "integer"
+                },
+                "available": {
+                    "type": "integer"
+                },
+                "material_id": {
+                    "type": "string"
+                },
+                "material_name": {
                     "type": "string"
                 }
             }
@@ -7304,6 +7403,12 @@ const docTemplate = `{
         "internal_module_production.AdvanceStatusInput": {
             "type": "object",
             "properties": {
+                "bypass_overflow": {
+                    "type": "boolean"
+                },
+                "bypass_reason": {
+                    "type": "string"
+                },
                 "sheet_id": {
                     "type": "string"
                 },

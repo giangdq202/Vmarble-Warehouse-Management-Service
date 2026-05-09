@@ -100,16 +100,34 @@ func (s *service) GetSheet(ctx context.Context, sheetID uuid.UUID) (BoardSheet, 
 	return s.st.selectSheetByID(ctx, sheetID)
 }
 
-func (s *service) PreAssignSheet(ctx context.Context, sheetID uuid.UUID, workOrderID uuid.UUID) error {
+func (s *service) PreAssignSheet(ctx context.Context, in PreAssignSheetInput) error {
 	overflow, err := s.GetOverflowStatus(ctx)
 	if err != nil {
 		return err
 	}
 	if overflow.BlockNewSheetIssue {
-		return domain.NewBizError(domain.ErrPreconditionFailed,
-			"cannot issue new sheet while overflow status is RED")
+		if !in.BypassOverflow {
+			return domain.NewBizError(domain.ErrPreconditionFailed,
+				"remnant overflow: must consume remnants before issuing new sheets")
+		}
+		if in.ActorID == uuid.Nil || in.Reason == "" {
+			return domain.NewBizError(domain.ErrInvalidInput,
+				"overflow bypass requires actor and reason")
+		}
+		reason := in.Reason
+		if err := s.st.insertAuditLog(ctx, AuditLogEntry{
+			ID:         uuid.New(),
+			EntityType: entityTypeBoardSheet,
+			EntityID:   in.SheetID,
+			Action:     auditActionOverflowBypassed,
+			ActorID:    in.ActorID,
+			Reason:     &reason,
+			CreatedAt:  time.Now().UTC(),
+		}); err != nil {
+			return fmt.Errorf("write overflow bypass audit log: %w", err)
+		}
 	}
-	return s.st.preAssignSheet(ctx, sheetID, workOrderID)
+	return s.st.preAssignSheet(ctx, in.SheetID, in.WorkOrderID)
 }
 
 func (s *service) ListAvailableSheets(ctx context.Context, p httpkit.PageParams, materialID *uuid.UUID) (httpkit.PagedResult[BoardSheet], error) {
@@ -451,6 +469,9 @@ const (
 	entityTypeBoardSheet = "BOARD_SHEET"
 	auditActionTransfer  = "TRANSFER"
 	auditActionAdjust    = "ADJUSTMENT"
+	// auditActionOverflowBypassed is written when an authorised caller pre-assigns
+	// a board sheet to a work order while remnant overflow is RED.
+	auditActionOverflowBypassed = "OVERFLOW_BYPASSED"
 )
 
 func (s *service) Transfer(ctx context.Context, in TransferInput) (TransferResult, error) {

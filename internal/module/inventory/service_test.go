@@ -3552,7 +3552,7 @@ func TestGetRemnant_NotFound_ReturnsError(t *testing.T) {
 func TestPreAssignSheet_HappyPath(t *testing.T) {
 	st := &mockStore{preAssignSheetErr: nil, selectOverflowSheetArea: 1}
 	svc := NewService(st, nil)
-	if err := svc.PreAssignSheet(context.Background(), uuid.New(), uuid.New()); err != nil {
+	if err := svc.PreAssignSheet(context.Background(), PreAssignSheetInput{SheetID: uuid.New(), WorkOrderID: uuid.New()}); err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
 	if !st.preAssignSheetCalled {
@@ -3564,7 +3564,7 @@ func TestPreAssignSheet_StoreError_Propagates(t *testing.T) {
 	storeErr := errors.New("sheet not available")
 	st := &mockStore{preAssignSheetErr: storeErr, selectOverflowSheetArea: 1}
 	svc := NewService(st, nil)
-	err := svc.PreAssignSheet(context.Background(), uuid.New(), uuid.New())
+	err := svc.PreAssignSheet(context.Background(), PreAssignSheetInput{SheetID: uuid.New(), WorkOrderID: uuid.New()})
 	if !errors.Is(err, storeErr) {
 		t.Errorf("want store error, got %v", err)
 	}
@@ -3573,11 +3573,82 @@ func TestPreAssignSheet_StoreError_Propagates(t *testing.T) {
 func TestPreAssignSheet_RedOverflow_BlocksIssue(t *testing.T) {
 	st := &mockStore{selectOverflowRemnantArea: 200, selectOverflowSheetArea: 100}
 	svc := NewServiceWithOverflowThreshold(st, nil, 15)
-	if err := svc.PreAssignSheet(context.Background(), uuid.New(), uuid.New()); !errors.Is(err, domain.ErrPreconditionFailed) {
+	if err := svc.PreAssignSheet(context.Background(), PreAssignSheetInput{SheetID: uuid.New(), WorkOrderID: uuid.New()}); !errors.Is(err, domain.ErrPreconditionFailed) {
 		t.Errorf("want ErrPreconditionFailed, got %v", err)
 	}
 	if st.preAssignSheetCalled {
 		t.Error("preAssignSheet should not be called when overflow is RED")
+	}
+}
+
+func TestPreAssignSheet_RedOverflow_BypassWithReason_WritesAuditAndProceeds(t *testing.T) {
+	st := &mockStore{selectOverflowRemnantArea: 200, selectOverflowSheetArea: 100}
+	svc := NewServiceWithOverflowThreshold(st, nil, 15)
+	actorID := uuid.New()
+	err := svc.PreAssignSheet(context.Background(), PreAssignSheetInput{
+		SheetID:        uuid.New(),
+		WorkOrderID:    uuid.New(),
+		BypassOverflow: true,
+		ActorID:        actorID,
+		Reason:         "urgent customer order",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !st.preAssignSheetCalled {
+		t.Error("expected preAssignSheet to be called when bypass is granted")
+	}
+	if !st.insertAuditLogCalled {
+		t.Fatal("want audit log entry written, none was")
+	}
+	entry := st.insertAuditLogEntry
+	if entry.Action != auditActionOverflowBypassed {
+		t.Errorf("want audit action %q, got %q", auditActionOverflowBypassed, entry.Action)
+	}
+	if entry.ActorID != actorID {
+		t.Errorf("want actor %v, got %v", actorID, entry.ActorID)
+	}
+	if entry.Reason == nil || *entry.Reason != "urgent customer order" {
+		t.Errorf("want reason 'urgent customer order', got %v", entry.Reason)
+	}
+}
+
+func TestPreAssignSheet_RedOverflow_BypassMissingReason_Rejected(t *testing.T) {
+	st := &mockStore{selectOverflowRemnantArea: 200, selectOverflowSheetArea: 100}
+	svc := NewServiceWithOverflowThreshold(st, nil, 15)
+	err := svc.PreAssignSheet(context.Background(), PreAssignSheetInput{
+		SheetID:        uuid.New(),
+		WorkOrderID:    uuid.New(),
+		BypassOverflow: true,
+		ActorID:        uuid.New(),
+		Reason:         "",
+	})
+	if !errors.Is(err, domain.ErrInvalidInput) {
+		t.Errorf("want ErrInvalidInput, got %v", err)
+	}
+	if st.preAssignSheetCalled {
+		t.Error("preAssignSheet must not be called when bypass is missing reason")
+	}
+	if st.insertAuditLogCalled {
+		t.Error("audit log must not be written when bypass is rejected")
+	}
+}
+
+func TestPreAssignSheet_RedOverflow_BypassMissingActor_Rejected(t *testing.T) {
+	st := &mockStore{selectOverflowRemnantArea: 200, selectOverflowSheetArea: 100}
+	svc := NewServiceWithOverflowThreshold(st, nil, 15)
+	err := svc.PreAssignSheet(context.Background(), PreAssignSheetInput{
+		SheetID:        uuid.New(),
+		WorkOrderID:    uuid.New(),
+		BypassOverflow: true,
+		ActorID:        uuid.Nil,
+		Reason:         "force",
+	})
+	if !errors.Is(err, domain.ErrInvalidInput) {
+		t.Errorf("want ErrInvalidInput, got %v", err)
+	}
+	if st.preAssignSheetCalled {
+		t.Error("preAssignSheet must not be called when bypass is missing actor")
 	}
 }
 
