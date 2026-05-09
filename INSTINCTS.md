@@ -23,3 +23,5 @@ This file serves as the Dynamic Memory for the AI Agent. It records patterns, pi
 - [Cross-module Late-binding Cycle] When module A needs to check module B, but B also depends on A (A→B→A cycle), use a late-binding adapter with an empty `svc` field (like `woAdvanceAdapter`). Wire `adapter.svc = bSvc` after both services are constructed. Guard the adapter's method with `if a.svc == nil { return safeDefault }` to avoid nil panics during startup ordering edge cases.
 
 - [CostingType Enum] When a record can represent two semantically different states (ESTIMATED vs ACTUAL), model this as a `type CostingType string` enum in `iface.go`, not as a boolean flag. This allows exhaustive switch in the future and makes the API self-documenting.
+
+- [Dashboard Read-only Aggregation] For read-only dashboard endpoints that aggregate across tables, place the SQL directly in `dashboard/pgstore.go` — no migration needed, no transaction required. Use `COUNT(*) FILTER (WHERE status = 'X')` for multi-status aggregation in a single pass instead of multiple queries.

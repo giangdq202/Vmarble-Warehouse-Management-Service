@@ -76,3 +76,11 @@ func (svc *service) GetOverview(ctx context.Context) (OverviewOutput, error) {
 		},
 	}, nil
 }
+
+func (s *service) GetBoardStockSummary(ctx context.Context) ([]BoardStockSummaryItem, error) {
+	items, err := s.s.selectBoardStockSummary(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return items, nil
+}
