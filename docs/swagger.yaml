@@ -780,6 +780,10 @@ definitions:
         type: string
       id:
         type: string
+      metadata:
+        items:
+          type: integer
+        type: array
       reason:
         type: string
       session_id:
@@ -1208,6 +1212,12 @@ definitions:
     type: object
   internal_module_production.CreateWOInput:
     properties:
+      bypass_reason:
+        description: |-
+          BypassReason is an optional planner note recorded on the REMNANT_BYPASSED
+          audit row when the work order is created without allocating any of the
+          fitting remnant suggestions (BR-K05).
+        type: string
       plan_id:
         type: string
       quantity:
@@ -2232,6 +2242,38 @@ paths:
       summary: Get dashboard overview
       tags:
       - dashboard
+  /api/v1/inventory/audit-log:
+    get:
+      description: |-
+        Useful for accountant/admin review (e.g. action=REMNANT_BYPASSED,
+        OVERFLOW_BYPASSED). Restricted to accountant + admin roles.
+      parameters:
+      - description: audit action (REMNANT_BYPASSED, OVERFLOW_BYPASSED, TRANSFER,
+          ADJUSTMENT)
+        in: query
+        name: action
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/internal_module_inventory.AuditLogEntry'
+            type: array
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: List audit log entries by action across all entities
+      tags:
+      - inventory
   /api/v1/inventory/audit-log/{entity_type}/{entity_id}:
     get:
       parameters:
@@ -4499,6 +4541,12 @@ paths:
     post:
       consumes:
       - application/json
+      description: |-
+        Creates a PLANNED work order. If the SKU has dimensions and there
+        is at least one fitting remnant in stock, the system writes a
+        REMNANT_BYPASSED row to inventory_audit_log to record that the
+        planner did not allocate any of the suggestions (BR-K05). Provide
+        `bypass_reason` to attach a free-text note to that audit row.
       parameters:
       - description: payload
         in: body

@@ -467,11 +467,16 @@ func (s *service) ReleaseExpiredAllocations(ctx context.Context, before time.Tim
 const (
 	entityTypeRemnant    = "REMNANT"
 	entityTypeBoardSheet = "BOARD_SHEET"
+	entityTypeWorkOrder  = "WORK_ORDER"
 	auditActionTransfer  = "TRANSFER"
 	auditActionAdjust    = "ADJUSTMENT"
 	// auditActionOverflowBypassed is written when an authorised caller pre-assigns
 	// a board sheet to a work order while remnant overflow is RED.
 	auditActionOverflowBypassed = "OVERFLOW_BYPASSED"
+	// auditActionRemnantBypassed is written when CreateWorkOrder fires with at
+	// least one matching remnant suggestion but the planner did not allocate
+	// any remnant to the work order (BR-K05).
+	auditActionRemnantBypassed = "REMNANT_BYPASSED"
 )
 
 func (s *service) Transfer(ctx context.Context, in TransferInput) (TransferResult, error) {
@@ -542,11 +547,53 @@ func (s *service) Transfer(ctx context.Context, in TransferInput) (TransferResul
 }
 
 func (s *service) ListAuditLog(ctx context.Context, entityID uuid.UUID, entityType string) ([]AuditLogEntry, error) {
-	if entityType != entityTypeRemnant && entityType != entityTypeBoardSheet {
+	if entityType != entityTypeRemnant && entityType != entityTypeBoardSheet && entityType != entityTypeWorkOrder {
 		return nil, domain.NewBizError(domain.ErrInvalidInput,
-			"entity_type must be REMNANT or BOARD_SHEET")
+			"entity_type must be REMNANT, BOARD_SHEET, or WORK_ORDER")
 	}
 	return s.st.selectAuditLogByEntity(ctx, entityID, entityType)
+}
+
+func (s *service) ListAuditLogByAction(ctx context.Context, action string) ([]AuditLogEntry, error) {
+	if action == "" {
+		return nil, domain.NewBizError(domain.ErrInvalidInput, "action is required")
+	}
+	return s.st.selectAuditLogByAction(ctx, action)
+}
+
+func (s *service) LogRemnantBypass(ctx context.Context, in LogRemnantBypassInput) error {
+	if in.WorkOrderID == uuid.Nil {
+		return domain.NewBizError(domain.ErrInvalidInput, "work_order_id is required")
+	}
+	if in.ActorID == uuid.Nil {
+		return domain.NewBizError(domain.ErrInvalidInput, "actor_id is required")
+	}
+	if len(in.SuggestedRemnantIDs) == 0 {
+		return domain.NewBizError(domain.ErrInvalidInput, "suggested_remnant_ids must contain at least one id")
+	}
+	metaBytes, err := json.Marshal(map[string]any{
+		"suggested_remnant_ids": in.SuggestedRemnantIDs,
+	})
+	if err != nil {
+		return fmt.Errorf("encode remnant bypass metadata: %w", err)
+	}
+	entry := AuditLogEntry{
+		ID:         uuid.New(),
+		EntityType: entityTypeWorkOrder,
+		EntityID:   in.WorkOrderID,
+		Action:     auditActionRemnantBypassed,
+		ActorID:    in.ActorID,
+		Metadata:   metaBytes,
+		CreatedAt:  time.Now().UTC(),
+	}
+	if in.Reason != "" {
+		reason := in.Reason
+		entry.Reason = &reason
+	}
+	if err := s.st.insertAuditLog(ctx, entry); err != nil {
+		return fmt.Errorf("write remnant bypass audit log: %w", err)
+	}
+	return nil
 }
 
 func (s *service) CreateCycleCountSession(ctx context.Context, in CreateCycleCountInput) (CycleCountSession, error) {

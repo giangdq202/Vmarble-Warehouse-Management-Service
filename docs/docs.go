@@ -1328,6 +1328,52 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/inventory/audit-log": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Useful for accountant/admin review (e.g. action=REMNANT_BYPASSED,\nOVERFLOW_BYPASSED). Restricted to accountant + admin roles.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "inventory"
+                ],
+                "summary": "List audit log entries by action across all entities",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "audit action (REMNANT_BYPASSED, OVERFLOW_BYPASSED, TRANSFER, ADJUSTMENT)",
+                        "name": "action",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/internal_module_inventory.AuditLogEntry"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/inventory/audit-log/{entity_type}/{entity_id}": {
             "get": {
                 "security": [
@@ -4904,6 +4950,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
+                "description": "Creates a PLANNED work order. If the SKU has dimensions and there\nis at least one fitting remnant in stock, the system writes a\nREMNANT_BYPASSED row to inventory_audit_log to record that the\nplanner did not allocate any of the suggestions (BR-K05). Provide\n` + "`" + `bypass_reason` + "`" + ` to attach a free-text note to that audit row.",
                 "consumes": [
                     "application/json"
                 ],
@@ -6835,6 +6882,12 @@ const docTemplate = `{
                 "id": {
                     "type": "string"
                 },
+                "metadata": {
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    }
+                },
                 "reason": {
                     "type": "string"
                 },
@@ -7482,6 +7535,10 @@ const docTemplate = `{
         "internal_module_production.CreateWOInput": {
             "type": "object",
             "properties": {
+                "bypass_reason": {
+                    "description": "BypassReason is an optional planner note recorded on the REMNANT_BYPASSED\naudit row when the work order is created without allocating any of the\nfitting remnant suggestions (BR-K05).",
+                    "type": "string"
+                },
                 "plan_id": {
                     "type": "string"
                 },

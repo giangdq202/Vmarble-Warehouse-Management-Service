@@ -115,6 +115,11 @@ func (h *Handler) Register(rg *gin.RouterGroup) {
 // createWorkOrder godoc
 //
 // @Summary      Create work order
+// @Description  Creates a PLANNED work order. If the SKU has dimensions and there
+// @Description  is at least one fitting remnant in stock, the system writes a
+// @Description  REMNANT_BYPASSED row to inventory_audit_log to record that the
+// @Description  planner did not allocate any of the suggestions (BR-K05). Provide
+// @Description  `bypass_reason` to attach a free-text note to that audit row.
 // @Tags         production
 // @Accept       json
 // @Produce      json
@@ -128,6 +133,11 @@ func (h *Handler) create(c *gin.Context) {
 	var in CreateWOInput
 	if !httpkit.Bind(c, &in) {
 		return
+	}
+	if identity, ok := auth.FromContext(c); ok {
+		if callerID, err := uuid.Parse(identity.UserID); err == nil {
+			in.CallerID = &callerID
+		}
 	}
 	wo, err := h.svc.CreateWorkOrder(c.Request.Context(), in)
 	if err != nil {

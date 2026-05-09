@@ -102,7 +102,7 @@ func main() {
 		barcodeGen,
 	)
 
-	productionSvc := production.NewService(
+	productionSvc := production.NewServiceWithRemnantAdvisor(
 		productionStore,
 		&planAdapter{svc: planningSvc},
 		&skuAdapter{svc: catalogSvc},
@@ -110,6 +110,7 @@ func main() {
 		&sheetAssignAdapter{svc: inventorySvc},
 		costingChecker,
 		eventPublisher,
+		&remnantAdvisorAdapter{svc: inventorySvc},
 	)
 	barcodeSvc := barcode.NewService(
 		barcodeStore,
@@ -245,7 +246,11 @@ func (a *skuAdapter) GetSKU(ctx context.Context, skuID uuid.UUID) (production.SK
 	if err != nil {
 		return production.SKUInfo{}, err
 	}
-	return production.SKUInfo{ID: s.ID, RequiresMetal: s.RequiresMetal}, nil
+	return production.SKUInfo{
+		ID:            s.ID,
+		RequiresMetal: s.RequiresMetal,
+		Dimensions:    s.Dimensions,
+	}, nil
 }
 
 type userAdapter struct {
@@ -283,6 +288,35 @@ func (a *sheetAssignAdapter) PreAssignSheet(ctx context.Context, in production.P
 		BypassOverflow: in.BypassOverflow,
 		ActorID:        in.ActorID,
 		Reason:         in.Reason,
+	})
+}
+
+// remnantAdvisorAdapter implements production.RemnantAdvisor.
+// Bridges production → inventory.SuggestRemnants + LogRemnantBypass for BR-K05.
+type remnantAdvisorAdapter struct {
+	svc inventory.Service
+}
+
+func (a *remnantAdvisorAdapter) SuggestRemnants(ctx context.Context, requiredDim domain.Dimension) ([]production.RemnantSuggestionRef, error) {
+	suggestions, err := a.svc.SuggestRemnants(ctx, inventory.SuggestRemnantsInput{
+		RequiredDimension: requiredDim,
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]production.RemnantSuggestionRef, len(suggestions))
+	for i, s := range suggestions {
+		out[i] = production.RemnantSuggestionRef{RemnantID: s.Remnant.ID}
+	}
+	return out, nil
+}
+
+func (a *remnantAdvisorAdapter) LogRemnantBypass(ctx context.Context, in production.LogRemnantBypassRequest) error {
+	return a.svc.LogRemnantBypass(ctx, inventory.LogRemnantBypassInput{
+		WorkOrderID:         in.WorkOrderID,
+		ActorID:             in.ActorID,
+		SuggestedRemnantIDs: in.SuggestedRemnantIDs,
+		Reason:              in.Reason,
 	})
 }
 

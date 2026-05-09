@@ -222,6 +222,9 @@ func (s *concurrentMockStore) insertAuditLog(_ context.Context, _ AuditLogEntry)
 func (s *concurrentMockStore) selectAuditLogByEntity(_ context.Context, _ uuid.UUID, _ string) ([]AuditLogEntry, error) {
 	return nil, nil
 }
+func (s *concurrentMockStore) selectAuditLogByAction(_ context.Context, _ string) ([]AuditLogEntry, error) {
+	return nil, nil
+}
 func (s *concurrentMockStore) insertCycleCountSession(_ context.Context, _ CycleCountSession) error {
 	return nil
 }

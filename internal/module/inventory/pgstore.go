@@ -942,15 +942,19 @@ func (s *pgStore) updateSheetBinLocation(ctx context.Context, sheetID uuid.UUID,
 }
 
 func (s *pgStore) insertAuditLog(ctx context.Context, entry AuditLogEntry) error {
+	var meta any
+	if len(entry.Metadata) > 0 {
+		meta = []byte(entry.Metadata)
+	}
 	_, err := s.pool.Exec(ctx,
 		`INSERT INTO inventory_audit_log
 		    (id, entity_type, entity_id, action, actor_id, from_location, to_location,
-		     from_status, to_status, reason, session_id, created_at)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+		     from_status, to_status, reason, session_id, metadata, created_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
 		entry.ID, entry.EntityType, entry.EntityID, entry.Action, entry.ActorID,
 		entry.FromLocation, entry.ToLocation,
 		entry.FromStatus, entry.ToStatus,
-		entry.Reason, entry.SessionID, entry.CreatedAt,
+		entry.Reason, entry.SessionID, meta, entry.CreatedAt,
 	)
 	return err
 }
@@ -958,11 +962,36 @@ func (s *pgStore) insertAuditLog(ctx context.Context, entry AuditLogEntry) error
 func (s *pgStore) selectAuditLogByEntity(ctx context.Context, entityID uuid.UUID, entityType string) ([]AuditLogEntry, error) {
 	rows, err := s.pool.Query(ctx,
 		`SELECT id, entity_type, entity_id, action, actor_id,
-		        from_location, to_location, from_status, to_status, reason, session_id, created_at
+		        from_location, to_location, from_status, to_status, reason, session_id, metadata, created_at
 		 FROM inventory_audit_log
 		 WHERE entity_id = $1 AND entity_type = $2
 		 ORDER BY created_at DESC`,
 		entityID, entityType,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []AuditLogEntry
+	for rows.Next() {
+		e, err := scanAuditLogEntry(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
+func (s *pgStore) selectAuditLogByAction(ctx context.Context, action string) ([]AuditLogEntry, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT id, entity_type, entity_id, action, actor_id,
+		        from_location, to_location, from_status, to_status, reason, session_id, metadata, created_at
+		 FROM inventory_audit_log
+		 WHERE action = $1
+		 ORDER BY created_at DESC`,
+		action,
 	)
 	if err != nil {
 		return nil, err
@@ -985,12 +1014,16 @@ func scanAuditLogEntry(row interface{ Scan(...any) error }) (AuditLogEntry, erro
 	var fromLoc, toLoc uuid.NullUUID
 	var fromStatus, toStatus, reason sql.NullString
 	var sessionID uuid.NullUUID
+	var metadata []byte
 	err := row.Scan(
 		&e.ID, &e.EntityType, &e.EntityID, &e.Action, &e.ActorID,
-		&fromLoc, &toLoc, &fromStatus, &toStatus, &reason, &sessionID, &e.CreatedAt,
+		&fromLoc, &toLoc, &fromStatus, &toStatus, &reason, &sessionID, &metadata, &e.CreatedAt,
 	)
 	if err != nil {
 		return AuditLogEntry{}, err
+	}
+	if len(metadata) > 0 {
+		e.Metadata = metadata
 	}
 	if fromLoc.Valid {
 		v := fromLoc.UUID

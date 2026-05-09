@@ -14,6 +14,14 @@ type CreateWOInput struct {
 	PlanID   uuid.UUID `json:"plan_id"`
 	SKUID    uuid.UUID `json:"sku_id"`
 	Quantity int       `json:"quantity"`
+	// BypassReason is an optional planner note recorded on the REMNANT_BYPASSED
+	// audit row when the work order is created without allocating any of the
+	// fitting remnant suggestions (BR-K05).
+	BypassReason string `json:"bypass_reason,omitempty"`
+	// CallerID is the planner's user id, populated by the handler from JWT
+	// claims (not accepted from the request body). Used as the actor for the
+	// REMNANT_BYPASSED audit row.
+	CallerID *uuid.UUID `json:"-"`
 }
 
 type WorkOrder struct {
