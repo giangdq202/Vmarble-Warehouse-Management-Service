@@ -2,6 +2,7 @@ package inventory
 
 import (
 	"context"
+	"encoding/json"
 	"time"
 
 	"github.com/google/uuid"
@@ -187,20 +188,31 @@ type TransferResult struct {
 	AuditLogID   uuid.UUID  `json:"audit_log_id"`
 }
 
-// AuditLogEntry records a single inventory change event (transfer or cycle count adjustment).
+// AuditLogEntry records a single inventory change event (transfer, cycle
+// count adjustment, overflow bypass, remnant bypass).
 type AuditLogEntry struct {
-	ID           uuid.UUID  `json:"id"`
-	EntityType   string     `json:"entity_type"`
-	EntityID     uuid.UUID  `json:"entity_id"`
-	Action       string     `json:"action"`
-	ActorID      uuid.UUID  `json:"actor_id"`
-	FromLocation *uuid.UUID `json:"from_location,omitempty"`
-	ToLocation   *uuid.UUID `json:"to_location,omitempty"`
-	FromStatus   *string    `json:"from_status,omitempty"`
-	ToStatus     *string    `json:"to_status,omitempty"`
-	Reason       *string    `json:"reason,omitempty"`
-	SessionID    *uuid.UUID `json:"session_id,omitempty"`
-	CreatedAt    time.Time  `json:"created_at"`
+	ID           uuid.UUID       `json:"id"`
+	EntityType   string          `json:"entity_type"`
+	EntityID     uuid.UUID       `json:"entity_id"`
+	Action       string          `json:"action"`
+	ActorID      uuid.UUID       `json:"actor_id"`
+	FromLocation *uuid.UUID      `json:"from_location,omitempty"`
+	ToLocation   *uuid.UUID      `json:"to_location,omitempty"`
+	FromStatus   *string         `json:"from_status,omitempty"`
+	ToStatus     *string         `json:"to_status,omitempty"`
+	Reason       *string         `json:"reason,omitempty"`
+	SessionID    *uuid.UUID      `json:"session_id,omitempty"`
+	Metadata     json.RawMessage `json:"metadata,omitempty"`
+	CreatedAt    time.Time       `json:"created_at"`
+}
+
+// LogRemnantBypassInput records a planner's decision to skip available remnant
+// suggestions when creating a work order (BR-K05).
+type LogRemnantBypassInput struct {
+	WorkOrderID         uuid.UUID
+	ActorID             uuid.UUID
+	SuggestedRemnantIDs []uuid.UUID
+	Reason              string
 }
 
 // CreateCycleCountInput carries a request to open a new cycle count session.
@@ -301,6 +313,15 @@ type Service interface {
 	Transfer(ctx context.Context, in TransferInput) (TransferResult, error)
 	// ListAuditLog returns audit log entries for a given entity ordered by created_at DESC.
 	ListAuditLog(ctx context.Context, entityID uuid.UUID, entityType string) ([]AuditLogEntry, error)
+	// ListAuditLogByAction returns audit log entries for a given action across
+	// all entities, ordered by created_at DESC. Used by accountant/admin review
+	// dashboards (e.g. action=REMNANT_BYPASSED, OVERFLOW_BYPASSED).
+	ListAuditLogByAction(ctx context.Context, action string) ([]AuditLogEntry, error)
+	// LogRemnantBypass records that a planner chose to skip remnant suggestions
+	// when creating a work order. Caller must ensure SuggestedRemnantIDs is
+	// non-empty before invoking — that is the business condition that makes
+	// the row meaningful (BR-K05).
+	LogRemnantBypass(ctx context.Context, in LogRemnantBypassInput) error
 
 	// CreateCycleCountSession opens a new OPEN cycle count session.
 	CreateCycleCountSession(ctx context.Context, in CreateCycleCountInput) (CycleCountSession, error)

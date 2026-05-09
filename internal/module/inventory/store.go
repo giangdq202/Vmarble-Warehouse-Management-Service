@@ -56,6 +56,9 @@ type store interface {
 	insertAuditLog(ctx context.Context, entry AuditLogEntry) error
 	// selectAuditLogByEntity returns audit entries for the given entity, newest first.
 	selectAuditLogByEntity(ctx context.Context, entityID uuid.UUID, entityType string) ([]AuditLogEntry, error)
+	// selectAuditLogByAction returns audit entries for the given action across all
+	// entities, newest first.
+	selectAuditLogByAction(ctx context.Context, action string) ([]AuditLogEntry, error)
 
 	// insertCycleCountSession persists a new cycle count session row.
 	insertCycleCountSession(ctx context.Context, s CycleCountSession) error

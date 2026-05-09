@@ -2,6 +2,7 @@ package inventory
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -128,6 +129,11 @@ type mockStore struct {
 	selectAuditLogByEntityResult []AuditLogEntry
 	selectAuditLogByEntityErr    error
 
+	// selectAuditLogByAction
+	selectAuditLogByActionResult []AuditLogEntry
+	selectAuditLogByActionErr    error
+	selectAuditLogByActionAction string
+
 	// insertCycleCountSession
 	insertCycleCountSessionErr error
 
@@ -243,6 +249,11 @@ func (m *mockStore) insertAuditLog(_ context.Context, entry AuditLogEntry) error
 	m.insertAuditLogCalled = true
 	m.insertAuditLogEntry = entry
 	return m.insertAuditLogErr
+}
+
+func (m *mockStore) selectAuditLogByAction(_ context.Context, action string) ([]AuditLogEntry, error) {
+	m.selectAuditLogByActionAction = action
+	return m.selectAuditLogByActionResult, m.selectAuditLogByActionErr
 }
 
 func (m *mockStore) selectAuditLogByEntity(_ context.Context, _ uuid.UUID, _ string) ([]AuditLogEntry, error) {
@@ -3649,6 +3660,111 @@ func TestPreAssignSheet_RedOverflow_BypassMissingActor_Rejected(t *testing.T) {
 	}
 	if st.preAssignSheetCalled {
 		t.Error("preAssignSheet must not be called when bypass is missing actor")
+	}
+}
+
+// ─── REMNANT_BYPASSED audit logging (Issue #223) ───────────────────────────
+
+func TestLogRemnantBypass_HappyPath_WritesAuditRowWithMetadata(t *testing.T) {
+	st := &mockStore{}
+	svc := NewService(st, nil)
+	woID := uuid.New()
+	actorID := uuid.New()
+	ids := []uuid.UUID{uuid.New(), uuid.New()}
+
+	err := svc.LogRemnantBypass(context.Background(), LogRemnantBypassInput{
+		WorkOrderID:         woID,
+		ActorID:             actorID,
+		SuggestedRemnantIDs: ids,
+		Reason:              "planner prefers full sheet",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !st.insertAuditLogCalled {
+		t.Fatal("insertAuditLog must be called")
+	}
+	got := st.insertAuditLogEntry
+	if got.Action != auditActionRemnantBypassed {
+		t.Errorf("action = %q, want %q", got.Action, auditActionRemnantBypassed)
+	}
+	if got.EntityType != entityTypeWorkOrder {
+		t.Errorf("entity_type = %q, want %q", got.EntityType, entityTypeWorkOrder)
+	}
+	if got.EntityID != woID {
+		t.Errorf("entity_id = %v, want %v", got.EntityID, woID)
+	}
+	if got.ActorID != actorID {
+		t.Errorf("actor_id = %v, want %v", got.ActorID, actorID)
+	}
+	if got.Reason == nil || *got.Reason != "planner prefers full sheet" {
+		t.Errorf("reason = %v, want 'planner prefers full sheet'", got.Reason)
+	}
+	if len(got.Metadata) == 0 {
+		t.Fatal("metadata must be populated with suggested_remnant_ids")
+	}
+	var meta struct {
+		SuggestedRemnantIDs []uuid.UUID `json:"suggested_remnant_ids"`
+	}
+	if err := json.Unmarshal(got.Metadata, &meta); err != nil {
+		t.Fatalf("metadata is not valid JSON: %v", err)
+	}
+	if len(meta.SuggestedRemnantIDs) != 2 || meta.SuggestedRemnantIDs[0] != ids[0] || meta.SuggestedRemnantIDs[1] != ids[1] {
+		t.Errorf("metadata.suggested_remnant_ids = %v, want %v", meta.SuggestedRemnantIDs, ids)
+	}
+}
+
+func TestLogRemnantBypass_EmptySuggestions_Rejected(t *testing.T) {
+	st := &mockStore{}
+	svc := NewService(st, nil)
+	err := svc.LogRemnantBypass(context.Background(), LogRemnantBypassInput{
+		WorkOrderID: uuid.New(),
+		ActorID:     uuid.New(),
+		Reason:      "no reason",
+	})
+	if !errors.Is(err, domain.ErrInvalidInput) {
+		t.Errorf("want ErrInvalidInput, got %v", err)
+	}
+	if st.insertAuditLogCalled {
+		t.Error("audit log must not be written when suggestions list is empty")
+	}
+}
+
+func TestLogRemnantBypass_MissingActor_Rejected(t *testing.T) {
+	st := &mockStore{}
+	svc := NewService(st, nil)
+	err := svc.LogRemnantBypass(context.Background(), LogRemnantBypassInput{
+		WorkOrderID:         uuid.New(),
+		ActorID:             uuid.Nil,
+		SuggestedRemnantIDs: []uuid.UUID{uuid.New()},
+	})
+	if !errors.Is(err, domain.ErrInvalidInput) {
+		t.Errorf("want ErrInvalidInput, got %v", err)
+	}
+}
+
+func TestListAuditLogByAction_PassesActionToStore(t *testing.T) {
+	st := &mockStore{
+		selectAuditLogByActionResult: []AuditLogEntry{{ID: uuid.New(), Action: auditActionRemnantBypassed}},
+	}
+	svc := NewService(st, nil)
+	got, err := svc.ListAuditLogByAction(context.Background(), auditActionRemnantBypassed)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if st.selectAuditLogByActionAction != auditActionRemnantBypassed {
+		t.Errorf("action passed to store = %q, want %q", st.selectAuditLogByActionAction, auditActionRemnantBypassed)
+	}
+	if len(got) != 1 {
+		t.Errorf("want 1 entry, got %d", len(got))
+	}
+}
+
+func TestListAuditLogByAction_EmptyAction_Rejected(t *testing.T) {
+	svc := NewService(&mockStore{}, nil)
+	_, err := svc.ListAuditLogByAction(context.Background(), "")
+	if !errors.Is(err, domain.ErrInvalidInput) {
+		t.Errorf("want ErrInvalidInput, got %v", err)
 	}
 }
 

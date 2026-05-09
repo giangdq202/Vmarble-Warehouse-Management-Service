@@ -24,6 +24,7 @@ type SKUChecker interface {
 type SKUInfo struct {
 	ID            uuid.UUID
 	RequiresMetal bool
+	Dimensions    domain.Dimension
 }
 
 // UserChecker fetches user identity from the authn module without importing it.
@@ -68,4 +69,29 @@ type PreAssignSheetRequest struct {
 // Implementation lives in the costing module; wired in main.go.
 type CostingChecker interface {
 	HasCostingRecord(ctx context.Context, workOrderID uuid.UUID) (bool, error)
+}
+
+// RemnantAdvisor is the production module's view of inventory's remnant
+// suggestion + bypass logging API. Used at CreateWorkOrder time to enforce
+// BR-K05: when fitting remnants exist but the planner did not allocate any,
+// log a REMNANT_BYPASSED row to inventory_audit_log.
+type RemnantAdvisor interface {
+	SuggestRemnants(ctx context.Context, requiredDim domain.Dimension) ([]RemnantSuggestionRef, error)
+	LogRemnantBypass(ctx context.Context, in LogRemnantBypassRequest) error
+}
+
+// RemnantSuggestionRef is the production-side projection of an inventory
+// remnant suggestion. Only the remnant ID is needed because the bypass log
+// records a list of skipped IDs.
+type RemnantSuggestionRef struct {
+	RemnantID uuid.UUID
+}
+
+// LogRemnantBypassRequest mirrors inventory.LogRemnantBypassInput so the
+// production module does not need to import the inventory package.
+type LogRemnantBypassRequest struct {
+	WorkOrderID         uuid.UUID
+	ActorID             uuid.UUID
+	SuggestedRemnantIDs []uuid.UUID
+	Reason              string
 }

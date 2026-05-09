@@ -18,11 +18,20 @@ type service struct {
 	uc       UserChecker
 	sa       SheetAssigner
 	cc       CostingChecker
+	ra       RemnantAdvisor
 	notifier WorkOrderNotifier
 }
 
 func NewService(s store, pc PlanChecker, sc SKUChecker, uc UserChecker, sa SheetAssigner, cc CostingChecker, notifier WorkOrderNotifier) Service {
 	return &service{s: s, pc: pc, sc: sc, uc: uc, sa: sa, cc: cc, notifier: notifier}
+}
+
+// NewServiceWithRemnantAdvisor returns a Service wired with a RemnantAdvisor.
+// Production calls advisor.SuggestRemnants on CreateWorkOrder; if there are
+// fitting suggestions and the planner did not allocate any remnant, advisor
+// .LogRemnantBypass writes a REMNANT_BYPASSED audit row (BR-K05).
+func NewServiceWithRemnantAdvisor(s store, pc PlanChecker, sc SKUChecker, uc UserChecker, sa SheetAssigner, cc CostingChecker, notifier WorkOrderNotifier, ra RemnantAdvisor) Service {
+	return &service{s: s, pc: pc, sc: sc, uc: uc, sa: sa, cc: cc, ra: ra, notifier: notifier}
 }
 
 func (svc *service) CreateWorkOrder(ctx context.Context, in CreateWOInput) (WorkOrder, error) {
@@ -42,6 +51,11 @@ func (svc *service) CreateWorkOrder(ctx context.Context, in CreateWOInput) (Work
 		return WorkOrder{}, domain.NewBizError(domain.ErrInvalidInput, "quantity must be greater than 0")
 	}
 
+	sku, err := svc.sc.GetSKU(ctx, in.SKUID)
+	if err != nil {
+		return WorkOrder{}, err
+	}
+
 	now := time.Now()
 	wo := WorkOrder{
 		ID:        uuid.New(),
@@ -53,6 +67,34 @@ func (svc *service) CreateWorkOrder(ctx context.Context, in CreateWOInput) (Work
 	}
 	if err := svc.s.insertWorkOrder(ctx, wo); err != nil {
 		return WorkOrder{}, err
+	}
+
+	// BR-K05: when fitting remnants exist and the planner did not allocate one,
+	// record REMNANT_BYPASSED in inventory_audit_log for accountant review.
+	// Best-effort: log and continue if anything in the advisory path fails —
+	// the work order is already created and an advisory error must not roll it
+	// back or surface to the API caller.
+	if svc.ra != nil && sku.Dimensions.Valid() && in.CallerID != nil {
+		suggestions, suggErr := svc.ra.SuggestRemnants(ctx, sku.Dimensions)
+		switch {
+		case suggErr != nil:
+			slog.Warn("production: SuggestRemnants failed during CreateWorkOrder",
+				"wo_id", wo.ID, "err", suggErr)
+		case len(suggestions) > 0:
+			ids := make([]uuid.UUID, len(suggestions))
+			for i, s := range suggestions {
+				ids[i] = s.RemnantID
+			}
+			if logErr := svc.ra.LogRemnantBypass(ctx, LogRemnantBypassRequest{
+				WorkOrderID:         wo.ID,
+				ActorID:             *in.CallerID,
+				SuggestedRemnantIDs: ids,
+				Reason:              in.BypassReason,
+			}); logErr != nil {
+				slog.Warn("production: LogRemnantBypass failed during CreateWorkOrder",
+					"wo_id", wo.ID, "err", logErr)
+			}
+		}
 	}
 	return wo, nil
 }

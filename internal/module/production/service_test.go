@@ -237,6 +237,31 @@ func (m *mockCostingChecker) HasCostingRecord(_ context.Context, _ uuid.UUID) (b
 	return m.result, m.err
 }
 
+// mockRemnantAdvisor satisfies RemnantAdvisor. Records every interaction so
+// CreateWorkOrder tests can assert which advisory branch fired.
+type mockRemnantAdvisor struct {
+	suggestResult []RemnantSuggestionRef
+	suggestErr    error
+	suggestCalled bool
+	suggestDim    domain.Dimension
+
+	logErr    error
+	logCalled bool
+	logArg    LogRemnantBypassRequest
+}
+
+func (m *mockRemnantAdvisor) SuggestRemnants(_ context.Context, dim domain.Dimension) ([]RemnantSuggestionRef, error) {
+	m.suggestCalled = true
+	m.suggestDim = dim
+	return m.suggestResult, m.suggestErr
+}
+
+func (m *mockRemnantAdvisor) LogRemnantBypass(_ context.Context, in LogRemnantBypassRequest) error {
+	m.logCalled = true
+	m.logArg = in
+	return m.logErr
+}
+
 // ── helpers ───────────────────────────────────────────────────────────────────
 
 func newSvc(st *mockStore, pc *mockPlanChecker, sc *mockSKUChecker) Service {
@@ -266,6 +291,17 @@ func skuNoMetal(skuID uuid.UUID) *mockSKUChecker {
 // skuRequiresMetal returns a SKUChecker for a SKU that requires metal.
 func skuRequiresMetal(skuID uuid.UUID) *mockSKUChecker {
 	return &mockSKUChecker{result: SKUInfo{ID: skuID, RequiresMetal: true}}
+}
+
+// skuWithDim returns a SKUChecker carrying valid Dimensions so the BR-K05
+// remnant-advisor branch is exercised in CreateWorkOrder tests.
+func skuWithDim(skuID uuid.UUID, dim domain.Dimension) *mockSKUChecker {
+	return &mockSKUChecker{result: SKUInfo{ID: skuID, RequiresMetal: false, Dimensions: dim}}
+}
+
+// newSvcWithAdvisor wires a service with a RemnantAdvisor for BR-K05 tests.
+func newSvcWithAdvisor(st *mockStore, pc *mockPlanChecker, sc *mockSKUChecker, ra RemnantAdvisor) Service {
+	return NewServiceWithRemnantAdvisor(st, pc, sc, &mockUserChecker{}, nil, nil, nil, ra)
 }
 
 // plannedWO returns a WorkOrder in PLANNED status.
@@ -471,6 +507,175 @@ func TestCreateWorkOrder_StoreError_Propagates(t *testing.T) {
 	})
 	if !errors.Is(err, dbErr) {
 		t.Errorf("expected store error to propagate, got %v", err)
+	}
+}
+
+// ─── BR-K05: REMNANT_BYPASSED audit logging on CreateWorkOrder ────────────────
+
+// When the advisor returns fitting remnants and the planner did not allocate
+// any of them, CreateWorkOrder must call LogRemnantBypass with the suggestion
+// IDs and the planner's bypass_reason for accountant review.
+func TestCreateWorkOrder_AdvisorWithFits_LogsRemnantBypass(t *testing.T) {
+	planID := uuid.New()
+	skuID := uuid.New()
+	callerID := uuid.New()
+	r1, r2 := uuid.New(), uuid.New()
+	dim := domain.Dimension{LengthMM: 1000, WidthMM: 500}
+
+	advisor := &mockRemnantAdvisor{
+		suggestResult: []RemnantSuggestionRef{{RemnantID: r1}, {RemnantID: r2}},
+	}
+	svc := newSvcWithAdvisor(&mockStore{}, approvedPlan(planID, skuID), skuWithDim(skuID, dim), advisor)
+
+	wo, err := svc.CreateWorkOrder(context.Background(), CreateWOInput{
+		PlanID:       planID,
+		SKUID:        skuID,
+		Quantity:     1,
+		BypassReason: "ưu tiên tấm mới cho đơn rush",
+		CallerID:     &callerID,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !advisor.suggestCalled {
+		t.Fatal("SuggestRemnants must be called")
+	}
+	if advisor.suggestDim != dim {
+		t.Errorf("SuggestRemnants dim = %v, want %v", advisor.suggestDim, dim)
+	}
+	if !advisor.logCalled {
+		t.Fatal("LogRemnantBypass must be called when suggestions exist")
+	}
+	if advisor.logArg.WorkOrderID != wo.ID {
+		t.Errorf("logArg.WorkOrderID = %v, want %v", advisor.logArg.WorkOrderID, wo.ID)
+	}
+	if advisor.logArg.ActorID != callerID {
+		t.Errorf("logArg.ActorID = %v, want %v", advisor.logArg.ActorID, callerID)
+	}
+	if advisor.logArg.Reason != "ưu tiên tấm mới cho đơn rush" {
+		t.Errorf("logArg.Reason = %q, want bypass reason from input", advisor.logArg.Reason)
+	}
+	if got := advisor.logArg.SuggestedRemnantIDs; len(got) != 2 || got[0] != r1 || got[1] != r2 {
+		t.Errorf("logArg.SuggestedRemnantIDs = %v, want [%v %v]", got, r1, r2)
+	}
+}
+
+// When the advisor returns no suggestions, LogRemnantBypass must not run —
+// there is no bypass to record.
+func TestCreateWorkOrder_AdvisorNoFits_DoesNotLog(t *testing.T) {
+	planID := uuid.New()
+	skuID := uuid.New()
+	callerID := uuid.New()
+	advisor := &mockRemnantAdvisor{suggestResult: nil}
+
+	svc := newSvcWithAdvisor(&mockStore{}, approvedPlan(planID, skuID),
+		skuWithDim(skuID, domain.Dimension{LengthMM: 800, WidthMM: 400}), advisor)
+
+	if _, err := svc.CreateWorkOrder(context.Background(), CreateWOInput{
+		PlanID: planID, SKUID: skuID, Quantity: 1, CallerID: &callerID,
+	}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !advisor.suggestCalled {
+		t.Error("SuggestRemnants must be called even when there are no fits")
+	}
+	if advisor.logCalled {
+		t.Error("LogRemnantBypass must not be called when suggestions are empty")
+	}
+}
+
+// SuggestRemnants failures are advisory only: the work order is already
+// persisted and CreateWorkOrder must still return success.
+func TestCreateWorkOrder_AdvisorSuggestErr_StillCreatesWO(t *testing.T) {
+	planID := uuid.New()
+	skuID := uuid.New()
+	callerID := uuid.New()
+	advisor := &mockRemnantAdvisor{suggestErr: errors.New("inventory unavailable")}
+
+	svc := newSvcWithAdvisor(&mockStore{}, approvedPlan(planID, skuID),
+		skuWithDim(skuID, domain.Dimension{LengthMM: 800, WidthMM: 400}), advisor)
+
+	wo, err := svc.CreateWorkOrder(context.Background(), CreateWOInput{
+		PlanID: planID, SKUID: skuID, Quantity: 1, CallerID: &callerID,
+	})
+	if err != nil {
+		t.Fatalf("CreateWorkOrder must not fail when advisor errors: %v", err)
+	}
+	if wo.ID == uuid.Nil {
+		t.Error("WO must still be created when SuggestRemnants errors")
+	}
+	if advisor.logCalled {
+		t.Error("LogRemnantBypass must not run after SuggestRemnants failure")
+	}
+}
+
+// LogRemnantBypass failures are also advisory: best-effort logging must never
+// surface to the API caller after the WO has been written.
+func TestCreateWorkOrder_AdvisorLogErr_StillReturnsWO(t *testing.T) {
+	planID := uuid.New()
+	skuID := uuid.New()
+	callerID := uuid.New()
+	advisor := &mockRemnantAdvisor{
+		suggestResult: []RemnantSuggestionRef{{RemnantID: uuid.New()}},
+		logErr:        errors.New("audit insert failed"),
+	}
+
+	svc := newSvcWithAdvisor(&mockStore{}, approvedPlan(planID, skuID),
+		skuWithDim(skuID, domain.Dimension{LengthMM: 800, WidthMM: 400}), advisor)
+
+	wo, err := svc.CreateWorkOrder(context.Background(), CreateWOInput{
+		PlanID: planID, SKUID: skuID, Quantity: 1, CallerID: &callerID,
+	})
+	if err != nil {
+		t.Fatalf("CreateWorkOrder must swallow advisory log error: %v", err)
+	}
+	if wo.ID == uuid.Nil {
+		t.Error("WO must still be created when LogRemnantBypass errors")
+	}
+}
+
+// Without a CallerID we have no actor for the audit row, so the entire
+// advisor path must be skipped.
+func TestCreateWorkOrder_NoCallerID_SkipsAdvisor(t *testing.T) {
+	planID := uuid.New()
+	skuID := uuid.New()
+	advisor := &mockRemnantAdvisor{
+		suggestResult: []RemnantSuggestionRef{{RemnantID: uuid.New()}},
+	}
+
+	svc := newSvcWithAdvisor(&mockStore{}, approvedPlan(planID, skuID),
+		skuWithDim(skuID, domain.Dimension{LengthMM: 800, WidthMM: 400}), advisor)
+
+	if _, err := svc.CreateWorkOrder(context.Background(), CreateWOInput{
+		PlanID: planID, SKUID: skuID, Quantity: 1, // CallerID is nil
+	}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if advisor.suggestCalled || advisor.logCalled {
+		t.Error("advisor must not run when CallerID is nil")
+	}
+}
+
+// SKU without valid dimensions cannot match remnants by area, so the advisor
+// path must be skipped entirely.
+func TestCreateWorkOrder_SKUDimInvalid_SkipsAdvisor(t *testing.T) {
+	planID := uuid.New()
+	skuID := uuid.New()
+	callerID := uuid.New()
+	advisor := &mockRemnantAdvisor{
+		suggestResult: []RemnantSuggestionRef{{RemnantID: uuid.New()}},
+	}
+
+	svc := newSvcWithAdvisor(&mockStore{}, approvedPlan(planID, skuID),
+		skuNoMetal(skuID), advisor) // dimensions zero → invalid
+
+	if _, err := svc.CreateWorkOrder(context.Background(), CreateWOInput{
+		PlanID: planID, SKUID: skuID, Quantity: 1, CallerID: &callerID,
+	}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if advisor.suggestCalled || advisor.logCalled {
+		t.Error("advisor must not run when SKU dimensions are invalid")
 	}
 }
 

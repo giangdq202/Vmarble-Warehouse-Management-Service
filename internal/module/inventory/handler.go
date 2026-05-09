@@ -39,6 +39,7 @@ func (h *Handler) Register(rg *gin.RouterGroup) {
 	inv.POST("/remnants/:id/stock", auth.RequireRole(auth.RoleWarehouse, auth.RoleCNC, auth.RoleCNCManager, auth.RoleAdmin), h.stockRemnant)
 
 	inv.POST("/transfers", auth.RequireRole(auth.RoleWarehouse, auth.RoleAdmin), h.transfer)
+	inv.GET("/audit-log", auth.RequireRole(auth.RoleAccountant, auth.RoleAdmin), h.listAuditLogByAction)
 	inv.GET("/audit-log/:entity_type/:entity_id", h.listAuditLog)
 	inv.POST("/cycle-counts", auth.RequireRole(auth.RoleWarehouse, auth.RoleAdmin), h.createCycleCount)
 	inv.GET("/cycle-counts/:id", h.getCycleCount)
@@ -514,6 +515,31 @@ func (h *Handler) transfer(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusCreated, result)
+}
+
+// listAuditLogByAction godoc
+//
+// @Summary      List audit log entries by action across all entities
+// @Description  Useful for accountant/admin review (e.g. action=REMNANT_BYPASSED,
+// @Description  OVERFLOW_BYPASSED). Restricted to accountant + admin roles.
+// @Tags         inventory
+// @Produce      json
+// @Param        action  query     string  true  "audit action (REMNANT_BYPASSED, OVERFLOW_BYPASSED, TRANSFER, ADJUSTMENT)"
+// @Security     BearerAuth
+// @Success      200  {array}   AuditLogEntry
+// @Failure      400  {object}  map[string]string
+// @Router       /api/v1/inventory/audit-log [get]
+func (h *Handler) listAuditLogByAction(c *gin.Context) {
+	action := c.Query("action")
+	entries, err := h.svc.ListAuditLogByAction(c.Request.Context(), action)
+	if err != nil {
+		httpkit.Error(c, err)
+		return
+	}
+	if entries == nil {
+		entries = []AuditLogEntry{}
+	}
+	c.JSON(http.StatusOK, entries)
 }
 
 // listAuditLog godoc
