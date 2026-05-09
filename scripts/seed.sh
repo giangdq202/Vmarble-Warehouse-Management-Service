@@ -2,8 +2,9 @@
 # scripts/seed.sh — Demo data seed for Vmarble Warehouse Management Service
 #
 # Populates a fresh database with a complete end-to-end workflow:
-#   Materials → SKUs → BOM → Purchase Order → Production Plan → Work Orders
-#   → Board Sheet stock → CNC Cutting → Processing → Costing → Barcode scans
+#   Materials → SKUs → BOM → Customer PO → Production Plan → Work Orders
+#   → Board Sheet stock (manual lot + supplier PO receipt)
+#   → CNC Cutting → Processing → Costing → Barcode scans
 #
 # Requires: curl, jq, a running server (default: http://localhost:8080)
 # Usage:    VMARBLE_BASE_URL=http://localhost:8080 bash scripts/seed.sh
@@ -263,6 +264,28 @@ api_post "${TOKEN_WAREHOUSE}" "/api/v1/inventory/lots" \
     }" >/dev/null
 ok "Lot 2: 5 × 2440×1220 sheets @ 295,000 VND"
 
+# ── PURCHASING: supplier PO receipt path (auto-creates lot + sheets) ─────────
+step "Supplier PO lifecycle  [DRAFT → ORDERED → RECEIVED]"
+
+SUPPLIER_PO_ID=$(api_post "${TOKEN_WAREHOUSE}" "/api/v1/purchase-orders" \
+    "{
+      \"code\": \"SPO-2026-DEMO\",
+      \"material_id\": \"${MAT_PLYWOOD}\",
+      \"supplier\": \"ACME Plywood Co.\",
+      \"note\": \"Refill stock for Q2 production\"
+    }" | jq -r '.id')
+ok "Supplier PO created: ${SUPPLIER_PO_ID} [DRAFT]"
+
+api_post "${TOKEN_WAREHOUSE}" "/api/v1/purchase-orders/${SUPPLIER_PO_ID}/items" \
+    '{"quantity":3,"length_mm":2440,"width_mm":1220,"unit_cost":{"amount":310000,"currency":"VND"}}' >/dev/null
+ok "Line item added: 3 × 2440×1220 @ 310,000 VND"
+
+api_post "${TOKEN_WAREHOUSE}" "/api/v1/purchase-orders/${SUPPLIER_PO_ID}/order" '{}' >/dev/null
+ok "→ ORDERED"
+
+api_post "${TOKEN_WAREHOUSE}" "/api/v1/purchase-orders/${SUPPLIER_PO_ID}/receive" '{}' >/dev/null
+ok "→ RECEIVED (inventory lot + 3 board sheets auto-created)"
+
 SHEETS=$(curl -sf "${BASE}/api/v1/inventory/sheets?limit=2" \
     -H "Authorization: Bearer ${TOKEN_WAREHOUSE}")
 SHEET_ID=$(echo "${SHEETS}" | jq -r '.items[0].id')
@@ -386,7 +409,8 @@ echo "    foreman     / fore123     (role: foreman)"
 echo "    cncmgr      / cncmgr123   (role: cnc_manager)"
 echo ""
 echo -e "  ${BOLD}Seeded resources${NC}"
-echo "    PO          : ${PO_ID}"
+echo "    Customer PO : ${PO_ID}"
+echo "    Supplier PO : ${SUPPLIER_PO_ID}  [RECEIVED — 3 sheets auto-stocked]"
 echo "    Plan        : ${PLAN_ID}  [APPROVED]"
 echo "    WO A        : ${WO_A}  [COSTED — Cabinet Door, no metal]"
 echo "    WO B        : ${WO_B}  [COSTED — Shelf Panel, BR-P04 metal]"

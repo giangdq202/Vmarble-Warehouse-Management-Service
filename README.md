@@ -12,7 +12,7 @@ Tracks the full lifecycle from Purchase Orders → CNC cutting → Processing �
 
 ## Architecture
 
-A **modular monolith** in Go. Nine domain modules live under `internal/module/`, each a self-contained black box with its own `iface.go / service.go / store.go / pgstore.go / handler.go`. Modules never import each other — cross-module calls go through dependency interfaces wired in `cmd/server/main.go`.
+A **modular monolith** in Go. Ten domain modules live under `internal/module/`, each a self-contained black box with its own `iface.go / service.go / store.go / pgstore.go / handler.go`. Modules never import each other — cross-module calls go through dependency interfaces wired in `cmd/server/main.go`.
 
 ```
 HTTP Clients (Web UI / Barcode Scanner)
@@ -26,33 +26,37 @@ HTTP Clients (Web UI / Barcode Scanner)
    ┌──────────────────┼──────────────────┐
    ▼                  ▼                  ▼
 catalog            order            planning
-SKU/Material/BOM   PO/LineItems     ProductionPlan
+SKU/Material/BOM   Customer PO      ProductionPlan
    │                  │                  │
    └──────────────────┼──────────────────┘
                       │
    ┌──────────────────┼──────────────────┐
    ▼                  ▼                  ▼
-inventory        production          costing
-BoardSheet        WorkOrder         CostingRecord
-Remnant         ConsumptionRecord   area-based
-CuttingRecord   state machine       allocation
-   │                  │                  │
-   └──────────────────┼──────────────────┘
-                      │
-              ┌───────┼───────┐
-              ▼               ▼
-           barcode         authn / dashboard
-           Scan events     JWT + stats
-              │
-              ▼
-       PostgreSQL 17  (pgx/pgxpool)
+purchasing       inventory          production
+Supplier PO →    BoardSheet         WorkOrder
+auto-receives    Remnant            ConsumptionRecord
+into stock       CuttingRecord      state machine
+                       │                  │
+                       └────────┬─────────┘
+                                ▼
+                            costing
+                       CostingRecord
+                       area-based allocation
+                                │
+                       ┌────────┼────────┐
+                       ▼                 ▼
+                    barcode      authn / dashboard
+                    Scan events  JWT + stats
+                                │
+                                ▼
+                       PostgreSQL 17  (pgx/pgxpool)
 ```
 
 Key technical properties:
 - **Row-level locking**: critical writes use `SELECT … FOR UPDATE` inside `pgx.Tx` to prevent inventory oversell and capacity overcommit — see `recordCutAtomically`, `allocateRemnantAtomically`, `assignSlotAtomically`
 - **Domain invariants enforced in service layer**: area conservation (BR-K03), work order state machine (BR-P01-P04), costing immutability (BR-C04)
 - **No ORM**: all SQL written by hand with `pgx/v5`; prepared statements and parameterised queries throughout
-- **32 ordered migrations** managed by goose with idempotent Up/Down
+- **36 ordered migrations** managed by goose with idempotent Up/Down
 
 ---
 
@@ -84,13 +88,14 @@ open http://localhost:8080/swagger/index.html
 | Module | Entities | Key rules |
 |---|---|---|
 | `catalog` | SKU, Material, BOM | Foundation data; referenced by all modules |
-| `order` | PurchaseOrder, POLineItem | PO lifecycle |
+| `order` | Customer PO, POLineItem | Customer-facing order lifecycle |
+| `purchasing` | Supplier PO, POItem | Supplier order DRAFT → ORDERED → RECEIVED; auto-creates inventory lots + board sheets on receipt |
 | `planning` | ProductionPlan, PlanItem | DRAFT → APPROVED → CANCELED |
 | `inventory` | InventoryLot, BoardSheet, Remnant, CuttingRecord | BR-K01–K05: stock, area conservation, remnant lineage, cycle count, bin transfer |
 | `production` | WorkOrder, ConsumptionRecord, Machine, ShiftSlot | BR-P01–P04: state machine, metal check, capacity-aware scheduling |
-| `costing` | CostingRecord | BR-C01–C04: area-based cost allocation, finalisation lock |
+| `costing` | CostingRecord, CostingAdjustment | BR-C01–C04: area-based cost allocation, finalisation lock, waste-cost ledger |
 | `barcode` | Barcode, ScanEvent | 3 scan checkpoints with actor identity |
-| `authn` | JWT | Role-based auth (admin, warehouse_staff, cnc_manager, accountant) |
+| `authn` | User, JWT | Role-based auth (admin / planner / warehouse / cnc / cnc_manager / foreman / accountant) + admin user CRUD |
 | `dashboard` | — | Aggregated stats endpoints |
 
 ---
@@ -137,20 +142,22 @@ internal/
   domain/           Shared value objects: Dimension, Money, status enums, BizError
   module/
     catalog/        SKU, Material, BOM
-    order/          Purchase Order, Line Items
+    order/          Customer Purchase Order, Line Items
+    purchasing/     Supplier Purchase Order (auto-receives stock into inventory)
     planning/       Production Plan
     inventory/      BoardSheet, Remnant, CuttingRecord, cycle count, bin transfer
     production/     WorkOrder, ConsumptionRecord, machine capacity scheduling
-    costing/        CostingRecord (area-based allocation)
+    costing/        CostingRecord, CostingAdjustment, waste-cost ledger
     barcode/        Barcode/QR, ScanEvent
-    authn/          JWT authentication
+    authn/          JWT authentication + admin user CRUD
     dashboard/      Stats aggregation
   platform/
     postgres/       pgxpool creation + goose migration runner
     httpkit/        Router setup, pagination, JSON helpers, error mapping
     auth/           Auth middleware + context helpers
+    events/         Server-sent event broker
     config/         Env config loader
-migrations/         32 SQL migration files (goose Up/Down)
+migrations/         36 SQL migration files (goose Up/Down)
 docs/               Swagger spec, architecture, business logic spec (Vietnamese)
 ```
 
