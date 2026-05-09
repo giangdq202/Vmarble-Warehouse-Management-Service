@@ -86,6 +86,29 @@ func parseDateFilterBoundary(s string, loc *time.Location, inclusiveDayEnd bool)
 	return time.Parse(time.RFC3339, s)
 }
 
+// parseWorkOrderAssignedFilter parses the ?assigned query param.
+//
+//	assigned=null  → assignedNull=true (filter assigned_to IS NULL)
+//	assigned=<id>  → assignedTo=&id   (filter assigned_to = id)
+//	assigned=""    → both zero (no filter)
+//
+// On a malformed UUID it writes 400 and returns ok=false.
+func parseWorkOrderAssignedFilter(c *gin.Context) (assignedNull bool, assignedTo *uuid.UUID, ok bool) {
+	v := c.Query("assigned")
+	if v == "" {
+		return false, nil, true
+	}
+	if v == "null" {
+		return true, nil, true
+	}
+	parsed, err := uuid.Parse(v)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid assigned, expected 'null' or a user uuid"})
+		return false, nil, false
+	}
+	return false, &parsed, true
+}
+
 func (h *Handler) Register(rg *gin.RouterGroup) {
 	rg.POST("/work-orders", auth.RequireRole(auth.RolePlanner, auth.RoleCNCManager, auth.RoleAdmin), h.create)
 	rg.GET("/work-orders", h.list)
@@ -161,7 +184,8 @@ func (h *Handler) create(c *gin.Context) {
 // @Param        to       query     string  false  "filter created_at to (RFC3339 or YYYY-MM-DD); date-only means inclusive local day end"
 // @Param        sort_by  query     string  false  "sort column: created_at, status (default created_at)"
 // @Param        order    query     string  false  "sort direction: asc, desc (default desc)"
-// @Param        preset   query     string  false  "operational preset: dashboard_default — shows PLANNED today/yesterday then active, excludes COMPLETED/COSTED; mutually exclusive with status/date/from/to filters"
+// @Param        preset   query     string  false  "operational preset: dashboard_default — shows PLANNED today/yesterday then active, excludes COMPLETED/COSTED; mutually exclusive with status/date/from/to/assigned filters"
+// @Param        assigned query     string  false  "filter by assignment: 'null' for unassigned WOs, or a user UUID for WOs assigned to that user; mutually exclusive with preset"
 // @Success      200      {object}  httpkit.PagedResult[WorkOrder]
 // @Failure      400      {object}  map[string]string
 // @Failure      500      {object}  map[string]string
@@ -185,9 +209,14 @@ func (h *Handler) list(c *gin.Context) {
 		return
 	}
 
+	assignedNull, assignedTo, ok := parseWorkOrderAssignedFilter(c)
+	if !ok {
+		return
+	}
+
 	if preset == "dashboard_default" {
-		if c.Query("status") != "" || c.Query("date") != "" || c.Query("from") != "" || c.Query("to") != "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "preset=dashboard_default cannot be combined with status, date, from, or to filters"})
+		if c.Query("status") != "" || c.Query("date") != "" || c.Query("from") != "" || c.Query("to") != "" || c.Query("assigned") != "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "preset=dashboard_default cannot be combined with status, date, from, to, or assigned filters"})
 			return
 		}
 		now := time.Now().In(workOrderFilterLoc)
@@ -215,10 +244,12 @@ func (h *Handler) list(c *gin.Context) {
 
 	p := httpkit.BindPageParams(c)
 	result, err := h.svc.ListWorkOrders(c.Request.Context(), p, WorkOrderListFilter{
-		Status:      c.Query("status"),
-		PlanID:      planID,
-		CreatedFrom: createdFrom,
-		CreatedTo:   createdTo,
+		Status:       c.Query("status"),
+		PlanID:       planID,
+		CreatedFrom:  createdFrom,
+		CreatedTo:    createdTo,
+		AssignedNull: assignedNull,
+		AssignedTo:   assignedTo,
 	})
 	if err != nil {
 		httpkit.Error(c, err)

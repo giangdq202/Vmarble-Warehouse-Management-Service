@@ -4975,8 +4975,14 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "operational preset: dashboard_default — shows PLANNED today/yesterday then active, excludes COMPLETED/COSTED; mutually exclusive with status/date/from/to filters",
+                        "description": "operational preset: dashboard_default — shows PLANNED today/yesterday then active, excludes COMPLETED/COSTED; mutually exclusive with status/date/from/to/assigned filters",
                         "name": "preset",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "filter by assignment: 'null' for unassigned WOs, or a user UUID for WOs assigned to that user; mutually exclusive with preset",
+                        "name": "assigned",
                         "in": "query"
                     }
                 ],

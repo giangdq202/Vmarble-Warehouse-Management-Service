@@ -91,8 +91,10 @@ func (s *pgStore) selectWorkOrdersPaged(ctx context.Context, p httpkit.PageParam
 		 WHERE ($1::text = '' OR status = $1)
 		   AND ($2::uuid IS NULL OR plan_id = $2)
 		   AND ($3::timestamptz IS NULL OR created_at >= $3)
-		   AND ($4::timestamptz IS NULL OR created_at < $4)`,
-		f.Status, f.PlanID, f.CreatedFrom, f.CreatedTo,
+		   AND ($4::timestamptz IS NULL OR created_at < $4)
+		   AND (NOT $5::boolean OR assigned_to IS NULL)
+		   AND ($6::uuid IS NULL OR assigned_to = $6)`,
+		f.Status, f.PlanID, f.CreatedFrom, f.CreatedTo, f.AssignedNull, f.AssignedTo,
 	).Scan(&total); err != nil {
 		return nil, 0, err
 	}
@@ -103,11 +105,16 @@ func (s *pgStore) selectWorkOrdersPaged(ctx context.Context, p httpkit.PageParam
 		   AND ($2::uuid IS NULL OR wo.plan_id = $2)
 		   AND ($3::timestamptz IS NULL OR wo.created_at >= $3)
 		   AND ($4::timestamptz IS NULL OR wo.created_at < $4)
+		   AND (NOT $5::boolean OR wo.assigned_to IS NULL)
+		   AND ($6::uuid IS NULL OR wo.assigned_to = $6)
 		 ORDER BY wo.%s %s
-		 LIMIT $5 OFFSET $6`,
+		 LIMIT $7 OFFSET $8`,
 		sortCol, orderDir,
 	)
-	rows, err := s.pool.Query(ctx, query, f.Status, f.PlanID, f.CreatedFrom, f.CreatedTo, p.Limit, p.Offset())
+	rows, err := s.pool.Query(ctx, query,
+		f.Status, f.PlanID, f.CreatedFrom, f.CreatedTo, f.AssignedNull, f.AssignedTo,
+		p.Limit, p.Offset(),
+	)
 	if err != nil {
 		return nil, 0, err
 	}

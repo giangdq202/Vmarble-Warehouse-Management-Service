@@ -4567,10 +4567,15 @@ paths:
         name: order
         type: string
       - description: 'operational preset: dashboard_default — shows PLANNED today/yesterday
-          then active, excludes COMPLETED/COSTED; mutually exclusive with status/date/from/to
+          then active, excludes COMPLETED/COSTED; mutually exclusive with status/date/from/to/assigned
           filters'
         in: query
         name: preset
+        type: string
+      - description: 'filter by assignment: ''null'' for unassigned WOs, or a user
+          UUID for WOs assigned to that user; mutually exclusive with preset'
+        in: query
+        name: assigned
         type: string
       produces:
       - application/json
