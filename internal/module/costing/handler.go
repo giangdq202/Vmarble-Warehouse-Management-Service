@@ -1,13 +1,25 @@
 package costing
 
 import (
+	"encoding/csv"
+	"fmt"
 	"net/http"
+	"strconv"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/vmarble/warehouse-management-service/internal/platform/auth"
 	"github.com/vmarble/warehouse-management-service/internal/platform/httpkit"
 )
+
+var wasteReportFilterLoc = func() *time.Location {
+	loc, err := time.LoadLocation("Asia/Ho_Chi_Minh")
+	if err != nil {
+		return time.FixedZone("Asia/Ho_Chi_Minh", 7*60*60)
+	}
+	return loc
+}()
 
 type Handler struct {
 	svc Service
@@ -24,6 +36,7 @@ func (h *Handler) Register(rg *gin.RouterGroup) {
 	rg.GET("/costing", auth.RequireRole(auth.RoleAccountant, auth.RoleAdmin), h.list)
 	rg.POST("/costing/:workOrderID/adjustments", auth.RequireRole(auth.RoleAccountant, auth.RoleAdmin), h.createAdjustment)
 	rg.GET("/costing/:workOrderID/adjustments", auth.RequireRole(auth.RoleAccountant, auth.RolePlanner, auth.RoleAdmin), h.listAdjustments)
+	rg.GET("/costing/waste-report", auth.RequireRole(auth.RoleAccountant, auth.RoleAdmin), h.wasteReport)
 }
 
 // computeCost godoc
@@ -183,6 +196,115 @@ func (h *Handler) get(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, record)
+}
+
+// wasteReport godoc
+//
+// @Summary      Per-material waste-cost ledger (BR-C03)
+// @Description  Aggregates per-cut waste area into a per-material report.
+// @Description  Waste cost is allocated using the originating board sheet's
+// @Description  cost-per-mm² (sheet_cost / sheet_area).
+// @Tags         costing
+// @Produce      json
+// @Param        from         query     string  false  "from date (Asia/Ho_Chi_Minh, YYYY-MM-DD)"
+// @Param        to           query     string  false  "to date inclusive (Asia/Ho_Chi_Minh, YYYY-MM-DD)"
+// @Param        material_id  query     string  false  "filter by material id (uuid)"
+// @Param        format       query     string  false  "response format: json (default) or csv"
+// @Success      200          {array}   WasteReportRow
+// @Failure      400          {object}  map[string]string
+// @Security     BearerAuth
+// @Failure      401  {object}  map[string]string
+// @Router       /api/v1/costing/waste-report [get]
+func (h *Handler) wasteReport(c *gin.Context) {
+	from, to, ok := parseWasteReportDateRange(c)
+	if !ok {
+		return
+	}
+
+	var materialID *uuid.UUID
+	if v := c.Query("material_id"); v != "" {
+		mid, err := uuid.Parse(v)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid material_id"})
+			return
+		}
+		materialID = &mid
+	}
+
+	rows, err := h.svc.ListWasteReport(c.Request.Context(), WasteReportFilter{
+		From:       from,
+		To:         to,
+		MaterialID: materialID,
+	})
+	if err != nil {
+		httpkit.Error(c, err)
+		return
+	}
+
+	if c.Query("format") == "csv" {
+		writeWasteReportCSV(c, rows)
+		return
+	}
+	c.JSON(http.StatusOK, rows)
+}
+
+func parseWasteReportDateRange(c *gin.Context) (from, to *time.Time, ok bool) {
+	fromStr := c.Query("from")
+	toStr := c.Query("to")
+	if fromStr == "" && toStr == "" {
+		return nil, nil, true
+	}
+	if fromStr != "" {
+		day, err := time.ParseInLocation(time.DateOnly, fromStr, wasteReportFilterLoc)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid from, use YYYY-MM-DD"})
+			return nil, nil, false
+		}
+		from = &day
+	}
+	if toStr != "" {
+		day, err := time.ParseInLocation(time.DateOnly, toStr, wasteReportFilterLoc)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid to, use YYYY-MM-DD"})
+			return nil, nil, false
+		}
+		// to is inclusive day; query uses half-open [from, to) so add 1 day.
+		exclusive := day.AddDate(0, 0, 1)
+		to = &exclusive
+	}
+	return from, to, true
+}
+
+func writeWasteReportCSV(c *gin.Context, rows []WasteReportRow) {
+	c.Header("Content-Type", "text/csv; charset=utf-8")
+	c.Header("Content-Disposition", `attachment; filename="waste-report.csv"`)
+	w := csv.NewWriter(c.Writer)
+	_ = w.Write([]string{
+		"material_id",
+		"material_name",
+		"sheets_consumed",
+		"waste_area_mm2",
+		"avg_sheet_cost",
+		"total_waste_cost",
+		"currency",
+	})
+	for _, r := range rows {
+		_ = w.Write([]string{
+			r.MaterialID.String(),
+			r.MaterialName,
+			strconv.Itoa(r.SheetsConsumed),
+			strconv.FormatInt(r.WasteAreaMM2, 10),
+			strconv.FormatInt(r.AvgSheetCost.Amount, 10),
+			strconv.FormatInt(r.TotalWasteCost.Amount, 10),
+			r.TotalWasteCost.Currency,
+		})
+	}
+	w.Flush()
+	if err := w.Error(); err != nil {
+		// Headers already written; best-effort log via standard error response is no longer possible.
+		// Append a comment line so downstream tooling sees the failure rather than a silently truncated file.
+		fmt.Fprintf(c.Writer, "# csv flush error: %s\n", err.Error())
+	}
 }
 
 // listCostingRecords godoc

@@ -53,6 +53,27 @@ type CreateAdjustmentInput struct {
 	CreatedBy        uuid.UUID    `json:"-"`
 }
 
+// WasteReportFilter narrows the waste-cost ledger by created_at range
+// (cutting_records.created_at) and an optional material.
+type WasteReportFilter struct {
+	From       *time.Time
+	To         *time.Time
+	MaterialID *uuid.UUID
+}
+
+// WasteReportRow is one line in the per-material waste-cost ledger.
+//
+// BR-C03: waste area is excluded from per-SKU allocation; this report
+// posts the corresponding cost to the "tài khoản hao hụt" (waste account).
+type WasteReportRow struct {
+	MaterialID     uuid.UUID    `json:"material_id"`
+	MaterialName   string       `json:"material_name"`
+	SheetsConsumed int          `json:"sheets_consumed"`
+	WasteAreaMM2   int64        `json:"waste_area_mm2"`
+	AvgSheetCost   domain.Money `json:"avg_sheet_cost"`
+	TotalWasteCost domain.Money `json:"total_waste_cost"`
+}
+
 type Service interface {
 	ComputeCost(ctx context.Context, workOrderID uuid.UUID) (CostingRecord, error)
 	FinalizeCost(ctx context.Context, workOrderID uuid.UUID, actorID uuid.UUID) error
@@ -61,4 +82,5 @@ type Service interface {
 	HasCostingRecord(ctx context.Context, workOrderID uuid.UUID) (bool, error)
 	CreateAdjustment(ctx context.Context, in CreateAdjustmentInput) (CostingAdjustment, error)
 	ListAdjustments(ctx context.Context, workOrderID uuid.UUID) ([]CostingAdjustment, error)
+	ListWasteReport(ctx context.Context, filter WasteReportFilter) ([]WasteReportRow, error)
 }

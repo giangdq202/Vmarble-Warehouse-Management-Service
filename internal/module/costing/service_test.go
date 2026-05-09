@@ -46,6 +46,11 @@ type mockStore struct {
 	// selectAdjustmentsByRecord
 	selectAdjResult []CostingAdjustment
 	selectAdjErr    error
+
+	// selectWasteReport
+	wasteReportResult []WasteReportRow
+	wasteReportErr    error
+	wasteReportFilter WasteReportFilter
 }
 
 func (m *mockStore) insertCostingRecord(_ context.Context, _ CostingRecord) error {
@@ -82,6 +87,11 @@ func (m *mockStore) insertCostingAdjustment(_ context.Context, _ CostingAdjustme
 
 func (m *mockStore) selectAdjustmentsByRecord(_ context.Context, _ uuid.UUID) ([]CostingAdjustment, error) {
 	return m.selectAdjResult, m.selectAdjErr
+}
+
+func (m *mockStore) selectWasteReport(_ context.Context, filter WasteReportFilter) ([]WasteReportRow, error) {
+	m.wasteReportFilter = filter
+	return m.wasteReportResult, m.wasteReportErr
 }
 
 // ── mockWOR (WorkOrderReader) ─────────────────────────────────────────────────
@@ -890,5 +900,129 @@ func TestListCostingRecords_StoreError_Propagates(t *testing.T) {
 
 	if !errors.Is(err, storeErr) {
 		t.Errorf("expected list error to propagate, got %v", err)
+	}
+}
+
+// ── TestListWasteReport — BR-C03 waste-cost ledger ───────────────────────────
+
+func TestListWasteReport_HappyPath_TwoMaterialsThreeCuts(t *testing.T) {
+	// Models the issue's DoD scenario: two materials, three cuts
+	// ── Material A: two cuts on a single sheet
+	//      sheet area=2_000_000, cost=80_000 → cost-per-mm² = 0.04
+	//      cut1: used=900_000, no remnant → waste = 1_100_000 → cost = 44_000
+	//      Wait — but second cut wouldn't happen if sheet is consumed in first cut.
+	//      Realistic: cut1: used=900_000, new_remnant=1_000_000 → waste = 100_000 → cost = 4_000
+	//                 cut2 (from remnant 1_000_000): used=600_000, no new remnant → waste = 400_000 → cost = 16_000
+	//      Total A: waste_area = 500_000, waste_cost = 20_000, sheets = 1
+	// ── Material B: one cut on its sheet
+	//      sheet area=1_000_000, cost=60_000 → cost-per-mm² = 0.06
+	//      cut3: used=700_000, no remnant → waste = 300_000 → cost = 18_000
+	//      Total B: waste_area = 300_000, waste_cost = 18_000, sheets = 1
+	matA := uuid.New()
+	matB := uuid.New()
+
+	expected := []WasteReportRow{
+		{
+			MaterialID:     matA,
+			MaterialName:   "Mat A",
+			SheetsConsumed: 1,
+			WasteAreaMM2:   500_000,
+			AvgSheetCost:   domain.Money{Amount: 80_000, Currency: "VND"},
+			TotalWasteCost: domain.Money{Amount: 20_000, Currency: "VND"},
+		},
+		{
+			MaterialID:     matB,
+			MaterialName:   "Mat B",
+			SheetsConsumed: 1,
+			WasteAreaMM2:   300_000,
+			AvgSheetCost:   domain.Money{Amount: 60_000, Currency: "VND"},
+			TotalWasteCost: domain.Money{Amount: 18_000, Currency: "VND"},
+		},
+	}
+
+	st := &mockStore{wasteReportResult: expected}
+	svc := newSvc(st, &mockWOR{}, &mockCDR{}, zeroCONR())
+
+	got, err := svc.ListWasteReport(context.Background(), WasteReportFilter{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("len = %d, want 2", len(got))
+	}
+	if got[0].MaterialID != matA || got[0].WasteAreaMM2 != 500_000 || got[0].TotalWasteCost.Amount != 20_000 {
+		t.Errorf("row 0 = %+v, want material A with waste_area=500_000 cost=20_000", got[0])
+	}
+	if got[1].MaterialID != matB || got[1].WasteAreaMM2 != 300_000 || got[1].TotalWasteCost.Amount != 18_000 {
+		t.Errorf("row 1 = %+v, want material B with waste_area=300_000 cost=18_000", got[1])
+	}
+}
+
+func TestListWasteReport_FromAfterTo_ReturnsInvalidInput(t *testing.T) {
+	st := &mockStore{}
+	svc := newSvc(st, &mockWOR{}, &mockCDR{}, zeroCONR())
+
+	from := time.Date(2026, 5, 10, 0, 0, 0, 0, time.UTC)
+	to := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
+
+	_, err := svc.ListWasteReport(context.Background(), WasteReportFilter{From: &from, To: &to})
+
+	if !errors.Is(err, domain.ErrInvalidInput) {
+		t.Errorf("expected ErrInvalidInput, got %v", err)
+	}
+	if st.wasteReportFilter.From != nil {
+		t.Error("store must NOT be called when validation fails")
+	}
+}
+
+func TestListWasteReport_PassesFilterToStore(t *testing.T) {
+	st := &mockStore{wasteReportResult: []WasteReportRow{}}
+	svc := newSvc(st, &mockWOR{}, &mockCDR{}, zeroCONR())
+
+	from := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
+	to := time.Date(2026, 5, 31, 0, 0, 0, 0, time.UTC)
+	matID := uuid.New()
+	filter := WasteReportFilter{From: &from, To: &to, MaterialID: &matID}
+
+	_, err := svc.ListWasteReport(context.Background(), filter)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if st.wasteReportFilter.From == nil || !st.wasteReportFilter.From.Equal(from) {
+		t.Errorf("From not propagated to store: got %v, want %v", st.wasteReportFilter.From, from)
+	}
+	if st.wasteReportFilter.To == nil || !st.wasteReportFilter.To.Equal(to) {
+		t.Errorf("To not propagated to store: got %v, want %v", st.wasteReportFilter.To, to)
+	}
+	if st.wasteReportFilter.MaterialID == nil || *st.wasteReportFilter.MaterialID != matID {
+		t.Errorf("MaterialID not propagated to store: got %v, want %v", st.wasteReportFilter.MaterialID, matID)
+	}
+}
+
+func TestListWasteReport_NilStoreResult_ReturnsEmptySlice(t *testing.T) {
+	st := &mockStore{wasteReportResult: nil}
+	svc := newSvc(st, &mockWOR{}, &mockCDR{}, zeroCONR())
+
+	got, err := svc.ListWasteReport(context.Background(), WasteReportFilter{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got == nil {
+		t.Error("expected non-nil empty slice, got nil")
+	}
+	if len(got) != 0 {
+		t.Errorf("len = %d, want 0", len(got))
+	}
+}
+
+func TestListWasteReport_StoreError_Propagates(t *testing.T) {
+	storeErr := errors.New("aggregation failed")
+	st := &mockStore{wasteReportErr: storeErr}
+	svc := newSvc(st, &mockWOR{}, &mockCDR{}, zeroCONR())
+
+	_, err := svc.ListWasteReport(context.Background(), WasteReportFilter{})
+
+	if !errors.Is(err, storeErr) {
+		t.Errorf("expected store error to propagate, got %v", err)
 	}
 }

@@ -609,6 +609,21 @@ definitions:
       reason:
         type: string
     type: object
+  internal_module_costing.WasteReportRow:
+    properties:
+      avg_sheet_cost:
+        $ref: '#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.Money'
+      material_id:
+        type: string
+      material_name:
+        type: string
+      sheets_consumed:
+        type: integer
+      total_waste_cost:
+        $ref: '#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.Money'
+      waste_area_mm2:
+        type: integer
+    type: object
   internal_module_dashboard.BoardStockSummaryItem:
     properties:
       allocated:
@@ -2171,6 +2186,55 @@ paths:
       security:
       - BearerAuth: []
       summary: Finalize costing for a work order
+      tags:
+      - costing
+  /api/v1/costing/waste-report:
+    get:
+      description: |-
+        Aggregates per-cut waste area into a per-material report.
+        Waste cost is allocated using the originating board sheet's
+        cost-per-mm² (sheet_cost / sheet_area).
+      parameters:
+      - description: from date (Asia/Ho_Chi_Minh, YYYY-MM-DD)
+        in: query
+        name: from
+        type: string
+      - description: to date inclusive (Asia/Ho_Chi_Minh, YYYY-MM-DD)
+        in: query
+        name: to
+        type: string
+      - description: filter by material id (uuid)
+        in: query
+        name: material_id
+        type: string
+      - description: 'response format: json (default) or csv'
+        in: query
+        name: format
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/internal_module_costing.WasteReportRow'
+            type: array
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Per-material waste-cost ledger (BR-C03)
       tags:
       - costing
   /api/v1/dashboard/board-stock-summary:
