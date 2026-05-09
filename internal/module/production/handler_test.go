@@ -219,3 +219,43 @@ func TestListRoute_DashboardPreset_CannotCombineWithFromTo_Returns400(t *testing
 		t.Fatalf("status = %d, want 400 when preset combined with from/to", w.Code)
 	}
 }
+
+func TestListRoute_AssignedNull_Returns200(t *testing.T) {
+	r := newListHandler()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/work-orders?assigned=null", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 for assigned=null", w.Code)
+	}
+}
+
+func TestListRoute_AssignedToUUID_Returns200(t *testing.T) {
+	r := newListHandler()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/work-orders?assigned="+uuid.NewString(), nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 for assigned=<uuid>", w.Code)
+	}
+}
+
+func TestListRoute_AssignedInvalidUUID_Returns400(t *testing.T) {
+	r := newListHandler()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/work-orders?assigned=not-a-uuid", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 for malformed assigned uuid", w.Code)
+	}
+}
+
+func TestListRoute_DashboardPreset_CannotCombineWithAssigned_Returns400(t *testing.T) {
+	r := newListHandler()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/work-orders?preset=dashboard_default&assigned=null", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 when preset combined with assigned", w.Code)
+	}
+}

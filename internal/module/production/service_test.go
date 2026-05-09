@@ -857,6 +857,47 @@ func TestListWorkOrders_DashboardPreset_FilterPassedThrough(t *testing.T) {
 	}
 }
 
+func TestListWorkOrders_AssignedNull_FilterPassedThrough(t *testing.T) {
+	st := &mockStore{}
+	svc := newSvc(st, approvedPlan(uuid.New()), skuNoMetal(uuid.New()))
+
+	f := WorkOrderListFilter{
+		Status:       "PLANNED",
+		AssignedNull: true,
+	}
+	_, err := svc.ListWorkOrders(context.Background(), httpkit.PageParams{Page: 1, Limit: 10}, f)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !st.selectWorkOrdersFilter.AssignedNull {
+		t.Error("AssignedNull not forwarded to store")
+	}
+	if st.selectWorkOrdersFilter.AssignedTo != nil {
+		t.Errorf("AssignedTo must be nil when AssignedNull is set, got %v", st.selectWorkOrdersFilter.AssignedTo)
+	}
+}
+
+func TestListWorkOrders_AssignedTo_FilterPassedThrough(t *testing.T) {
+	st := &mockStore{}
+	svc := newSvc(st, approvedPlan(uuid.New()), skuNoMetal(uuid.New()))
+
+	userID := uuid.New()
+	f := WorkOrderListFilter{
+		Status:     "PLANNED",
+		AssignedTo: &userID,
+	}
+	_, err := svc.ListWorkOrders(context.Background(), httpkit.PageParams{Page: 1, Limit: 10}, f)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if st.selectWorkOrdersFilter.AssignedTo == nil || *st.selectWorkOrdersFilter.AssignedTo != userID {
+		t.Errorf("AssignedTo not forwarded: got %v, want %v", st.selectWorkOrdersFilter.AssignedTo, userID)
+	}
+	if st.selectWorkOrdersFilter.AssignedNull {
+		t.Error("AssignedNull must remain false when AssignedTo is set")
+	}
+}
+
 func TestListWorkOrdersByPlan_ReturnsFiltered(t *testing.T) {
 	planID := uuid.New()
 	wo1 := plannedWO(uuid.New(), planID, uuid.New())

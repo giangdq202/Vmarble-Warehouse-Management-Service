@@ -46,6 +46,13 @@ type WorkOrderListFilter struct {
 	CreatedFrom *time.Time `json:"created_from,omitempty"`
 	CreatedTo   *time.Time `json:"created_to,omitempty"` // exclusive upper bound
 
+	// AssignedNull, when true, filters to work orders with assigned_to IS NULL
+	// (i.e. unassigned). Mutually exclusive with AssignedTo.
+	AssignedNull bool
+	// AssignedTo, when set, filters to work orders assigned to a specific user.
+	// Mutually exclusive with AssignedNull.
+	AssignedTo *uuid.UUID
+
 	// DashboardPreset enables the operational queue: PLANNED-today first, then
 	// PLANNED-yesterday, then active (IN_CUTTING/IN_PROCESSING), then older PLANNED.
 	// COMPLETED and COSTED records are excluded. Mutually exclusive with Status /
