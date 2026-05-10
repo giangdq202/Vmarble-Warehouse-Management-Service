@@ -27,6 +27,9 @@ type store interface {
 	preAssignSheet(ctx context.Context, sheetID uuid.UUID, workOrderID uuid.UUID) error
 
 	insertCuttingRecord(ctx context.Context, cr CuttingRecord) error
+	// selectCuttingRecordDetails fetches a single cutting record along with the
+	// SKU details needed to render combined WIP + remnant labels.
+	selectCuttingRecordDetails(ctx context.Context, id uuid.UUID) (CuttingRecordDetails, error)
 
 	insertRemnant(ctx context.Context, r Remnant) error
 	selectAvailableRemnantsByMinDimension(ctx context.Context, minDim domain.Dimension) ([]Remnant, error)
@@ -128,14 +131,25 @@ type remnantStatusUpdate struct {
 }
 
 type CuttingRecord struct {
-	ID              uuid.UUID  `json:"id"`
-	SheetID         *uuid.UUID `json:"sheet_id,omitempty"`
-	RemnantSourceID *uuid.UUID `json:"remnant_source_id,omitempty"`
-	WorkOrderID     uuid.UUID  `json:"work_order_id"`
-	SKUID           uuid.UUID  `json:"sku_id"`
-	UsedLengthMM    int        `json:"used_length_mm"`
-	UsedWidthMM     int        `json:"used_width_mm"`
-	CreatedAt       time.Time  `json:"created_at"`
+	ID                uuid.UUID  `json:"id"`
+	SheetID           *uuid.UUID `json:"sheet_id,omitempty"`
+	RemnantSourceID   *uuid.UUID `json:"remnant_source_id,omitempty"`
+	WorkOrderID       uuid.UUID  `json:"work_order_id"`
+	SKUID             uuid.UUID  `json:"sku_id"`
+	UsedLengthMM      int        `json:"used_length_mm"`
+	UsedWidthMM       int        `json:"used_width_mm"`
+	ProducedRemnantID *uuid.UUID `json:"produced_remnant_id,omitempty"`
+	CreatedAt         time.Time  `json:"created_at"`
+}
+
+// CuttingRecordDetails enriches a CuttingRecord with SKU code/name fetched
+// via SQL JOIN, plus the produced remnant if any. Used by the cutting kiosk
+// label-generation flow so the inventory module does not need a SKU dep.
+type CuttingRecordDetails struct {
+	Record          CuttingRecord
+	SKUCode         string
+	SKUName         string
+	ProducedRemnant *Remnant
 }
 
 // cycleCountPostOp carries all adjustments to apply when posting a cycle count session.

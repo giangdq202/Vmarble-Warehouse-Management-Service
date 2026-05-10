@@ -34,6 +34,7 @@ func (h *Handler) Register(rg *gin.RouterGroup) {
 	inv.GET("/remnants/:id", h.getRemnant)
 	inv.GET("/remnants/:id/lineage", h.getRemnantLineage)
 	inv.GET("/remnants/:id/label.pdf", h.getRemnantLabelPDF)
+	inv.POST("/cutting-records/:id/labels", auth.RequireRole(auth.RoleWarehouse, auth.RoleCNC, auth.RoleCNCManager, auth.RoleAdmin), h.generateCutLabels)
 	inv.POST("/remnants/:id/allocate", auth.RequireRole(auth.RoleWarehouse, auth.RoleCNC, auth.RoleCNCManager, auth.RoleAdmin), h.allocateRemnant)
 	inv.POST("/remnants/:id/waste", auth.RequireRole(auth.RoleWarehouse, auth.RoleAdmin), h.markWaste)
 	inv.POST("/remnants/:id/stock", auth.RequireRole(auth.RoleWarehouse, auth.RoleCNC, auth.RoleCNCManager, auth.RoleAdmin), h.stockRemnant)
@@ -792,5 +793,41 @@ func (h *Handler) getRemnantLabelPDF(c *gin.Context) {
 		return
 	}
 	c.Header("Content-Disposition", "inline; filename=remnant-label-"+id.String()+"-"+string(size)+".pdf")
+	c.Data(http.StatusOK, "application/pdf", pdf)
+}
+
+// generateCutLabels godoc
+//
+// @Summary      Generate combined WIP + remnant labels PDF for a cutting record
+// @Description  Returns a single PDF document containing one WIP label page for the cutting record. When the cut produced a leftover remnant, an additional remnant label page is appended. Used by the cutting kiosk to auto-print labels at the moment a cut is reported.
+// @Tags         inventory
+// @Produce      application/pdf
+// @Param        id    path      string  true   "cutting record id (uuid)"
+// @Param        size  query     string  false  "label size: 50x30 or 100x70 (default 50x30)"
+// @Success      200   {file}    binary
+// @Failure      400   {object}  map[string]string
+// @Failure      401   {object}  map[string]string
+// @Failure      404   {object}  map[string]string
+// @Security     BearerAuth
+// @Router       /api/v1/inventory/cutting-records/{id}/labels [post]
+func (h *Handler) generateCutLabels(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+	size := RemnantLabelSize(c.Query("size"))
+	if size == "" {
+		size = RemnantLabelSize50x30
+	}
+	pdf, err := h.svc.GenerateCutLabelsPDF(c.Request.Context(), CutLabelsInput{
+		CuttingRecordID: id,
+		Size:            size,
+	})
+	if err != nil {
+		httpkit.Error(c, err)
+		return
+	}
+	c.Header("Content-Disposition", "inline; filename=cut-labels-"+id.String()+"-"+string(size)+".pdf")
 	c.Data(http.StatusOK, "application/pdf", pdf)
 }

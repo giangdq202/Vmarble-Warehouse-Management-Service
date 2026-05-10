@@ -326,13 +326,50 @@ func (s *pgStore) preAssignSheet(ctx context.Context, sheetID uuid.UUID, workOrd
 
 func (s *pgStore) insertCuttingRecord(ctx context.Context, cr CuttingRecord) error {
 	_, err := s.pool.Exec(ctx,
-		`INSERT INTO cutting_records (id, sheet_id, remnant_source_id, work_order_id, sku_id, used_length_mm, used_width_mm, created_at)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+		`INSERT INTO cutting_records (id, sheet_id, remnant_source_id, work_order_id, sku_id, used_length_mm, used_width_mm, produced_remnant_id, created_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
 		cr.ID, cr.SheetID, cr.RemnantSourceID,
 		cr.WorkOrderID, cr.SKUID,
-		cr.UsedLengthMM, cr.UsedWidthMM, cr.CreatedAt,
+		cr.UsedLengthMM, cr.UsedWidthMM, cr.ProducedRemnantID, cr.CreatedAt,
 	)
 	return err
+}
+
+// selectCuttingRecordDetails fetches a cutting record plus the SKU code/name
+// (joined from skus table — same database, read-only access) and the
+// produced remnant if any.
+func (s *pgStore) selectCuttingRecordDetails(ctx context.Context, id uuid.UUID) (CuttingRecordDetails, error) {
+	var d CuttingRecordDetails
+	row := s.pool.QueryRow(ctx,
+		`SELECT cr.id, cr.sheet_id, cr.remnant_source_id, cr.work_order_id,
+		        cr.sku_id, cr.used_length_mm, cr.used_width_mm,
+		        cr.produced_remnant_id, cr.created_at,
+		        COALESCE(s.code, ''), COALESCE(s.name, '')
+		   FROM cutting_records cr
+		   LEFT JOIN skus s ON s.id = cr.sku_id
+		  WHERE cr.id = $1`,
+		id,
+	)
+	if err := row.Scan(
+		&d.Record.ID, &d.Record.SheetID, &d.Record.RemnantSourceID, &d.Record.WorkOrderID,
+		&d.Record.SKUID, &d.Record.UsedLengthMM, &d.Record.UsedWidthMM,
+		&d.Record.ProducedRemnantID, &d.Record.CreatedAt,
+		&d.SKUCode, &d.SKUName,
+	); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return CuttingRecordDetails{}, domain.NewBizError(domain.ErrNotFound, "cutting record not found")
+		}
+		return CuttingRecordDetails{}, err
+	}
+	if d.Record.ProducedRemnantID != nil {
+		r, err := s.selectRemnantByID(ctx, *d.Record.ProducedRemnantID)
+		if err == nil {
+			d.ProducedRemnant = &r
+		} else if !errors.Is(err, domain.ErrNotFound) {
+			return CuttingRecordDetails{}, err
+		}
+	}
+	return d, nil
 }
 
 func (s *pgStore) insertRemnant(ctx context.Context, r Remnant) error {
@@ -649,11 +686,11 @@ func (s *pgStore) recordCutAtomically(ctx context.Context, op cutWriteOp) error 
 	// 2. Insert cutting record.
 	cr := op.Record
 	if _, execErr := tx.Exec(ctx,
-		`INSERT INTO cutting_records (id, sheet_id, remnant_source_id, work_order_id, sku_id, used_length_mm, used_width_mm, created_at)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+		`INSERT INTO cutting_records (id, sheet_id, remnant_source_id, work_order_id, sku_id, used_length_mm, used_width_mm, produced_remnant_id, created_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
 		cr.ID, cr.SheetID, cr.RemnantSourceID,
 		cr.WorkOrderID, cr.SKUID,
-		cr.UsedLengthMM, cr.UsedWidthMM, cr.CreatedAt,
+		cr.UsedLengthMM, cr.UsedWidthMM, cr.ProducedRemnantID, cr.CreatedAt,
 	); execErr != nil {
 		err = fmt.Errorf("insert cutting record: %w", execErr)
 		return err

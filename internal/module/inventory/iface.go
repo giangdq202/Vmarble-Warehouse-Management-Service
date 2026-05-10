@@ -142,6 +142,15 @@ type RemnantLabelInput struct {
 	Size      RemnantLabelSize
 }
 
+// CutLabelsInput carries the parameters for generating combined WIP + remnant
+// labels for a single cutting record. The PDF returned by GenerateCutLabelsPDF
+// contains one WIP page and, when the cut produced a leftover remnant, an
+// additional remnant page.
+type CutLabelsInput struct {
+	CuttingRecordID uuid.UUID
+	Size            RemnantLabelSize
+}
+
 type OverflowLevel string
 
 const (
@@ -341,4 +350,10 @@ type Service interface {
 	// text block with the remnant ID, parent board ID, and dimensions.
 	// Size must be one of RemnantLabelSize50x30 or RemnantLabelSize100x70.
 	GenerateRemnantLabelPDF(ctx context.Context, in RemnantLabelInput) ([]byte, error)
+
+	// GenerateCutLabelsPDF renders a single PDF document carrying a WIP label
+	// for the given cutting record and, if the cut produced a remnant, an
+	// additional remnant label page. Used by the cutting kiosk to auto-print
+	// labels at the moment a cut is reported.
+	GenerateCutLabelsPDF(ctx context.Context, in CutLabelsInput) ([]byte, error)
 }

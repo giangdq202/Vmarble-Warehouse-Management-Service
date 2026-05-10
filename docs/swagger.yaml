@@ -2406,6 +2406,52 @@ paths:
       summary: Record cutting operation
       tags:
       - inventory
+  /api/v1/inventory/cutting-records/{id}/labels:
+    post:
+      description: Returns a single PDF document containing one WIP label page for
+        the cutting record. When the cut produced a leftover remnant, an additional
+        remnant label page is appended. Used by the cutting kiosk to auto-print labels
+        at the moment a cut is reported.
+      parameters:
+      - description: cutting record id (uuid)
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: 'label size: 50x30 or 100x70 (default 50x30)'
+        in: query
+        name: size
+        type: string
+      produces:
+      - application/pdf
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: file
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Generate combined WIP + remnant labels PDF for a cutting record
+      tags:
+      - inventory
   /api/v1/inventory/cycle-counts:
     post:
       consumes:

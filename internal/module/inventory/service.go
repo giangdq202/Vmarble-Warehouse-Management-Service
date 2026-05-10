@@ -320,6 +320,10 @@ func (s *service) RecordCut(ctx context.Context, in RecordCutInput) (CutResult, 
 			CreatedAt:           time.Now().UTC(),
 		}
 		op.NewRemnant = &newRemnant
+		// Link the cutting record to the produced remnant so the kiosk can
+		// later regenerate combined WIP + remnant labels without time-proximity
+		// joins.
+		op.Record.ProducedRemnantID = &newRemnant.ID
 	}
 
 	if err := s.st.recordCutAtomically(ctx, op); err != nil {
@@ -869,26 +873,50 @@ func (s *service) GenerateRemnantLabelPDF(ctx context.Context, in RemnantLabelIn
 		return nil, err
 	}
 
-	raw, err := buildRemnantQRBytes(r)
-	if err != nil {
+	pdf := newLabelPDF(layout)
+	if err := drawRemnantLabelPage(pdf, layout, r); err != nil {
 		return nil, err
 	}
-	qrPNG, err := qrcode.Encode(string(raw), qrcode.High, 1024)
-	if err != nil {
-		return nil, fmt.Errorf("encode remnant qr: %w", err)
-	}
 
+	var out bytes.Buffer
+	if err := pdf.Output(&out); err != nil {
+		return nil, fmt.Errorf("render remnant label pdf: %w", err)
+	}
+	return out.Bytes(), nil
+}
+
+// newLabelPDF constructs a gofpdf instance configured with zero margins and
+// the layout's page size, ready for AddPageFormat calls. Used by both
+// GenerateRemnantLabelPDF and GenerateCutLabelsPDF so they share rendering
+// settings.
+func newLabelPDF(layout remnantLabelLayout) *gofpdf.Fpdf {
 	pdf := gofpdf.NewCustom(&gofpdf.InitType{
 		UnitStr: "mm",
 		Size:    gofpdf.SizeType{Wd: layout.pageWidthMM, Ht: layout.pageHeightMM},
 	})
 	pdf.SetMargins(0, 0, 0)
 	pdf.SetAutoPageBreak(false, 0)
+	return pdf
+}
+
+// drawRemnantLabelPage adds a remnant label page to pdf — same layout used
+// by GenerateRemnantLabelPDF.
+func drawRemnantLabelPage(pdf *gofpdf.Fpdf, layout remnantLabelLayout, r Remnant) error {
+	raw, err := buildRemnantQRBytes(r)
+	if err != nil {
+		return err
+	}
+	qrPNG, err := qrcode.Encode(string(raw), qrcode.High, 1024)
+	if err != nil {
+		return fmt.Errorf("encode remnant qr: %w", err)
+	}
+
 	pdf.AddPageFormat("P", gofpdf.SizeType{Wd: layout.pageWidthMM, Ht: layout.pageHeightMM})
 
+	imgName := "qr-rem-" + r.ID.String()
 	imgOpts := gofpdf.ImageOptions{ImageType: "PNG"}
-	pdf.RegisterImageOptionsReader("qr", imgOpts, bytes.NewReader(qrPNG))
-	pdf.ImageOptions("qr", layout.qrXMM, layout.qrYMM, layout.qrSizeMM, layout.qrSizeMM, false, imgOpts, 0, "")
+	pdf.RegisterImageOptionsReader(imgName, imgOpts, bytes.NewReader(qrPNG))
+	pdf.ImageOptions(imgName, layout.qrXMM, layout.qrYMM, layout.qrSizeMM, layout.qrSizeMM, false, imgOpts, 0, "")
 
 	dimText := fmt.Sprintf("%dx%d mm", r.Dimensions.LengthMM, r.Dimensions.WidthMM)
 
@@ -901,10 +929,96 @@ func (s *service) GenerateRemnantLabelPDF(ctx context.Context, in RemnantLabelIn
 	pdf.CellFormat(layout.textWidthMM, layout.lineHeightMM, "Board: "+shortID(r.ParentBoardID), "", 1, "L", false, 0, "")
 	pdf.SetX(layout.textXMM)
 	pdf.CellFormat(layout.textWidthMM, layout.lineHeightMM, dimText, "", 1, "L", false, 0, "")
+	return nil
+}
+
+// ── Cut labels PDF (WIP + optional remnant, single document) ─────────────────
+
+// wipQRPayload is encoded into the WIP label QR code. Scanning the QR
+// returns the originating cutting_record_id so kiosk operators can re-print
+// or look up the cut later.
+type wipQRPayload struct {
+	Type            string `json:"type"`
+	CuttingRecordID string `json:"cutting_record_id"`
+	WorkOrderID     string `json:"work_order_id"`
+	SKUID           string `json:"sku_id"`
+}
+
+func buildWIPQRBytes(d CuttingRecordDetails) ([]byte, error) {
+	payload := wipQRPayload{
+		Type:            "wip",
+		CuttingRecordID: d.Record.ID.String(),
+		WorkOrderID:     d.Record.WorkOrderID.String(),
+		SKUID:           d.Record.SKUID.String(),
+	}
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("marshal wip qr payload: %w", err)
+	}
+	return raw, nil
+}
+
+// drawWIPLabelPage adds a WIP label page to pdf. The label shows SKU code,
+// used dimensions, work-order short id, and a QR encoding the cutting_record_id.
+func drawWIPLabelPage(pdf *gofpdf.Fpdf, layout remnantLabelLayout, d CuttingRecordDetails) error {
+	raw, err := buildWIPQRBytes(d)
+	if err != nil {
+		return err
+	}
+	qrPNG, err := qrcode.Encode(string(raw), qrcode.High, 1024)
+	if err != nil {
+		return fmt.Errorf("encode wip qr: %w", err)
+	}
+
+	pdf.AddPageFormat("P", gofpdf.SizeType{Wd: layout.pageWidthMM, Ht: layout.pageHeightMM})
+
+	imgName := "qr-wip-" + d.Record.ID.String()
+	imgOpts := gofpdf.ImageOptions{ImageType: "PNG"}
+	pdf.RegisterImageOptionsReader(imgName, imgOpts, bytes.NewReader(qrPNG))
+	pdf.ImageOptions(imgName, layout.qrXMM, layout.qrYMM, layout.qrSizeMM, layout.qrSizeMM, false, imgOpts, 0, "")
+
+	skuLabel := d.SKUCode
+	if skuLabel == "" {
+		skuLabel = "SKU " + shortID(d.Record.SKUID)
+	}
+	dimText := fmt.Sprintf("%dx%d mm", d.Record.UsedLengthMM, d.Record.UsedWidthMM)
+
+	pdf.SetFont("Arial", "B", layout.titleFontPt)
+	pdf.SetXY(layout.textXMM, layout.textYMM)
+	pdf.CellFormat(layout.textWidthMM, layout.lineHeightMM, "WIP: "+skuLabel, "", 1, "L", false, 0, "")
+
+	pdf.SetFont("Arial", "", layout.bodyFontPt)
+	pdf.SetX(layout.textXMM)
+	pdf.CellFormat(layout.textWidthMM, layout.lineHeightMM, "WO: "+shortID(d.Record.WorkOrderID), "", 1, "L", false, 0, "")
+	pdf.SetX(layout.textXMM)
+	pdf.CellFormat(layout.textWidthMM, layout.lineHeightMM, dimText, "", 1, "L", false, 0, "")
+	return nil
+}
+
+func (s *service) GenerateCutLabelsPDF(ctx context.Context, in CutLabelsInput) ([]byte, error) {
+	layout, err := resolveRemnantLabelLayout(in.Size)
+	if err != nil {
+		return nil, err
+	}
+
+	d, err := s.st.selectCuttingRecordDetails(ctx, in.CuttingRecordID)
+	if err != nil {
+		return nil, err
+	}
+
+	pdf := newLabelPDF(layout)
+	if err := drawWIPLabelPage(pdf, layout, d); err != nil {
+		return nil, err
+	}
+	if d.ProducedRemnant != nil {
+		if err := drawRemnantLabelPage(pdf, layout, *d.ProducedRemnant); err != nil {
+			return nil, err
+		}
+	}
 
 	var out bytes.Buffer
 	if err := pdf.Output(&out); err != nil {
-		return nil, fmt.Errorf("render remnant label pdf: %w", err)
+		return nil, fmt.Errorf("render cut labels pdf: %w", err)
 	}
 	return out.Bytes(), nil
 }
