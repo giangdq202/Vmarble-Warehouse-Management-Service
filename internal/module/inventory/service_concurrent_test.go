@@ -243,6 +243,9 @@ func (s *concurrentMockStore) selectCycleCountLinesBySession(_ context.Context, 
 func (s *concurrentMockStore) postCycleCountAtomically(_ context.Context, _ cycleCountPostOp) error {
 	return nil
 }
+func (s *concurrentMockStore) selectCuttingRecordDetails(_ context.Context, _ uuid.UUID) (CuttingRecordDetails, error) {
+	return CuttingRecordDetails{}, nil
+}
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 

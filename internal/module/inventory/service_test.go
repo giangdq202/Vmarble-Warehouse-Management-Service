@@ -156,6 +156,10 @@ type mockStore struct {
 	postCycleCountAtomicallyCalled bool
 	postCycleCountAtomicallyOp     cycleCountPostOp
 	postCycleCountAtomicallyErr    error
+
+	// selectCuttingRecordDetails
+	selectCuttingRecordDetailsResult CuttingRecordDetails
+	selectCuttingRecordDetailsErr    error
 }
 
 func (m *mockStore) insertLot(_ context.Context, _ InventoryLot) error {
@@ -285,6 +289,10 @@ func (m *mockStore) postCycleCountAtomically(_ context.Context, op cycleCountPos
 	m.postCycleCountAtomicallyCalled = true
 	m.postCycleCountAtomicallyOp = op
 	return m.postCycleCountAtomicallyErr
+}
+
+func (m *mockStore) selectCuttingRecordDetails(_ context.Context, _ uuid.UUID) (CuttingRecordDetails, error) {
+	return m.selectCuttingRecordDetailsResult, m.selectCuttingRecordDetailsErr
 }
 
 // ── helpers ──────────────────────────────────────────────────────────────────
@@ -4257,6 +4265,131 @@ func TestGenerateRemnantLabelPDF_InvalidSize_ReturnsError(t *testing.T) {
 	_, err := svc.GenerateRemnantLabelPDF(context.Background(), RemnantLabelInput{
 		RemnantID: uuid.New(),
 		Size:      RemnantLabelSize("invalid"),
+	})
+	if !errors.Is(err, domain.ErrInvalidInput) {
+		t.Errorf("want ErrInvalidInput, got %v", err)
+	}
+}
+
+// ── GenerateCutLabelsPDF ──────────────────────────────────────────────────────
+
+// countPDFPages returns the number of pages declared in the PDF byte stream by
+// counting "/Type /Page" occurrences (each page object declares its type).
+// Sufficient for tests that only need to distinguish 1-page vs 2-page output.
+func countPDFPages(b []byte) int {
+	count := 0
+	src := string(b)
+	target := "/Type /Page"
+	for i := 0; i+len(target) <= len(src); i++ {
+		if src[i:i+len(target)] != target {
+			continue
+		}
+		next := byte(' ')
+		if i+len(target) < len(src) {
+			next = src[i+len(target)]
+		}
+		if next != 's' { // skip "/Type /Pages"
+			count++
+		}
+	}
+	return count
+}
+
+func TestGenerateCutLabelsPDF_HappyPath_NoRemnant_OnePage(t *testing.T) {
+	cutID := uuid.New()
+	st := &mockStore{
+		selectCuttingRecordDetailsResult: CuttingRecordDetails{
+			Record: CuttingRecord{
+				ID:           cutID,
+				WorkOrderID:  uuid.New(),
+				SKUID:        uuid.New(),
+				UsedLengthMM: 600,
+				UsedWidthMM:  400,
+				CreatedAt:    time.Now(),
+			},
+			SKUCode:         "SKU-001",
+			SKUName:         "Test SKU",
+			ProducedRemnant: nil,
+		},
+	}
+	svc := NewService(st, nil)
+	pdf, err := svc.GenerateCutLabelsPDF(context.Background(), CutLabelsInput{
+		CuttingRecordID: cutID,
+		Size:            RemnantLabelSize50x30,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(pdf) == 0 {
+		t.Fatal("expected non-empty PDF bytes")
+	}
+	if pages := countPDFPages(pdf); pages != 1 {
+		t.Errorf("want 1 page (no remnant produced), got %d", pages)
+	}
+}
+
+func TestGenerateCutLabelsPDF_HappyPath_WithRemnant_TwoPages(t *testing.T) {
+	cutID := uuid.New()
+	remnantID := uuid.New()
+	boardID := uuid.New()
+	remnant := Remnant{
+		ID:            remnantID,
+		ParentBoardID: boardID,
+		Dimensions:    domain.Dimension{LengthMM: 800, WidthMM: 500},
+		Status:        domain.RemnantAvailable,
+	}
+	st := &mockStore{
+		selectCuttingRecordDetailsResult: CuttingRecordDetails{
+			Record: CuttingRecord{
+				ID:                cutID,
+				WorkOrderID:       uuid.New(),
+				SKUID:             uuid.New(),
+				UsedLengthMM:      600,
+				UsedWidthMM:       400,
+				ProducedRemnantID: &remnantID,
+				CreatedAt:         time.Now(),
+			},
+			SKUCode:         "SKU-001",
+			SKUName:         "Test SKU",
+			ProducedRemnant: &remnant,
+		},
+	}
+	svc := NewService(st, nil)
+	pdf, err := svc.GenerateCutLabelsPDF(context.Background(), CutLabelsInput{
+		CuttingRecordID: cutID,
+		Size:            RemnantLabelSize100x70,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(pdf) == 0 {
+		t.Fatal("expected non-empty PDF bytes")
+	}
+	if pages := countPDFPages(pdf); pages != 2 {
+		t.Errorf("want 2 pages (WIP + remnant), got %d", pages)
+	}
+}
+
+func TestGenerateCutLabelsPDF_RecordNotFound_ReturnsError(t *testing.T) {
+	st := &mockStore{
+		selectCuttingRecordDetailsErr: domain.NewBizError(domain.ErrNotFound, "cutting record not found"),
+	}
+	svc := NewService(st, nil)
+	_, err := svc.GenerateCutLabelsPDF(context.Background(), CutLabelsInput{
+		CuttingRecordID: uuid.New(),
+		Size:            RemnantLabelSize50x30,
+	})
+	if !errors.Is(err, domain.ErrNotFound) {
+		t.Errorf("want ErrNotFound, got %v", err)
+	}
+}
+
+func TestGenerateCutLabelsPDF_InvalidSize_ReturnsError(t *testing.T) {
+	st := &mockStore{}
+	svc := NewService(st, nil)
+	_, err := svc.GenerateCutLabelsPDF(context.Background(), CutLabelsInput{
+		CuttingRecordID: uuid.New(),
+		Size:            RemnantLabelSize("invalid"),
 	})
 	if !errors.Is(err, domain.ErrInvalidInput) {
 		t.Errorf("want ErrInvalidInput, got %v", err)
