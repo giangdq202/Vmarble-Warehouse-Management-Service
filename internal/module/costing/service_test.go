@@ -127,17 +127,6 @@ func (m *mockCONR) GetConsumptionCostForWO(_ context.Context, _ uuid.UUID) (doma
 	return m.result, m.err
 }
 
-// ── mockLBR (LaborDataReader) ────────────────────────────────────────────────
-
-type mockLBR struct {
-	result domain.Money
-	err    error
-}
-
-func (m *mockLBR) GetLaborCostForWO(_ context.Context, _ uuid.UUID) (domain.Money, error) {
-	return m.result, m.err
-}
-
 // ── helpers ───────────────────────────────────────────────────────────────────
 
 func completedWO(woID, skuID uuid.UUID) WOInfo {
