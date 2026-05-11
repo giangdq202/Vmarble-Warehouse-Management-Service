@@ -69,6 +69,10 @@ type PreAssignSheetRequest struct {
 // Implementation lives in the costing module; wired in main.go.
 type CostingChecker interface {
 	HasCostingRecord(ctx context.Context, workOrderID uuid.UUID) (bool, error)
+	// IsCostingFinalized reports whether the costing record for the work order
+	// is finalized (immutable per BR-C04). Returns false (no error) when no
+	// costing record exists yet.
+	IsCostingFinalized(ctx context.Context, workOrderID uuid.UUID) (bool, error)
 }
 
 // RemnantAdvisor is the production module's view of inventory's remnant

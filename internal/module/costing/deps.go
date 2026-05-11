@@ -30,3 +30,10 @@ type CuttingData struct {
 type ConsumptionDataReader interface {
 	GetConsumptionCostForWO(ctx context.Context, woID uuid.UUID) (domain.Money, error)
 }
+
+// LaborDataReader returns the aggregated labor cost recorded against a work
+// order, computed as SUM(minutes * rate_per_hour / 60). Implementation lives
+// in the production module; wired in main.go.
+type LaborDataReader interface {
+	GetLaborCostForWO(ctx context.Context, woID uuid.UUID) (domain.Money, error)
+}

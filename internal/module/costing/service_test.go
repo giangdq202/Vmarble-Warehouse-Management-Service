@@ -127,6 +127,17 @@ func (m *mockCONR) GetConsumptionCostForWO(_ context.Context, _ uuid.UUID) (doma
 	return m.result, m.err
 }
 
+// ── mockLBR (LaborDataReader) ────────────────────────────────────────────────
+
+type mockLBR struct {
+	result domain.Money
+	err    error
+}
+
+func (m *mockLBR) GetLaborCostForWO(_ context.Context, _ uuid.UUID) (domain.Money, error) {
+	return m.result, m.err
+}
+
 // ── helpers ───────────────────────────────────────────────────────────────────
 
 func completedWO(woID, skuID uuid.UUID) WOInfo {
@@ -138,7 +149,7 @@ func plannedWO(woID, skuID uuid.UUID) WOInfo {
 }
 
 func newSvc(st *mockStore, wor *mockWOR, cdr *mockCDR, conr *mockCONR) Service {
-	return NewService(st, wor, cdr, conr)
+	return NewService(st, wor, cdr, conr, nil)
 }
 
 // zeroCONR returns a ConsumptionDataReader that always returns zero cost.

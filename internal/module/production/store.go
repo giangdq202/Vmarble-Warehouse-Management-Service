@@ -44,6 +44,14 @@ type store interface {
 	// assignSlotAtomically acquires a row-level lock on the slot, re-validates
 	// remaining capacity under the lock, then sets machine_slot_id on the WO.
 	assignSlotAtomically(ctx context.Context, op assignSlotOp) error
+
+	// Labor cost entries
+	insertLaborEntry(ctx context.Context, e LaborEntry) error
+	selectLaborEntriesByWO(ctx context.Context, woID uuid.UUID) ([]LaborEntry, error)
+	// sumLaborMinuteRateByWO returns SUM(minutes * rate_per_hour) for the work
+	// order in dong·minutes; callers divide by 60 to get dong. Returns 0 when
+	// no entries exist.
+	sumLaborMinuteRateByWO(ctx context.Context, woID uuid.UUID) (int64, error)
 }
 
 // assignSlotOp carries the pre-validated data for a single slot assignment.

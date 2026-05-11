@@ -76,6 +76,15 @@ func (stubService) UnassignSlot(context.Context, uuid.UUID) (WorkOrder, error) {
 func (stubService) SuggestSchedule(context.Context, uuid.UUID) ([]ScheduleSuggestion, error) {
 	panic("unexpected call")
 }
+func (stubService) RecordLaborEntry(context.Context, RecordLaborEntryInput) (LaborEntry, error) {
+	panic("unexpected call")
+}
+func (stubService) ListLaborEntries(context.Context, uuid.UUID) ([]LaborEntry, error) {
+	panic("unexpected call")
+}
+func (stubService) SumLaborCost(context.Context, uuid.UUID) (domain.Money, error) {
+	panic("unexpected call")
+}
 
 var _ Service = stubService{}
 

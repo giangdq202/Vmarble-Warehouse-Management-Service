@@ -118,6 +118,8 @@ func (h *Handler) Register(rg *gin.RouterGroup) {
 	rg.POST("/work-orders/:id/advance", auth.RequireRole(auth.RoleCNC, auth.RoleCNCManager, auth.RoleWarehouse, auth.RoleForeman, auth.RoleAdmin), h.advance)
 	rg.POST("/work-orders/:id/consumptions", auth.RequireRole(auth.RoleWarehouse, auth.RoleForeman, auth.RoleAdmin), h.recordConsumption)
 	rg.GET("/work-orders/:id/consumptions", h.listConsumptions)
+	rg.POST("/work-orders/:id/labor-entries", auth.RequireRole(auth.RoleForeman, auth.RoleCNCManager, auth.RoleAdmin), h.recordLaborEntry)
+	rg.GET("/work-orders/:id/labor-entries", h.listLaborEntries)
 	rg.POST("/work-orders/:id/assign", auth.RequireRole(auth.RoleCNCManager, auth.RoleAdmin), h.assign)
 	rg.POST("/work-orders/:id/suggest-assignment", auth.RequireRole(auth.RoleCNCManager, auth.RoleAdmin), h.suggestAssignment)
 	rg.POST("/work-orders/:id/estimated-hours", auth.RequireRole(auth.RoleCNCManager, auth.RolePlanner, auth.RoleAdmin), h.setEstimatedHours)
@@ -795,4 +797,70 @@ func (h *Handler) deleteSlot(c *gin.Context) {
 		return
 	}
 	c.Status(http.StatusNoContent)
+}
+
+// recordLaborEntry godoc
+//
+// @Summary      Record a per-stage labor cost entry for a work order
+// @Description  Adds one labor cost line (stage, minutes, hourly rate). Cost contribution is `minutes * rate_per_hour / 60` and is aggregated by the costing module at compute-cost time. Rejected with 409 when the WO's costing record is finalized.
+// @Tags         production
+// @Accept       json
+// @Produce      json
+// @Param        id    path      string                  true  "work order id (uuid)"
+// @Param        body  body      RecordLaborEntryInput   true  "payload"
+// @Success      201   {object}  LaborEntry
+// @Failure      400   {object}  map[string]string
+// @Failure      404   {object}  map[string]string
+// @Failure      409   {object}  map[string]string
+// @Security     BearerAuth
+// @Failure      401  {object}  map[string]string
+// @Router       /api/v1/work-orders/{id}/labor-entries [post]
+func (h *Handler) recordLaborEntry(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+	var in RecordLaborEntryInput
+	if !httpkit.Bind(c, &in) {
+		return
+	}
+	in.WorkOrderID = id
+	if identity, ok := auth.FromContext(c); ok {
+		if actorID, err := uuid.Parse(identity.UserID); err == nil {
+			in.ActorID = actorID
+		}
+	}
+	entry, err := h.svc.RecordLaborEntry(c.Request.Context(), in)
+	if err != nil {
+		httpkit.Error(c, err)
+		return
+	}
+	c.JSON(http.StatusCreated, entry)
+}
+
+// listLaborEntries godoc
+//
+// @Summary      List labor cost entries for a work order
+// @Tags         production
+// @Produce      json
+// @Param        id   path      string  true  "work order id (uuid)"
+// @Success      200  {array}   LaborEntry
+// @Failure      400  {object}  map[string]string
+// @Failure      404  {object}  map[string]string
+// @Security     BearerAuth
+// @Failure      401  {object}  map[string]string
+// @Router       /api/v1/work-orders/{id}/labor-entries [get]
+func (h *Handler) listLaborEntries(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+	entries, err := h.svc.ListLaborEntries(c.Request.Context(), id)
+	if err != nil {
+		httpkit.Error(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, entries)
 }

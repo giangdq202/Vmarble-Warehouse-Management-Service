@@ -86,6 +86,15 @@ type mockStore struct {
 	updateEstimatedHoursErr error
 	unassignWOFromSlotErr   error
 	assignSlotAtomicallyErr error
+
+	// Labor entries
+	insertLaborEntryCalled       bool
+	insertLaborEntryArg          LaborEntry
+	insertLaborEntryErr          error
+	selectLaborEntriesByWOResult []LaborEntry
+	selectLaborEntriesByWOErr    error
+	sumLaborMinuteRateByWOResult int64
+	sumLaborMinuteRateByWOErr    error
 }
 
 func (m *mockStore) insertWorkOrder(_ context.Context, _ WorkOrder) error {
@@ -164,6 +173,17 @@ func (m *mockStore) unassignWOFromSlot(_ context.Context, _ uuid.UUID) error {
 func (m *mockStore) assignSlotAtomically(_ context.Context, _ assignSlotOp) error {
 	return m.assignSlotAtomicallyErr
 }
+func (m *mockStore) insertLaborEntry(_ context.Context, e LaborEntry) error {
+	m.insertLaborEntryCalled = true
+	m.insertLaborEntryArg = e
+	return m.insertLaborEntryErr
+}
+func (m *mockStore) selectLaborEntriesByWO(_ context.Context, _ uuid.UUID) ([]LaborEntry, error) {
+	return m.selectLaborEntriesByWOResult, m.selectLaborEntriesByWOErr
+}
+func (m *mockStore) sumLaborMinuteRateByWO(_ context.Context, _ uuid.UUID) (int64, error) {
+	return m.sumLaborMinuteRateByWOResult, m.sumLaborMinuteRateByWOErr
+}
 
 // mockPlanChecker satisfies PlanChecker.
 type mockPlanChecker struct {
@@ -229,12 +249,20 @@ func (m *mockSheetAssigner) PreAssignSheet(_ context.Context, in PreAssignSheetR
 
 // mockCostingChecker satisfies CostingChecker.
 type mockCostingChecker struct {
-	result bool
-	err    error
+	result         bool
+	err            error
+	finalized      bool
+	finalizedErr   error
+	finalizedCalls int
 }
 
 func (m *mockCostingChecker) HasCostingRecord(_ context.Context, _ uuid.UUID) (bool, error) {
 	return m.result, m.err
+}
+
+func (m *mockCostingChecker) IsCostingFinalized(_ context.Context, _ uuid.UUID) (bool, error) {
+	m.finalizedCalls++
+	return m.finalized, m.finalizedErr
 }
 
 // mockRemnantAdvisor satisfies RemnantAdvisor. Records every interaction so
@@ -2394,3 +2422,271 @@ func TestListWorkOrders_FilterByDateRange_ForwardsFilter(t *testing.T) {
 		t.Fatalf("CreatedTo not forwarded correctly")
 	}
 }
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Labor cost entries (Issue #225)
+// ═════════════════════════════════════════════════════════════════════════════
+
+func TestRecordLaborEntry_HappyPath(t *testing.T) {
+	woID := uuid.New()
+	actorID := uuid.New()
+	st := &mockStore{selectWorkOrderByIDResult: woWithStatus(woID, domain.WOInProcessing)}
+	svc := newSvc(st, approvedPlan(uuid.New()), skuNoMetal(uuid.New()))
+
+	entry, err := svc.RecordLaborEntry(context.Background(), RecordLaborEntryInput{
+		WorkOrderID: woID,
+		Stage:       domain.LaborStageCNC,
+		Minutes:     60,
+		RatePerHour: 120000,
+		ActorID:     actorID,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if entry.ID == uuid.Nil {
+		t.Error("entry.ID must be set")
+	}
+	if entry.Stage != domain.LaborStageCNC {
+		t.Errorf("Stage = %v, want CNC", entry.Stage)
+	}
+	if !st.insertLaborEntryCalled {
+		t.Fatal("expected insertLaborEntry to be called")
+	}
+	if st.insertLaborEntryArg.Minutes != 60 || st.insertLaborEntryArg.RatePerHour != 120000 {
+		t.Errorf("persisted entry mismatch: %+v", st.insertLaborEntryArg)
+	}
+	if st.insertLaborEntryArg.ActorID != actorID {
+		t.Errorf("ActorID = %v, want %v", st.insertLaborEntryArg.ActorID, actorID)
+	}
+}
+
+func TestRecordLaborEntry_InvalidStage_ReturnsInvalidInput(t *testing.T) {
+	st := &mockStore{selectWorkOrderByIDResult: woWithStatus(uuid.New(), domain.WOInProcessing)}
+	svc := newSvc(st, approvedPlan(uuid.New()), skuNoMetal(uuid.New()))
+
+	_, err := svc.RecordLaborEntry(context.Background(), RecordLaborEntryInput{
+		WorkOrderID: uuid.New(),
+		Stage:       domain.LaborStage("WELDING"),
+		Minutes:     30,
+		RatePerHour: 100000,
+		ActorID:     uuid.New(),
+	})
+	if !errors.Is(err, domain.ErrInvalidInput) {
+		t.Fatalf("err = %v, want ErrInvalidInput", err)
+	}
+	if st.insertLaborEntryCalled {
+		t.Error("insertLaborEntry must not be called on invalid stage")
+	}
+}
+
+func TestRecordLaborEntry_ZeroMinutes_ReturnsInvalidInput(t *testing.T) {
+	svc := newSvc(&mockStore{}, approvedPlan(uuid.New()), skuNoMetal(uuid.New()))
+
+	_, err := svc.RecordLaborEntry(context.Background(), RecordLaborEntryInput{
+		WorkOrderID: uuid.New(),
+		Stage:       domain.LaborStageCNC,
+		Minutes:     0,
+		RatePerHour: 100000,
+		ActorID:     uuid.New(),
+	})
+	if !errors.Is(err, domain.ErrInvalidInput) {
+		t.Fatalf("err = %v, want ErrInvalidInput", err)
+	}
+}
+
+func TestRecordLaborEntry_NegativeRate_ReturnsInvalidInput(t *testing.T) {
+	svc := newSvc(&mockStore{}, approvedPlan(uuid.New()), skuNoMetal(uuid.New()))
+
+	_, err := svc.RecordLaborEntry(context.Background(), RecordLaborEntryInput{
+		WorkOrderID: uuid.New(),
+		Stage:       domain.LaborStageCNC,
+		Minutes:     30,
+		RatePerHour: -1,
+		ActorID:     uuid.New(),
+	})
+	if !errors.Is(err, domain.ErrInvalidInput) {
+		t.Fatalf("err = %v, want ErrInvalidInput", err)
+	}
+}
+
+func TestRecordLaborEntry_MissingActor_ReturnsInvalidInput(t *testing.T) {
+	svc := newSvc(&mockStore{}, approvedPlan(uuid.New()), skuNoMetal(uuid.New()))
+
+	_, err := svc.RecordLaborEntry(context.Background(), RecordLaborEntryInput{
+		WorkOrderID: uuid.New(),
+		Stage:       domain.LaborStageCNC,
+		Minutes:     30,
+		RatePerHour: 100000,
+	})
+	if !errors.Is(err, domain.ErrInvalidInput) {
+		t.Fatalf("err = %v, want ErrInvalidInput", err)
+	}
+}
+
+func TestRecordLaborEntry_WorkOrderNotFound_PropagatesError(t *testing.T) {
+	st := &mockStore{selectWorkOrderByIDErr: domain.NewBizError(domain.ErrNotFound, "wo not found")}
+	svc := newSvc(st, approvedPlan(uuid.New()), skuNoMetal(uuid.New()))
+
+	_, err := svc.RecordLaborEntry(context.Background(), RecordLaborEntryInput{
+		WorkOrderID: uuid.New(),
+		Stage:       domain.LaborStageCNC,
+		Minutes:     30,
+		RatePerHour: 100000,
+		ActorID:     uuid.New(),
+	})
+	if !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("err = %v, want ErrNotFound", err)
+	}
+	if st.insertLaborEntryCalled {
+		t.Error("insertLaborEntry must not be called when WO lookup fails")
+	}
+}
+
+func TestRecordLaborEntry_CostingFinalized_ReturnsAlreadyFinalized(t *testing.T) {
+	woID := uuid.New()
+	st := &mockStore{selectWorkOrderByIDResult: woWithStatus(woID, domain.WOCompleted)}
+	cc := &mockCostingChecker{finalized: true}
+	svc := newSvcWithCosting(st, approvedPlan(uuid.New()), skuNoMetal(uuid.New()), cc)
+
+	_, err := svc.RecordLaborEntry(context.Background(), RecordLaborEntryInput{
+		WorkOrderID: woID,
+		Stage:       domain.LaborStageCNC,
+		Minutes:     30,
+		RatePerHour: 100000,
+		ActorID:     uuid.New(),
+	})
+	if !errors.Is(err, domain.ErrAlreadyFinalized) {
+		t.Fatalf("err = %v, want ErrAlreadyFinalized", err)
+	}
+	if cc.finalizedCalls == 0 {
+		t.Error("expected IsCostingFinalized to be consulted")
+	}
+	if st.insertLaborEntryCalled {
+		t.Error("insertLaborEntry must not be called when costing is finalized")
+	}
+}
+
+func TestRecordLaborEntry_CostingNotFinalized_Allows(t *testing.T) {
+	woID := uuid.New()
+	st := &mockStore{selectWorkOrderByIDResult: woWithStatus(woID, domain.WOCompleted)}
+	cc := &mockCostingChecker{finalized: false}
+	svc := newSvcWithCosting(st, approvedPlan(uuid.New()), skuNoMetal(uuid.New()), cc)
+
+	_, err := svc.RecordLaborEntry(context.Background(), RecordLaborEntryInput{
+		WorkOrderID: woID,
+		Stage:       domain.LaborStageGrinding,
+		Minutes:     45,
+		RatePerHour: 90000,
+		ActorID:     uuid.New(),
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !st.insertLaborEntryCalled {
+		t.Fatal("expected insertLaborEntry to be called")
+	}
+}
+
+func TestListLaborEntries_HappyPath(t *testing.T) {
+	woID := uuid.New()
+	want := []LaborEntry{
+		{ID: uuid.New(), WorkOrderID: woID, Stage: domain.LaborStageCNC, Minutes: 60, RatePerHour: 120000},
+		{ID: uuid.New(), WorkOrderID: woID, Stage: domain.LaborStageGrinding, Minutes: 30, RatePerHour: 90000},
+	}
+	st := &mockStore{selectLaborEntriesByWOResult: want}
+	svc := newSvc(st, approvedPlan(uuid.New()), skuNoMetal(uuid.New()))
+
+	got, err := svc.ListLaborEntries(context.Background(), woID)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("len = %d, want 2", len(got))
+	}
+}
+
+func TestListLaborEntries_EmptyResult_ReturnsEmptySlice(t *testing.T) {
+	st := &mockStore{selectLaborEntriesByWOResult: nil}
+	svc := newSvc(st, approvedPlan(uuid.New()), skuNoMetal(uuid.New()))
+
+	got, err := svc.ListLaborEntries(context.Background(), uuid.New())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got == nil {
+		t.Fatal("expected non-nil empty slice, got nil")
+	}
+	if len(got) != 0 {
+		t.Errorf("len = %d, want 0", len(got))
+	}
+}
+
+func TestListLaborEntries_MissingWO_ReturnsInvalidInput(t *testing.T) {
+	svc := newSvc(&mockStore{}, approvedPlan(uuid.New()), skuNoMetal(uuid.New()))
+
+	_, err := svc.ListLaborEntries(context.Background(), uuid.Nil)
+	if !errors.Is(err, domain.ErrInvalidInput) {
+		t.Fatalf("err = %v, want ErrInvalidInput", err)
+	}
+}
+
+func TestSumLaborCost_60MinutesAt100PerHour_Returns100(t *testing.T) {
+	// 60 min * 100 dong/hour = 6000 minute*dong/hour; / 60 = 100 dong.
+	st := &mockStore{sumLaborMinuteRateByWOResult: int64(60) * int64(100)}
+	svc := newSvc(st, approvedPlan(uuid.New()), skuNoMetal(uuid.New()))
+
+	cost, err := svc.SumLaborCost(context.Background(), uuid.New())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cost.Amount != 100 {
+		t.Errorf("Amount = %d, want 100", cost.Amount)
+	}
+	if cost.Currency != "VND" {
+		t.Errorf("Currency = %q, want VND", cost.Currency)
+	}
+}
+
+func TestSumLaborCost_MultipleStagesAggregate(t *testing.T) {
+	// CNC: 60min * 120000/h => 120000 dong
+	// GRINDING: 30min * 90000/h => 45000 dong
+	// Total => 165000 dong
+	// SQL aggregate returns SUM(minutes * rate_per_hour) = 60*120000 + 30*90000 = 9_900_000
+	// Service divides by 60 => 165000.
+	st := &mockStore{sumLaborMinuteRateByWOResult: int64(60)*int64(120000) + int64(30)*int64(90000)}
+	svc := newSvc(st, approvedPlan(uuid.New()), skuNoMetal(uuid.New()))
+
+	cost, err := svc.SumLaborCost(context.Background(), uuid.New())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cost.Amount != 165000 {
+		t.Errorf("Amount = %d, want 165000", cost.Amount)
+	}
+}
+
+func TestSumLaborCost_NoEntries_ReturnsZeroVND(t *testing.T) {
+	st := &mockStore{sumLaborMinuteRateByWOResult: 0}
+	svc := newSvc(st, approvedPlan(uuid.New()), skuNoMetal(uuid.New()))
+
+	cost, err := svc.SumLaborCost(context.Background(), uuid.New())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cost.Amount != 0 {
+		t.Errorf("Amount = %d, want 0", cost.Amount)
+	}
+	if cost.Currency != "VND" {
+		t.Errorf("Currency = %q, want VND", cost.Currency)
+	}
+}
+
+func TestSumLaborCost_MissingWO_ReturnsInvalidInput(t *testing.T) {
+	svc := newSvc(&mockStore{}, approvedPlan(uuid.New()), skuNoMetal(uuid.New()))
+
+	_, err := svc.SumLaborCost(context.Background(), uuid.Nil)
+	if !errors.Is(err, domain.ErrInvalidInput) {
+		t.Fatalf("err = %v, want ErrInvalidInput", err)
+	}
+}
+

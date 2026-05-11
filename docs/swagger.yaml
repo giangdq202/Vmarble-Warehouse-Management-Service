@@ -7,6 +7,18 @@ definitions:
       width_mm:
         type: integer
     type: object
+  github_com_vmarble_warehouse-management-service_internal_domain.LaborStage:
+    enum:
+    - CNC
+    - GRINDING
+    - ASSEMBLY
+    - POLISHING
+    type: string
+    x-enum-varnames:
+    - LaborStageCNC
+    - LaborStageGrinding
+    - LaborStageAssembly
+    - LaborStagePolishing
   github_com_vmarble_warehouse-management-service_internal_domain.Money:
     properties:
       amount:
@@ -1240,6 +1252,23 @@ definitions:
       sku_id:
         type: string
     type: object
+  internal_module_production.LaborEntry:
+    properties:
+      actor_id:
+        type: string
+      created_at:
+        type: string
+      id:
+        type: string
+      minutes:
+        type: integer
+      rate_per_hour:
+        type: integer
+      stage:
+        $ref: '#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.LaborStage'
+      work_order_id:
+        type: string
+    type: object
   internal_module_production.Machine:
     properties:
       capacity_hours_per_shift:
@@ -1288,6 +1317,15 @@ definitions:
         type: string
       work_order_id:
         type: string
+    type: object
+  internal_module_production.RecordLaborEntryInput:
+    properties:
+      minutes:
+        type: integer
+      rate_per_hour:
+        type: integer
+      stage:
+        $ref: '#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.LaborStage'
     type: object
   internal_module_production.ScheduleSuggestion:
     properties:
@@ -5014,6 +5052,100 @@ paths:
       security:
       - BearerAuth: []
       summary: Set estimated hours for scheduling
+      tags:
+      - production
+  /api/v1/work-orders/{id}/labor-entries:
+    get:
+      parameters:
+      - description: work order id (uuid)
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/internal_module_production.LaborEntry'
+            type: array
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: List labor cost entries for a work order
+      tags:
+      - production
+    post:
+      consumes:
+      - application/json
+      description: Adds one labor cost line (stage, minutes, hourly rate). Cost contribution
+        is `minutes * rate_per_hour / 60` and is aggregated by the costing module
+        at compute-cost time. Rejected with 409 when the WO's costing record is finalized.
+      parameters:
+      - description: work order id (uuid)
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: payload
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_module_production.RecordLaborEntryInput'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/internal_module_production.LaborEntry'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "409":
+          description: Conflict
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Record a per-stage labor cost entry for a work order
       tags:
       - production
   /api/v1/work-orders/{id}/suggest-assignment:

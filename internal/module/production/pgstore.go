@@ -624,3 +624,55 @@ func (s *pgStore) assignSlotAtomically(ctx context.Context, op assignSlotOp) err
 	}
 	return nil
 }
+
+// ── Labor cost entries ───────────────────────────────────────────────────────
+
+func (s *pgStore) insertLaborEntry(ctx context.Context, e LaborEntry) error {
+	_, err := s.pool.Exec(ctx,
+		`INSERT INTO labor_cost_entries
+		   (id, work_order_id, stage, minutes, rate_per_hour, actor_id, created_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+		e.ID, e.WorkOrderID, string(e.Stage), e.Minutes, e.RatePerHour, e.ActorID, e.CreatedAt,
+	)
+	return err
+}
+
+func (s *pgStore) selectLaborEntriesByWO(ctx context.Context, woID uuid.UUID) ([]LaborEntry, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT id, work_order_id, stage, minutes, rate_per_hour, actor_id, created_at
+		 FROM labor_cost_entries
+		 WHERE work_order_id = $1
+		 ORDER BY created_at ASC, id ASC`,
+		woID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []LaborEntry
+	for rows.Next() {
+		var e LaborEntry
+		var stage string
+		if scanErr := rows.Scan(&e.ID, &e.WorkOrderID, &stage, &e.Minutes, &e.RatePerHour, &e.ActorID, &e.CreatedAt); scanErr != nil {
+			return nil, scanErr
+		}
+		e.Stage = domain.LaborStage(stage)
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
+func (s *pgStore) sumLaborMinuteRateByWO(ctx context.Context, woID uuid.UUID) (int64, error) {
+	var sum int64
+	err := s.pool.QueryRow(ctx,
+		`SELECT COALESCE(SUM(minutes::bigint * rate_per_hour), 0)
+		 FROM labor_cost_entries
+		 WHERE work_order_id = $1`,
+		woID,
+	).Scan(&sum)
+	if err != nil {
+		return 0, err
+	}
+	return sum, nil
+}

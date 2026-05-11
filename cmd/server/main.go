@@ -129,6 +129,7 @@ func main() {
 		&woAdapter{svc: productionSvc},
 		&cuttingAdapter{pool: pool},
 		&consumptionAdapter{pool: pool},
+		&laborDataAdapter{svc: productionSvc},
 	)
 	// Wire costing into the checker adapter now that it exists.
 	costingChecker.svc = costingSvc
@@ -509,4 +510,22 @@ func (a *costingCheckerAdapter) HasCostingRecord(ctx context.Context, workOrderI
 		return false, nil
 	}
 	return a.svc.HasCostingRecord(ctx, workOrderID)
+}
+
+func (a *costingCheckerAdapter) IsCostingFinalized(ctx context.Context, workOrderID uuid.UUID) (bool, error) {
+	if a.svc == nil {
+		return false, nil
+	}
+	return a.svc.IsCostingFinalized(ctx, workOrderID)
+}
+
+// laborDataAdapter implements costing.LaborDataReader by delegating to the
+// production module's SumLaborCost. Wired in main.go after productionSvc is
+// constructed.
+type laborDataAdapter struct {
+	svc production.Service
+}
+
+func (a *laborDataAdapter) GetLaborCostForWO(ctx context.Context, woID uuid.UUID) (domain.Money, error) {
+	return a.svc.SumLaborCost(ctx, woID)
 }
