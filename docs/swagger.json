@@ -5676,6 +5676,149 @@
                 }
             }
         },
+        "/api/v1/work-orders/{id}/labor-entries": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "production"
+                ],
+                "summary": "List labor cost entries for a work order",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "work order id (uuid)",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/internal_module_production.LaborEntry"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Adds one labor cost line (stage, minutes, hourly rate). Cost contribution is `minutes * rate_per_hour / 60` and is aggregated by the costing module at compute-cost time. Rejected with 409 when the WO's costing record is finalized.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "production"
+                ],
+                "summary": "Record a per-stage labor cost entry for a work order",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "work order id (uuid)",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "payload",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_module_production.RecordLaborEntryInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/internal_module_production.LaborEntry"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/work-orders/{id}/suggest-assignment": {
             "post": {
                 "security": [
@@ -5853,6 +5996,21 @@
                     "type": "integer"
                 }
             }
+        },
+        "github_com_vmarble_warehouse-management-service_internal_domain.LaborStage": {
+            "type": "string",
+            "enum": [
+                "CNC",
+                "GRINDING",
+                "ASSEMBLY",
+                "POLISHING"
+            ],
+            "x-enum-varnames": [
+                "LaborStageCNC",
+                "LaborStageGrinding",
+                "LaborStageAssembly",
+                "LaborStagePolishing"
+            ]
         },
         "github_com_vmarble_warehouse-management-service_internal_domain.Money": {
             "type": "object",
@@ -7710,6 +7868,32 @@
                 }
             }
         },
+        "internal_module_production.LaborEntry": {
+            "type": "object",
+            "properties": {
+                "actor_id": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "minutes": {
+                    "type": "integer"
+                },
+                "rate_per_hour": {
+                    "type": "integer"
+                },
+                "stage": {
+                    "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.LaborStage"
+                },
+                "work_order_id": {
+                    "type": "string"
+                }
+            }
+        },
         "internal_module_production.Machine": {
             "type": "object",
             "properties": {
@@ -7782,6 +7966,20 @@
                 },
                 "work_order_id": {
                     "type": "string"
+                }
+            }
+        },
+        "internal_module_production.RecordLaborEntryInput": {
+            "type": "object",
+            "properties": {
+                "minutes": {
+                    "type": "integer"
+                },
+                "rate_per_hour": {
+                    "type": "integer"
+                },
+                "stage": {
+                    "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.LaborStage"
                 }
             }
         },

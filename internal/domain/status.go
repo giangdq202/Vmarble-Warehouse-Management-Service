@@ -54,3 +54,25 @@ const (
 	PlanApproved PlanStatus = "APPROVED"
 	PlanCanceled PlanStatus = "CANCELED"
 )
+
+// ── Labor cost stage ────────────────────────────────────────
+
+// LaborStage identifies the production stage a labor cost entry applies to.
+// The set is closed; new stages require a migration update to the
+// labor_cost_entries CHECK constraint as well.
+type LaborStage string
+
+const (
+	LaborStageCNC       LaborStage = "CNC"
+	LaborStageGrinding  LaborStage = "GRINDING"
+	LaborStageAssembly  LaborStage = "ASSEMBLY"
+	LaborStagePolishing LaborStage = "POLISHING"
+)
+
+func (s LaborStage) Valid() bool {
+	switch s {
+	case LaborStageCNC, LaborStageGrinding, LaborStageAssembly, LaborStagePolishing:
+		return true
+	}
+	return false
+}

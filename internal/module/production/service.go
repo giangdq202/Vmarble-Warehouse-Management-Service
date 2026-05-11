@@ -492,3 +492,80 @@ func (svc *service) SuggestSchedule(ctx context.Context, woID uuid.UUID) ([]Sche
 	}
 	return out, nil
 }
+
+// ── Labor cost entries ───────────────────────────────────────────────────────
+
+func (svc *service) RecordLaborEntry(ctx context.Context, in RecordLaborEntryInput) (LaborEntry, error) {
+	if in.WorkOrderID == uuid.Nil {
+		return LaborEntry{}, domain.NewBizError(domain.ErrInvalidInput, "work_order_id is required")
+	}
+	if !in.Stage.Valid() {
+		return LaborEntry{}, domain.NewBizError(domain.ErrInvalidInput, "stage must be one of CNC, GRINDING, ASSEMBLY, POLISHING")
+	}
+	if in.Minutes <= 0 {
+		return LaborEntry{}, domain.NewBizError(domain.ErrInvalidInput, "minutes must be > 0")
+	}
+	if in.RatePerHour < 0 {
+		return LaborEntry{}, domain.NewBizError(domain.ErrInvalidInput, "rate_per_hour must be >= 0")
+	}
+	if in.ActorID == uuid.Nil {
+		return LaborEntry{}, domain.NewBizError(domain.ErrInvalidInput, "actor_id is required")
+	}
+
+	// Verify the WO exists; let the FK fail otherwise.
+	if _, err := svc.s.selectWorkOrderByID(ctx, in.WorkOrderID); err != nil {
+		return LaborEntry{}, err
+	}
+
+	// BR-C04: finalized costing records are immutable — block new labor entries
+	// that would silently change the cost basis.
+	if svc.cc != nil {
+		finalized, err := svc.cc.IsCostingFinalized(ctx, in.WorkOrderID)
+		if err != nil {
+			return LaborEntry{}, err
+		}
+		if finalized {
+			return LaborEntry{}, domain.NewBizError(domain.ErrAlreadyFinalized, "costing for this work order is finalized; labor entries are immutable")
+		}
+	}
+
+	entry := LaborEntry{
+		ID:          uuid.New(),
+		WorkOrderID: in.WorkOrderID,
+		Stage:       in.Stage,
+		Minutes:     in.Minutes,
+		RatePerHour: in.RatePerHour,
+		ActorID:     in.ActorID,
+		CreatedAt:   time.Now().UTC(),
+	}
+	if err := svc.s.insertLaborEntry(ctx, entry); err != nil {
+		return LaborEntry{}, err
+	}
+	return entry, nil
+}
+
+func (svc *service) ListLaborEntries(ctx context.Context, woID uuid.UUID) ([]LaborEntry, error) {
+	if woID == uuid.Nil {
+		return nil, domain.NewBizError(domain.ErrInvalidInput, "work_order_id is required")
+	}
+	entries, err := svc.s.selectLaborEntriesByWO(ctx, woID)
+	if err != nil {
+		return nil, err
+	}
+	if entries == nil {
+		entries = []LaborEntry{}
+	}
+	return entries, nil
+}
+
+func (svc *service) SumLaborCost(ctx context.Context, woID uuid.UUID) (domain.Money, error) {
+	if woID == uuid.Nil {
+		return domain.Money{}, domain.NewBizError(domain.ErrInvalidInput, "work_order_id is required")
+	}
+	dongMinutes, err := svc.s.sumLaborMinuteRateByWO(ctx, woID)
+	if err != nil {
+		return domain.Money{}, err
+	}
+	// minute * (dong / hour) / 60 = dong. Integer division floors fractional dong.
+	return domain.VND(dongMinutes / 60), nil
+}

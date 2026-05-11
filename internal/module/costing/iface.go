@@ -80,6 +80,9 @@ type Service interface {
 	GetCostingRecord(ctx context.Context, workOrderID uuid.UUID) (CostingRecord, error)
 	ListCostingRecords(ctx context.Context, p httpkit.PageParams, finalized *bool) (httpkit.PagedResult[CostingRecord], error)
 	HasCostingRecord(ctx context.Context, workOrderID uuid.UUID) (bool, error)
+	// IsCostingFinalized reports whether the costing record for the work order
+	// is finalized (BR-C04). Returns (false, nil) when no record exists yet.
+	IsCostingFinalized(ctx context.Context, workOrderID uuid.UUID) (bool, error)
 	CreateAdjustment(ctx context.Context, in CreateAdjustmentInput) (CostingAdjustment, error)
 	ListAdjustments(ctx context.Context, workOrderID uuid.UUID) ([]CostingAdjustment, error)
 	ListWasteReport(ctx context.Context, filter WasteReportFilter) ([]WasteReportRow, error)

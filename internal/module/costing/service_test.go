@@ -138,7 +138,7 @@ func plannedWO(woID, skuID uuid.UUID) WOInfo {
 }
 
 func newSvc(st *mockStore, wor *mockWOR, cdr *mockCDR, conr *mockCONR) Service {
-	return NewService(st, wor, cdr, conr)
+	return NewService(st, wor, cdr, conr, nil)
 }
 
 // zeroCONR returns a ConsumptionDataReader that always returns zero cost.

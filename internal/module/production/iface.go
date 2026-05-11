@@ -169,6 +169,29 @@ type SuggestAssignmentResult struct {
 	InCuttingCount int       `json:"in_cutting_count"`
 }
 
+// RecordLaborEntryInput carries one labor cost line for a work order.
+// RatePerHour is in the smallest currency unit (e.g. VND dong per hour).
+// ActorID is populated by the handler from JWT claims, not from the request body.
+type RecordLaborEntryInput struct {
+	WorkOrderID uuid.UUID         `json:"-"`
+	Stage       domain.LaborStage `json:"stage"`
+	Minutes     int               `json:"minutes"`
+	RatePerHour int64             `json:"rate_per_hour"`
+	ActorID     uuid.UUID         `json:"-"`
+}
+
+// LaborEntry is a single recorded labor cost line for a work order.
+// Cost contribution = minutes * rate_per_hour / 60 (computed by the costing module).
+type LaborEntry struct {
+	ID          uuid.UUID         `json:"id"`
+	WorkOrderID uuid.UUID         `json:"work_order_id"`
+	Stage       domain.LaborStage `json:"stage"`
+	Minutes     int               `json:"minutes"`
+	RatePerHour int64             `json:"rate_per_hour"`
+	ActorID     uuid.UUID         `json:"actor_id"`
+	CreatedAt   time.Time         `json:"created_at"`
+}
+
 type Service interface {
 	CreateWorkOrder(ctx context.Context, in CreateWOInput) (WorkOrder, error)
 	GetWorkOrder(ctx context.Context, woID uuid.UUID) (WorkOrder, error)
@@ -198,4 +221,14 @@ type Service interface {
 	AssignSlot(ctx context.Context, in AssignSlotInput) (WorkOrder, error)
 	UnassignSlot(ctx context.Context, woID uuid.UUID) (WorkOrder, error)
 	SuggestSchedule(ctx context.Context, woID uuid.UUID) ([]ScheduleSuggestion, error)
+
+	// Labor cost entries (Pillar C — Actual Costing)
+	// RecordLaborEntry adds one per-stage labor cost line for a work order.
+	// Rejected with ErrAlreadyFinalized when the WO's costing record is locked.
+	RecordLaborEntry(ctx context.Context, in RecordLaborEntryInput) (LaborEntry, error)
+	// ListLaborEntries returns all labor entries for a work order, ordered by created_at ASC.
+	ListLaborEntries(ctx context.Context, woID uuid.UUID) ([]LaborEntry, error)
+	// SumLaborCost returns the total labor cost for a work order, computed as
+	// SUM(minutes * rate_per_hour / 60). Used by the costing module via deps.
+	SumLaborCost(ctx context.Context, woID uuid.UUID) (domain.Money, error)
 }

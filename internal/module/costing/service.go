@@ -15,10 +15,11 @@ type service struct {
 	wor  WorkOrderReader
 	cdr  CuttingDataReader
 	conr ConsumptionDataReader
+	lbr  LaborDataReader
 }
 
-func NewService(st store, wor WorkOrderReader, cdr CuttingDataReader, conr ConsumptionDataReader) Service {
-	return &service{st: st, wor: wor, cdr: cdr, conr: conr}
+func NewService(st store, wor WorkOrderReader, cdr CuttingDataReader, conr ConsumptionDataReader, lbr LaborDataReader) Service {
+	return &service{st: st, wor: wor, cdr: cdr, conr: conr, lbr: lbr}
 }
 
 func (s *service) ComputeCost(ctx context.Context, workOrderID uuid.UUID) (CostingRecord, error) {
@@ -54,7 +55,16 @@ func (s *service) ComputeCost(ctx context.Context, workOrderID uuid.UUID) (Costi
 		return CostingRecord{}, err
 	}
 
-	laborCost := domain.VND(0)
+	var laborCost domain.Money
+	if s.lbr != nil {
+		laborCost, err = s.lbr.GetLaborCostForWO(ctx, workOrderID)
+		if err != nil {
+			return CostingRecord{}, err
+		}
+	}
+	if laborCost.Currency == "" {
+		laborCost = domain.VND(0)
+	}
 	totalCost := materialCost.Add(auxiliaryCost).Add(laborCost)
 
 	record := CostingRecord{
@@ -152,6 +162,20 @@ func (s *service) GetCostingRecord(ctx context.Context, workOrderID uuid.UUID) (
 
 func (s *service) HasCostingRecord(ctx context.Context, workOrderID uuid.UUID) (bool, error) {
 	return s.st.hasCostingRecord(ctx, workOrderID)
+}
+
+// IsCostingFinalized returns true when a costing record exists for the work
+// order and its Finalized flag is set. Missing records are not an error —
+// callers (production module) treat that as "not finalized, write allowed".
+func (s *service) IsCostingFinalized(ctx context.Context, workOrderID uuid.UUID) (bool, error) {
+	record, err := s.st.selectCostingRecordByWO(ctx, workOrderID)
+	if err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			return false, nil
+		}
+		return false, err
+	}
+	return record.Finalized, nil
 }
 
 func (s *service) ListCostingRecords(ctx context.Context, p httpkit.PageParams, finalized *bool) (httpkit.PagedResult[CostingRecord], error) {
