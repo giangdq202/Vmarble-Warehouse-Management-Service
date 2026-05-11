@@ -33,6 +33,10 @@ type mockStore struct {
 	boardStockSummary         []BoardStockSummaryItem
 	boardStockSummaryErr      error
 
+	wipPipeline               []WIPStageRow
+	wipPipelineErr            error
+	wipPipelineWindowSeen     time.Duration
+
 	costAllocationLimitSeen   int
 	recentCutsLimitSeen       int
 	completedWOLimitSeen      int
@@ -85,6 +89,11 @@ func (m *mockStore) selectCostingFinalizations(_ context.Context, limit int) ([]
 
 func (m *mockStore) selectBoardStockSummary(_ context.Context) ([]BoardStockSummaryItem, error) {
 	return m.boardStockSummary, m.boardStockSummaryErr
+}
+
+func (m *mockStore) selectWIPPipeline(_ context.Context, window time.Duration) ([]WIPStageRow, error) {
+	m.wipPipelineWindowSeen = window
+	return m.wipPipeline, m.wipPipelineErr
 }
 
 func TestGetOverview_HappyPath(t *testing.T) {
@@ -223,5 +232,92 @@ func TestGetBoardStockSummary_StoreError_Propagates(t *testing.T) {
 	_, err := svc.GetBoardStockSummary(context.Background())
 	if !errors.Is(err, storeErr) {
 		t.Errorf("expected store error to propagate, got %v", err)
+	}
+}
+
+func TestGetWIPPipeline_FillsMissingStagesInCanonicalOrder(t *testing.T) {
+	oldest := time.Date(2026, 4, 1, 12, 0, 0, 0, time.UTC)
+	store := &mockStore{
+		wipPipeline: []WIPStageRow{
+			{Status: "IN_CUTTING", Count: 3, OldestStartedAt: &oldest, AtRiskCount: 1},
+			{Status: "COSTED", Count: 2, AtRiskCount: 0},
+		},
+	}
+	svc := NewService(store)
+
+	out, err := svc.GetWIPPipeline(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	wantOrder := []string{"PLANNED", "IN_CUTTING", "IN_PROCESSING", "COMPLETED", "COSTED"}
+	if len(out.Stages) != len(wantOrder) {
+		t.Fatalf("len(stages) = %d, want %d", len(out.Stages), len(wantOrder))
+	}
+	for i, want := range wantOrder {
+		if out.Stages[i].Status != want {
+			t.Errorf("Stages[%d].Status = %q, want %q", i, out.Stages[i].Status, want)
+		}
+	}
+
+	if out.Stages[0].Count != 0 || out.Stages[0].AtRiskCount != 0 || out.Stages[0].OldestStartedAt != nil {
+		t.Errorf("PLANNED stage should be zeroed, got %+v", out.Stages[0])
+	}
+	if out.Stages[1].Count != 3 || out.Stages[1].AtRiskCount != 1 {
+		t.Errorf("IN_CUTTING stage mismatch: %+v", out.Stages[1])
+	}
+	if out.Stages[1].OldestStartedAt == nil || !out.Stages[1].OldestStartedAt.Equal(oldest) {
+		t.Errorf("IN_CUTTING OldestStartedAt = %v, want %v", out.Stages[1].OldestStartedAt, oldest)
+	}
+	if out.Stages[4].Count != 2 {
+		t.Errorf("COSTED stage Count = %d, want 2", out.Stages[4].Count)
+	}
+}
+
+func TestGetWIPPipeline_PassesAtRiskWindow(t *testing.T) {
+	store := &mockStore{}
+	svc := NewService(store)
+
+	if _, err := svc.GetWIPPipeline(context.Background()); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if store.wipPipelineWindowSeen != wipAtRiskWindow {
+		t.Errorf("window = %v, want %v", store.wipPipelineWindowSeen, wipAtRiskWindow)
+	}
+}
+
+func TestGetWIPPipeline_StorePropagatesError(t *testing.T) {
+	storeErr := errors.New("boom")
+	svc := NewService(&mockStore{wipPipelineErr: storeErr})
+
+	_, err := svc.GetWIPPipeline(context.Background())
+	if !errors.Is(err, storeErr) {
+		t.Errorf("expected store error to propagate, got %v", err)
+	}
+}
+
+func TestGetWIPPipeline_UnknownStatusInStoreOutput_IsDropped(t *testing.T) {
+	store := &mockStore{
+		wipPipeline: []WIPStageRow{
+			{Status: "PLANNED", Count: 2},
+			{Status: "MYSTERY", Count: 99},
+		},
+	}
+	svc := NewService(store)
+
+	out, err := svc.GetWIPPipeline(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(out.Stages) != 5 {
+		t.Fatalf("len = %d, want 5 canonical stages", len(out.Stages))
+	}
+	for _, s := range out.Stages {
+		if s.Status == "MYSTERY" {
+			t.Errorf("unknown status leaked into response: %+v", s)
+		}
+	}
+	if out.Stages[0].Count != 2 {
+		t.Errorf("PLANNED count = %d, want 2", out.Stages[0].Count)
 	}
 }

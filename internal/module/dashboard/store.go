@@ -1,6 +1,9 @@
 package dashboard
 
-import "context"
+import (
+	"context"
+	"time"
+)
 
 type store interface {
 	selectRemnantKPIs(ctx context.Context) (RemnantKPIOutput, error)
@@ -14,4 +17,5 @@ type store interface {
 	selectCompletedWorkOrders(ctx context.Context, limit int) ([]RecentWorkOrderItem, error)
 	selectCostingFinalizations(ctx context.Context, limit int) ([]RecentCostingFinalizationItem, error)
 	selectBoardStockSummary(ctx context.Context) ([]BoardStockSummaryItem, error)
+	selectWIPPipeline(ctx context.Context, atRiskWindow time.Duration) ([]WIPStageRow, error)
 }

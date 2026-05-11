@@ -776,6 +776,24 @@ definitions:
       waste:
         type: integer
     type: object
+  internal_module_dashboard.WIPPipelineOutput:
+    properties:
+      stages:
+        items:
+          $ref: '#/definitions/internal_module_dashboard.WIPStageRow'
+        type: array
+    type: object
+  internal_module_dashboard.WIPStageRow:
+    properties:
+      at_risk_count:
+        type: integer
+      count:
+        type: integer
+      oldest_started_at:
+        type: string
+      status:
+        type: string
+    type: object
   internal_module_inventory.AddCountLineInput:
     properties:
       counted_location_id:
@@ -2342,6 +2360,41 @@ paths:
       security:
       - BearerAuth: []
       summary: Get dashboard overview
+      tags:
+      - dashboard
+  /api/v1/dashboard/wip-pipeline:
+    get:
+      description: Returns one row per work-order status (PLANNED → COSTED) with count,
+        oldest started_at, and at-risk count (deadline within next 2 days, not yet
+        COMPLETED)
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_module_dashboard.WIPPipelineOutput'
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Get WIP pipeline aggregation per stage
       tags:
       - dashboard
   /api/v1/inventory/audit-log:

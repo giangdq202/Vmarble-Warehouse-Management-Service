@@ -377,3 +377,154 @@ func TestIntegration_GetOverview_AggregatesData(t *testing.T) {
 		t.Errorf("costing_finalizations[0].total_cost = %d, want 7000", out.RecentActivity.CostingFinalizations[0].TotalCost)
 	}
 }
+
+func TestIntegration_GetWIPPipeline_EmptyDB_ReturnsFiveZeroStages(t *testing.T) {
+	pool := getPool(t)
+	truncateDashboard(t, pool)
+
+	svc := NewService(NewPGStore(pool))
+	out, err := svc.GetWIPPipeline(context.Background())
+	if err != nil {
+		t.Fatalf("GetWIPPipeline: %v", err)
+	}
+	if len(out.Stages) != 5 {
+		t.Fatalf("len(stages) = %d, want 5", len(out.Stages))
+	}
+	for _, s := range out.Stages {
+		if s.Count != 0 || s.AtRiskCount != 0 || s.OldestStartedAt != nil {
+			t.Errorf("stage %s not zero: %+v", s.Status, s)
+		}
+	}
+}
+
+func TestIntegration_GetWIPPipeline_AggregatesAndFlagsAtRisk(t *testing.T) {
+	pool := getPool(t)
+	truncateDashboard(t, pool)
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	poID := uuid.New()
+	planUrgent := uuid.New() // deadline tomorrow → at risk
+	planSafe := uuid.New()   // deadline next week → safe
+	planNoDeadline := uuid.New()
+	skuID := uuid.New()
+
+	woPlannedOld := uuid.New()
+	woPlannedNew := uuid.New()
+	woCutting := uuid.New()
+	woProcessing := uuid.New()
+	woCompletedAtRiskIgnored := uuid.New()
+	woCostedAtRiskIgnored := uuid.New()
+
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin tx: %v", err)
+	}
+	defer tx.Rollback(ctx)
+
+	if _, err := tx.Exec(ctx,
+		`INSERT INTO skus (id, code, name, length_mm, width_mm, requires_metal, created_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+		skuID, "SKU-WIP", "WIP SKU", 1000, 500, false, now,
+	); err != nil {
+		t.Fatalf("seed sku: %v", err)
+	}
+	if _, err := tx.Exec(ctx,
+		`INSERT INTO purchase_orders (id, code, expected_delivery, created_at)
+		 VALUES ($1, $2, $3, $4)`,
+		poID, "PO-WIP-001", now.AddDate(0, 0, 7), now,
+	); err != nil {
+		t.Fatalf("seed po: %v", err)
+	}
+	if _, err := tx.Exec(ctx,
+		`INSERT INTO production_plans (id, po_id, status, deadline, created_at, code)
+		 VALUES ($1, $2, 'APPROVED', $3, $4, $5),
+		        ($6, $7, 'APPROVED', $8, $9, $10),
+		        ($11, $12, 'APPROVED', NULL, $13, $14)`,
+		planUrgent, poID, now.AddDate(0, 0, 1), now, "KH-WIP-URG",
+		planSafe, poID, now.AddDate(0, 0, 7), now, "KH-WIP-SAFE",
+		planNoDeadline, poID, now, "KH-WIP-NONE",
+	); err != nil {
+		t.Fatalf("seed plans: %v", err)
+	}
+	if _, err := tx.Exec(ctx,
+		`INSERT INTO work_orders (id, plan_id, sku_id, quantity, status, created_at)
+		 VALUES
+		   ($1, $2, $3, 1, 'PLANNED',       $4),
+		   ($5, $6, $7, 1, 'PLANNED',       $8),
+		   ($9, $10, $11, 1, 'IN_CUTTING',  $12),
+		   ($13, $14, $15, 1, 'IN_PROCESSING', $16),
+		   ($17, $18, $19, 1, 'COMPLETED',  $20),
+		   ($21, $22, $23, 1, 'COSTED',     $24)`,
+		woPlannedOld, planUrgent, skuID, now.Add(-3*time.Hour),
+		woPlannedNew, planSafe, skuID, now.Add(-30*time.Minute),
+		woCutting, planUrgent, skuID, now.Add(-2*time.Hour),
+		woProcessing, planNoDeadline, skuID, now.Add(-1*time.Hour),
+		woCompletedAtRiskIgnored, planUrgent, skuID, now.Add(-90*time.Minute),
+		woCostedAtRiskIgnored, planUrgent, skuID, now.Add(-150*time.Minute),
+	); err != nil {
+		t.Fatalf("seed work orders: %v", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+
+	svc := NewService(NewPGStore(pool))
+	out, err := svc.GetWIPPipeline(ctx)
+	if err != nil {
+		t.Fatalf("GetWIPPipeline: %v", err)
+	}
+
+	byStatus := map[string]WIPStageRow{}
+	for _, s := range out.Stages {
+		byStatus[s.Status] = s
+	}
+
+	planned := byStatus["PLANNED"]
+	if planned.Count != 2 {
+		t.Errorf("PLANNED count = %d, want 2", planned.Count)
+	}
+	if planned.AtRiskCount != 1 {
+		t.Errorf("PLANNED at_risk = %d, want 1 (urgent plan only)", planned.AtRiskCount)
+	}
+	if planned.OldestStartedAt == nil || !planned.OldestStartedAt.Equal(now.Add(-3*time.Hour).Truncate(time.Microsecond)) {
+		// Compare with sub-microsecond tolerance: pg stores µs precision.
+		if planned.OldestStartedAt == nil {
+			t.Errorf("PLANNED oldest_started_at is nil")
+		} else if planned.OldestStartedAt.After(now.Add(-3*time.Hour).Add(time.Second)) || planned.OldestStartedAt.Before(now.Add(-3*time.Hour).Add(-time.Second)) {
+			t.Errorf("PLANNED oldest_started_at = %v, want ~%v", planned.OldestStartedAt, now.Add(-3*time.Hour))
+		}
+	}
+
+	cutting := byStatus["IN_CUTTING"]
+	if cutting.Count != 1 {
+		t.Errorf("IN_CUTTING count = %d, want 1", cutting.Count)
+	}
+	if cutting.AtRiskCount != 1 {
+		t.Errorf("IN_CUTTING at_risk = %d, want 1", cutting.AtRiskCount)
+	}
+
+	processing := byStatus["IN_PROCESSING"]
+	if processing.Count != 1 {
+		t.Errorf("IN_PROCESSING count = %d, want 1", processing.Count)
+	}
+	if processing.AtRiskCount != 0 {
+		t.Errorf("IN_PROCESSING at_risk = %d, want 0 (plan has no deadline)", processing.AtRiskCount)
+	}
+
+	completed := byStatus["COMPLETED"]
+	if completed.Count != 1 {
+		t.Errorf("COMPLETED count = %d, want 1", completed.Count)
+	}
+	if completed.AtRiskCount != 0 {
+		t.Errorf("COMPLETED at_risk = %d, want 0 (finished WOs never at risk)", completed.AtRiskCount)
+	}
+
+	costed := byStatus["COSTED"]
+	if costed.Count != 1 {
+		t.Errorf("COSTED count = %d, want 1", costed.Count)
+	}
+	if costed.AtRiskCount != 0 {
+		t.Errorf("COSTED at_risk = %d, want 0", costed.AtRiskCount)
+	}
+}

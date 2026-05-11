@@ -90,7 +90,32 @@ type BoardStockSummaryItem struct {
 	AreaMM2      int64     `json:"area_mm2"`
 }
 
+// WIPStageRow is one entry in the per-stage WIP pipeline aggregation.
+//
+// Spec Pillar D (Real-time WIP) — surfaces how many work orders sit at each
+// production stage and how many are at risk of missing the container ship
+// date (deadline within the next 2 days).
+type WIPStageRow struct {
+	Status          string     `json:"status"`
+	Count           int        `json:"count"`
+	OldestStartedAt *time.Time `json:"oldest_started_at,omitempty"`
+	AtRiskCount     int        `json:"at_risk_count"`
+}
+
+// WIPPipelineOutput is the response for GET /dashboard/wip-pipeline.
+//
+// Stages are returned in canonical state-machine order (PLANNED → IN_CUTTING
+// → IN_PROCESSING → COMPLETED → COSTED). Stages with zero work orders are
+// still included so the dashboard can render a stable five-column view.
+type WIPPipelineOutput struct {
+	Stages []WIPStageRow `json:"stages"`
+}
+
 type Service interface {
 	GetOverview(ctx context.Context) (OverviewOutput, error)
 	GetBoardStockSummary(ctx context.Context) ([]BoardStockSummaryItem, error)
+	// GetWIPPipeline returns per-status work-order counts plus the oldest
+	// work order's started timestamp and the count of "at risk" work orders
+	// (production plan deadline < now + 2 days) at that stage.
+	GetWIPPipeline(ctx context.Context) (WIPPipelineOutput, error)
 }
