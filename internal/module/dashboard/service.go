@@ -1,11 +1,31 @@
 package dashboard
 
-import "context"
+import (
+	"context"
+	"time"
+
+	"github.com/vmarble/warehouse-management-service/internal/domain"
+)
 
 const (
 	topCostAllocationLimit = 10
 	recentItemsLimit       = 10
+	// wipAtRiskWindow defines when a work order is flagged "at risk":
+	// production plan deadline within the next 2 days and status not yet
+	// COMPLETED. Per issue #226 DoD.
+	wipAtRiskWindow = 48 * time.Hour
 )
+
+// canonicalWIPStages lists every work-order status in state-machine order so
+// the response always carries one row per stage, even those with zero work
+// orders. This keeps the dashboard rendering stable.
+var canonicalWIPStages = []domain.WorkOrderStatus{
+	domain.WOPlanned,
+	domain.WOInCutting,
+	domain.WOInProcessing,
+	domain.WOCompleted,
+	domain.WOCosted,
+}
 
 type service struct {
 	s store
@@ -83,4 +103,29 @@ func (s *service) GetBoardStockSummary(ctx context.Context) ([]BoardStockSummary
 		return nil, err
 	}
 	return items, nil
+}
+
+func (s *service) GetWIPPipeline(ctx context.Context) (WIPPipelineOutput, error) {
+	rows, err := s.s.selectWIPPipeline(ctx, wipAtRiskWindow)
+	if err != nil {
+		return WIPPipelineOutput{}, err
+	}
+
+	// Build a status → row lookup, then materialise the response in canonical
+	// state-machine order so the dashboard column layout is stable across calls.
+	byStatus := make(map[string]WIPStageRow, len(rows))
+	for _, r := range rows {
+		byStatus[r.Status] = r
+	}
+	out := WIPPipelineOutput{Stages: make([]WIPStageRow, 0, len(canonicalWIPStages))}
+	for _, st := range canonicalWIPStages {
+		key := string(st)
+		if row, ok := byStatus[key]; ok {
+			row.Status = key
+			out.Stages = append(out.Stages, row)
+			continue
+		}
+		out.Stages = append(out.Stages, WIPStageRow{Status: key})
+	}
+	return out, nil
 }

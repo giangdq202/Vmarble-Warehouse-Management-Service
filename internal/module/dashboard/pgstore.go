@@ -2,6 +2,7 @@ package dashboard
 
 import (
 	"context"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/vmarble/warehouse-management-service/internal/domain"
@@ -365,6 +366,55 @@ func (s *pgStore) selectBoardStockSummary(ctx context.Context) ([]BoardStockSumm
 			return nil, err
 		}
 		out = append(out, item)
+	}
+	return out, rows.Err()
+}
+
+// selectWIPPipeline aggregates work orders by status. For each status we
+// return:
+//   - count: number of work orders at that status
+//   - oldest_started_at: earliest work_orders.created_at at that status
+//     (the work order's start is approximated by creation since the table
+//     does not record per-status transition timestamps)
+//   - at_risk_count: work orders at that status whose production plan
+//     deadline falls within the next atRiskWindow and that are not yet
+//     COMPLETED or COSTED (a finished WO can no longer be "at risk")
+//
+// Single grouped query — one round trip. Empty stages are omitted; the
+// service layer back-fills them in canonical state-machine order.
+func (s *pgStore) selectWIPPipeline(ctx context.Context, atRiskWindow time.Duration) ([]WIPStageRow, error) {
+	atRiskSeconds := int64(atRiskWindow / time.Second)
+	rows, err := s.pool.Query(ctx,
+		`SELECT
+			wo.status,
+			COUNT(*)::int                        AS count,
+			MIN(wo.created_at)                   AS oldest_started_at,
+			COUNT(*) FILTER (
+				WHERE pp.deadline IS NOT NULL
+				  AND pp.deadline < (now() + ($1 * INTERVAL '1 second'))
+				  AND wo.status NOT IN ($2, $3)
+			)::int                               AS at_risk_count
+		 FROM work_orders wo
+		 LEFT JOIN production_plans pp ON pp.id = wo.plan_id
+		 GROUP BY wo.status`,
+		atRiskSeconds,
+		domain.WOCompleted,
+		domain.WOCosted,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := make([]WIPStageRow, 0)
+	for rows.Next() {
+		var row WIPStageRow
+		var oldest *time.Time
+		if err := rows.Scan(&row.Status, &row.Count, &oldest, &row.AtRiskCount); err != nil {
+			return nil, err
+		}
+		row.OldestStartedAt = oldest
+		out = append(out, row)
 	}
 	return out, rows.Err()
 }

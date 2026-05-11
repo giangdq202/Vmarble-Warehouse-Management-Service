@@ -1400,6 +1400,58 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/dashboard/wip-pipeline": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns one row per work-order status (PLANNED → COSTED) with count, oldest started_at, and at-risk count (deadline within next 2 days, not yet COMPLETED)",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "dashboard"
+                ],
+                "summary": "Get WIP pipeline aggregation per stage",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_module_dashboard.WIPPipelineOutput"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/inventory/audit-log": {
             "get": {
                 "security": [
@@ -7158,6 +7210,34 @@ const docTemplate = `{
                 },
                 "waste": {
                     "type": "integer"
+                }
+            }
+        },
+        "internal_module_dashboard.WIPPipelineOutput": {
+            "type": "object",
+            "properties": {
+                "stages": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_module_dashboard.WIPStageRow"
+                    }
+                }
+            }
+        },
+        "internal_module_dashboard.WIPStageRow": {
+            "type": "object",
+            "properties": {
+                "at_risk_count": {
+                    "type": "integer"
+                },
+                "count": {
+                    "type": "integer"
+                },
+                "oldest_started_at": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
                 }
             }
         },

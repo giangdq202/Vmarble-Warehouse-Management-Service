@@ -19,6 +19,7 @@ func NewHandler(s Service) *Handler {
 func (h *Handler) Register(rg *gin.RouterGroup) {
 	rg.GET("/dashboard/overview", auth.RequireRole(auth.RoleAdmin, auth.RolePlanner, auth.RoleAccountant), h.overview)
 	rg.GET("/dashboard/board-stock-summary", auth.RequireRole(auth.RoleAdmin, auth.RolePlanner, auth.RoleWarehouse), h.boardStockSummary)
+	rg.GET("/dashboard/wip-pipeline", auth.RequireRole(auth.RoleAdmin, auth.RolePlanner, auth.RoleCNCManager), h.wipPipeline)
 }
 
 // getDashboardOverview godoc
@@ -56,6 +57,27 @@ func (h *Handler) overview(c *gin.Context) {
 // @Router       /api/v1/dashboard/board-stock-summary [get]
 func (h *Handler) boardStockSummary(c *gin.Context) {
 	out, err := h.svc.GetBoardStockSummary(c.Request.Context())
+	if err != nil {
+		httpkit.Error(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, out)
+}
+
+// wipPipeline godoc
+//
+// @Summary      Get WIP pipeline aggregation per stage
+// @Description  Returns one row per work-order status (PLANNED → COSTED) with count, oldest started_at, and at-risk count (deadline within next 2 days, not yet COMPLETED)
+// @Tags         dashboard
+// @Produce      json
+// @Success      200  {object}  WIPPipelineOutput
+// @Failure      401  {object}  map[string]string
+// @Failure      403  {object}  map[string]string
+// @Failure      500  {object}  map[string]string
+// @Security     BearerAuth
+// @Router       /api/v1/dashboard/wip-pipeline [get]
+func (h *Handler) wipPipeline(c *gin.Context) {
+	out, err := h.svc.GetWIPPipeline(c.Request.Context())
 	if err != nil {
 		httpkit.Error(c, err)
 		return
