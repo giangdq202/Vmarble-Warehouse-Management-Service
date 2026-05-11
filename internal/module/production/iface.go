@@ -171,23 +171,39 @@ type SuggestAssignmentResult struct {
 
 // RecordLaborEntryInput carries one labor cost line for a work order.
 // RatePerHour is in the smallest currency unit (e.g. VND dong per hour).
-// ActorID is populated by the handler from JWT claims, not from the request body.
+//
+// ActorID is the recorder (foreman / cnc_manager who logged the entry via the
+// UI). It is populated by the handler from JWT claims and is never read from
+// the request body.
+//
+// WorkerID is optional and identifies the person whose time is being recorded
+// when that differs from the recorder (typical case: one foreman logging
+// end-of-shift on behalf of a whole crew). When omitted, the worker is
+// assumed to be the caller — the entry is attributed to ActorID.
 type RecordLaborEntryInput struct {
 	WorkOrderID uuid.UUID         `json:"-"`
 	Stage       domain.LaborStage `json:"stage"`
 	Minutes     int               `json:"minutes"`
 	RatePerHour int64             `json:"rate_per_hour"`
+	WorkerID    *uuid.UUID        `json:"worker_id,omitempty"`
 	ActorID     uuid.UUID         `json:"-"`
 }
 
 // LaborEntry is a single recorded labor cost line for a work order.
 // Cost contribution = minutes * rate_per_hour / 60 (computed by the costing module).
+//
+// WorkerID identifies the person who actually performed the work; ActorID
+// identifies the user who recorded the entry. Frontend can render "X recorded
+// by Y" by comparing the two fields. For legacy rows recorded before the
+// worker_id field existed, WorkerID echoes ActorID so the API contract stays
+// uniform.
 type LaborEntry struct {
 	ID          uuid.UUID         `json:"id"`
 	WorkOrderID uuid.UUID         `json:"work_order_id"`
 	Stage       domain.LaborStage `json:"stage"`
 	Minutes     int               `json:"minutes"`
 	RatePerHour int64             `json:"rate_per_hour"`
+	WorkerID    uuid.UUID         `json:"worker_id"`
 	ActorID     uuid.UUID         `json:"actor_id"`
 	CreatedAt   time.Time         `json:"created_at"`
 }

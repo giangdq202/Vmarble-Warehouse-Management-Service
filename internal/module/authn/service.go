@@ -61,7 +61,7 @@ func (s *service) GetUser(ctx context.Context, userID uuid.UUID) (UserInfo, erro
 	if err != nil {
 		return UserInfo{}, err
 	}
-	return UserInfo{ID: u.ID, Username: u.Username, Role: u.Role}, nil
+	return UserInfo{ID: u.ID, Username: u.Username, Role: u.Role, IsActive: u.IsActive}, nil
 }
 
 func (s *service) ListUsers(ctx context.Context, params ListUsersParams) (httpkit.PagedResult[UserDetail], error) {
@@ -161,8 +161,8 @@ func (s *service) mapUserToDetail(u user) UserDetail {
 
 func (s *service) validateRole(role string) error {
 	r := auth.Role(role)
-	if r == auth.RoleAdmin || r == auth.RoleAccountant || r == auth.RolePlanner || 
-       r == auth.RoleWarehouse || r == auth.RoleCNC || r == auth.RoleCNCManager || r == auth.RoleForeman {
+	if r == auth.RoleAdmin || r == auth.RoleAccountant || r == auth.RolePlanner ||
+		r == auth.RoleWarehouse || r == auth.RoleCNC || r == auth.RoleCNCManager || r == auth.RoleForeman {
 		return nil
 	}
 	return domain.NewBizError(domain.ErrInvalidInput, "invalid role: "+role)

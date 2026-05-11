@@ -630,16 +630,19 @@ func (s *pgStore) assignSlotAtomically(ctx context.Context, op assignSlotOp) err
 func (s *pgStore) insertLaborEntry(ctx context.Context, e LaborEntry) error {
 	_, err := s.pool.Exec(ctx,
 		`INSERT INTO labor_cost_entries
-		   (id, work_order_id, stage, minutes, rate_per_hour, actor_id, created_at)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-		e.ID, e.WorkOrderID, string(e.Stage), e.Minutes, e.RatePerHour, e.ActorID, e.CreatedAt,
+		   (id, work_order_id, stage, minutes, rate_per_hour, worker_id, actor_id, created_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+		e.ID, e.WorkOrderID, string(e.Stage), e.Minutes, e.RatePerHour, e.WorkerID, e.ActorID, e.CreatedAt,
 	)
 	return err
 }
 
+// COALESCE worker_id with actor_id so the API contract returns a non-null
+// worker for every row, including rows created before migration 00039.
 func (s *pgStore) selectLaborEntriesByWO(ctx context.Context, woID uuid.UUID) ([]LaborEntry, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT id, work_order_id, stage, minutes, rate_per_hour, actor_id, created_at
+		`SELECT id, work_order_id, stage, minutes, rate_per_hour,
+		        COALESCE(worker_id, actor_id) AS worker_id, actor_id, created_at
 		 FROM labor_cost_entries
 		 WHERE work_order_id = $1
 		 ORDER BY created_at ASC, id ASC`,
@@ -654,7 +657,7 @@ func (s *pgStore) selectLaborEntriesByWO(ctx context.Context, woID uuid.UUID) ([
 	for rows.Next() {
 		var e LaborEntry
 		var stage string
-		if scanErr := rows.Scan(&e.ID, &e.WorkOrderID, &stage, &e.Minutes, &e.RatePerHour, &e.ActorID, &e.CreatedAt); scanErr != nil {
+		if scanErr := rows.Scan(&e.ID, &e.WorkOrderID, &stage, &e.Minutes, &e.RatePerHour, &e.WorkerID, &e.ActorID, &e.CreatedAt); scanErr != nil {
 			return nil, scanErr
 		}
 		e.Stage = domain.LaborStage(stage)

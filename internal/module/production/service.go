@@ -512,6 +512,28 @@ func (svc *service) RecordLaborEntry(ctx context.Context, in RecordLaborEntryInp
 		return LaborEntry{}, domain.NewBizError(domain.ErrInvalidInput, "actor_id is required")
 	}
 
+	// Resolve the worker (subject of the entry). When omitted, the recorder is
+	// also the worker — preserves the pre-#238 contract. When provided, the
+	// user must exist and be active; otherwise the entry would attribute time
+	// to a deactivated account and break per-worker reporting.
+	workerID := in.ActorID
+	if in.WorkerID != nil {
+		if *in.WorkerID == uuid.Nil {
+			return LaborEntry{}, domain.NewBizError(domain.ErrInvalidInput, "worker_id must not be empty when provided")
+		}
+		if svc.uc == nil {
+			return LaborEntry{}, domain.NewBizError(domain.ErrInvalidInput, "worker validation is not configured")
+		}
+		worker, err := svc.uc.GetUser(ctx, *in.WorkerID)
+		if err != nil {
+			return LaborEntry{}, domain.NewBizError(domain.ErrInvalidInput, "worker_id does not match a known user")
+		}
+		if !worker.IsActive {
+			return LaborEntry{}, domain.NewBizError(domain.ErrInvalidInput, "worker_id refers to an inactive user")
+		}
+		workerID = *in.WorkerID
+	}
+
 	// Verify the WO exists; let the FK fail otherwise.
 	if _, err := svc.s.selectWorkOrderByID(ctx, in.WorkOrderID); err != nil {
 		return LaborEntry{}, err
@@ -535,6 +557,7 @@ func (svc *service) RecordLaborEntry(ctx context.Context, in RecordLaborEntryInp
 		Stage:       in.Stage,
 		Minutes:     in.Minutes,
 		RatePerHour: in.RatePerHour,
+		WorkerID:    workerID,
 		ActorID:     in.ActorID,
 		CreatedAt:   time.Now().UTC(),
 	}
