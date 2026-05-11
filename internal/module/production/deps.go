@@ -32,10 +32,13 @@ type UserChecker interface {
 	GetUser(ctx context.Context, userID uuid.UUID) (UserInfo, error)
 }
 
-// UserInfo is the production module's view of a user — role is all we need.
+// UserInfo is the production module's view of a user.
+// IsActive lets the labor-entry flow reject worker references to deactivated
+// accounts; assignment logic only relies on Role.
 type UserInfo struct {
-	ID   uuid.UUID
-	Role string
+	ID       uuid.UUID
+	Role     string
+	IsActive bool
 }
 
 // WorkOrderNotifier fires a notification after a work order is assigned.

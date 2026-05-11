@@ -182,7 +182,7 @@ func main() {
 
 	authnHandler := authn.NewHandler(authnSvc)
 	authnHandler.RegisterProtected(api.Group("/users"))
-        authnHandler.RegisterAdmin(api.Group("/admin"))
+	authnHandler.RegisterAdmin(api.Group("/admin"))
 
 	catalog.NewHandler(catalogSvc).Register(api)
 	order.NewHandler(orderSvc).Register(api)
@@ -263,7 +263,7 @@ func (a *userAdapter) GetUser(ctx context.Context, userID uuid.UUID) (production
 	if err != nil {
 		return production.UserInfo{}, err
 	}
-	return production.UserInfo{ID: u.ID, Role: u.Role}, nil
+	return production.UserInfo{ID: u.ID, Role: u.Role, IsActive: u.IsActive}, nil
 }
 
 type woAdapter struct {
@@ -486,11 +486,11 @@ type purchasingStockAdapter struct {
 
 func (a *purchasingStockAdapter) ReceiveStock(ctx context.Context, in purchasing.ReceiveStockInput) (uuid.UUID, error) {
 	lot, err := a.svc.ReceiveStock(ctx, inventory.ReceiveStockInput{
-		MaterialID:  in.MaterialID,
-		Dimensions:  domain.Dimension{LengthMM: in.LengthMM, WidthMM: in.WidthMM},
+		MaterialID:   in.MaterialID,
+		Dimensions:   domain.Dimension{LengthMM: in.LengthMM, WidthMM: in.WidthMM},
 		CostPerSheet: in.UnitCost,
-		Quantity:    in.Quantity,
-		SupplierRef: in.SupplierRef,
+		Quantity:     in.Quantity,
+		SupplierRef:  in.SupplierRef,
 	})
 	if err != nil {
 		return uuid.Nil, err

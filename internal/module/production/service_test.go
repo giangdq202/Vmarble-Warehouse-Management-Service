@@ -228,13 +228,13 @@ func (m *mockWorkOrderNotifier) NotifyAssignment(_ context.Context, _, _, _ stri
 
 // mockSheetAssigner satisfies SheetAssigner.
 type mockSheetAssigner struct {
-	called         bool
-	calledSheet    uuid.UUID
-	calledWO       uuid.UUID
-	calledBypass   bool
-	calledActorID  uuid.UUID
-	calledReason   string
-	err            error
+	called        bool
+	calledSheet   uuid.UUID
+	calledWO      uuid.UUID
+	calledBypass  bool
+	calledActorID uuid.UUID
+	calledReason  string
+	err           error
 }
 
 func (m *mockSheetAssigner) PreAssignSheet(_ context.Context, in PreAssignSheetRequest) error {
@@ -2458,6 +2458,127 @@ func TestRecordLaborEntry_HappyPath(t *testing.T) {
 	if st.insertLaborEntryArg.ActorID != actorID {
 		t.Errorf("ActorID = %v, want %v", st.insertLaborEntryArg.ActorID, actorID)
 	}
+	// Issue #238: when worker_id is omitted, the recorder is the worker.
+	if st.insertLaborEntryArg.WorkerID != actorID {
+		t.Errorf("WorkerID = %v, want WorkerID == ActorID %v when omitted",
+			st.insertLaborEntryArg.WorkerID, actorID)
+	}
+	if entry.WorkerID != actorID {
+		t.Errorf("response WorkerID = %v, want %v", entry.WorkerID, actorID)
+	}
+}
+
+// Issue #238: when a foreman records on behalf of a crew, the recorder
+// (actor_id from JWT) and the subject (worker_id from body) are different
+// users. Both must round-trip into the persisted entry.
+func TestRecordLaborEntry_ExplicitWorker_PersistsBothActorAndWorker(t *testing.T) {
+	woID := uuid.New()
+	foremanID := uuid.New()
+	workerID := uuid.New()
+	st := &mockStore{selectWorkOrderByIDResult: woWithStatus(woID, domain.WOInProcessing)}
+	uc := &mockUserChecker{result: UserInfo{ID: workerID, Role: "cnc", IsActive: true}}
+	svc := newSvcWithUser(st, approvedPlan(uuid.New()), skuNoMetal(uuid.New()), uc)
+
+	entry, err := svc.RecordLaborEntry(context.Background(), RecordLaborEntryInput{
+		WorkOrderID: woID,
+		Stage:       domain.LaborStageCNC,
+		Minutes:     60,
+		RatePerHour: 120000,
+		WorkerID:    &workerID,
+		ActorID:     foremanID,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !st.insertLaborEntryCalled {
+		t.Fatal("expected insertLaborEntry to be called")
+	}
+	if st.insertLaborEntryArg.WorkerID != workerID {
+		t.Errorf("persisted WorkerID = %v, want %v", st.insertLaborEntryArg.WorkerID, workerID)
+	}
+	if st.insertLaborEntryArg.ActorID != foremanID {
+		t.Errorf("persisted ActorID = %v, want %v", st.insertLaborEntryArg.ActorID, foremanID)
+	}
+	if entry.WorkerID != workerID || entry.ActorID != foremanID {
+		t.Errorf("response carried wrong identity: worker=%v actor=%v", entry.WorkerID, entry.ActorID)
+	}
+}
+
+// Issue #238: an unknown worker_id must be rejected (422). The UserChecker
+// returns ErrNotFound; the service maps that to ErrInvalidInput so the FE
+// can show "worker not found" without leaking the existence of accounts.
+func TestRecordLaborEntry_UnknownWorker_ReturnsInvalidInput(t *testing.T) {
+	woID := uuid.New()
+	workerID := uuid.New()
+	st := &mockStore{selectWorkOrderByIDResult: woWithStatus(woID, domain.WOInProcessing)}
+	uc := &mockUserChecker{err: domain.NewBizError(domain.ErrNotFound, "user not found")}
+	svc := newSvcWithUser(st, approvedPlan(uuid.New()), skuNoMetal(uuid.New()), uc)
+
+	_, err := svc.RecordLaborEntry(context.Background(), RecordLaborEntryInput{
+		WorkOrderID: woID,
+		Stage:       domain.LaborStageCNC,
+		Minutes:     30,
+		RatePerHour: 100000,
+		WorkerID:    &workerID,
+		ActorID:     uuid.New(),
+	})
+	if !errors.Is(err, domain.ErrInvalidInput) {
+		t.Fatalf("err = %v, want ErrInvalidInput", err)
+	}
+	if st.insertLaborEntryCalled {
+		t.Error("insertLaborEntry must not be called when worker lookup fails")
+	}
+}
+
+// Issue #238: a deactivated worker must be rejected so we never attribute new
+// labor minutes to a user who has left the company.
+func TestRecordLaborEntry_InactiveWorker_ReturnsInvalidInput(t *testing.T) {
+	woID := uuid.New()
+	workerID := uuid.New()
+	st := &mockStore{selectWorkOrderByIDResult: woWithStatus(woID, domain.WOInProcessing)}
+	uc := &mockUserChecker{result: UserInfo{ID: workerID, Role: "cnc", IsActive: false}}
+	svc := newSvcWithUser(st, approvedPlan(uuid.New()), skuNoMetal(uuid.New()), uc)
+
+	_, err := svc.RecordLaborEntry(context.Background(), RecordLaborEntryInput{
+		WorkOrderID: woID,
+		Stage:       domain.LaborStageCNC,
+		Minutes:     30,
+		RatePerHour: 100000,
+		WorkerID:    &workerID,
+		ActorID:     uuid.New(),
+	})
+	if !errors.Is(err, domain.ErrInvalidInput) {
+		t.Fatalf("err = %v, want ErrInvalidInput", err)
+	}
+	if st.insertLaborEntryCalled {
+		t.Error("insertLaborEntry must not be called when worker is inactive")
+	}
+}
+
+// Issue #238: BR-C04 (immutability) still wins over the new worker_id field —
+// even a valid worker reference must be rejected once costing is finalized.
+func TestRecordLaborEntry_ExplicitWorker_StillBlockedByFinalizedCosting(t *testing.T) {
+	woID := uuid.New()
+	workerID := uuid.New()
+	st := &mockStore{selectWorkOrderByIDResult: woWithStatus(woID, domain.WOCompleted)}
+	uc := &mockUserChecker{result: UserInfo{ID: workerID, Role: "cnc", IsActive: true}}
+	cc := &mockCostingChecker{finalized: true}
+	svc := NewService(st, approvedPlan(uuid.New()), skuNoMetal(uuid.New()), uc, nil, cc, nil)
+
+	_, err := svc.RecordLaborEntry(context.Background(), RecordLaborEntryInput{
+		WorkOrderID: woID,
+		Stage:       domain.LaborStageCNC,
+		Minutes:     30,
+		RatePerHour: 100000,
+		WorkerID:    &workerID,
+		ActorID:     uuid.New(),
+	})
+	if !errors.Is(err, domain.ErrAlreadyFinalized) {
+		t.Fatalf("err = %v, want ErrAlreadyFinalized", err)
+	}
+	if st.insertLaborEntryCalled {
+		t.Error("insertLaborEntry must not be called once costing is finalized")
+	}
 }
 
 func TestRecordLaborEntry_InvalidStage_ReturnsInvalidInput(t *testing.T) {
@@ -2689,4 +2810,3 @@ func TestSumLaborCost_MissingWO_ReturnsInvalidInput(t *testing.T) {
 		t.Fatalf("err = %v, want ErrInvalidInput", err)
 	}
 }
-

@@ -26,17 +26,18 @@ type UserInfo struct {
 	ID       uuid.UUID `json:"id"`
 	Username string    `json:"username"`
 	Role     string    `json:"role"`
+	IsActive bool      `json:"is_active"`
 }
 
 // UserDetail is a comprehensive view of a user for administrative purposes.
 type UserDetail struct {
-	ID        uuid.UUID `json:"id"`
-	Username  string    `json:"username"`
-	Role      string    `json:"role"`
-	FullName  string    `json:"full_name"`
-	Email     string    `json:"email"`
-	IsActive  bool      `json:"is_active"`
-	CreatedAt time.Time `json:"created_at"`
+	ID        uuid.UUID  `json:"id"`
+	Username  string     `json:"username"`
+	Role      string     `json:"role"`
+	FullName  string     `json:"full_name"`
+	Email     string     `json:"email"`
+	IsActive  bool       `json:"is_active"`
+	CreatedAt time.Time  `json:"created_at"`
 	UpdatedAt *time.Time `json:"updated_at,omitempty"`
 }
 
