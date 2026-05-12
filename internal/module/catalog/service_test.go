@@ -59,6 +59,21 @@ type mockStore struct {
 	// selectBOMBySKU
 	selectBOMBySKUResult BOM
 	selectBOMBySKUErr    error
+
+	// insertBOMVariant
+	insertBOMVariantErr error
+
+	// selectBOMVariantsBySkuID
+	selectBOMVariantsBySkuIDResult []BOMVariant
+	selectBOMVariantsBySkuIDErr    error
+
+	// selectBOMVariantByCode
+	selectBOMVariantByCodeResult BOMVariant
+	selectBOMVariantByCodeErr    error
+
+	// selectBOMComponentsByVariantID
+	selectBOMComponentsByVariantIDResult []BOMComponent
+	selectBOMComponentsByVariantIDErr    error
 }
 
 func (m *mockStore) insertMaterial(_ context.Context, _ Material) error {
@@ -97,6 +112,18 @@ func (m *mockStore) upsertBOM(_ context.Context, _ uuid.UUID, _ []BOMComponent) 
 func (m *mockStore) selectBOMBySKU(_ context.Context, _ uuid.UUID) (BOM, error) {
 	return m.selectBOMBySKUResult, m.selectBOMBySKUErr
 }
+func (m *mockStore) insertBOMVariant(_ context.Context, _ BOMVariant, _ []BOMComponent) error {
+	return m.insertBOMVariantErr
+}
+func (m *mockStore) selectBOMVariantsBySkuID(_ context.Context, _ uuid.UUID) ([]BOMVariant, error) {
+	return m.selectBOMVariantsBySkuIDResult, m.selectBOMVariantsBySkuIDErr
+}
+func (m *mockStore) selectBOMVariantByCode(_ context.Context, _ uuid.UUID, _ string) (BOMVariant, error) {
+	return m.selectBOMVariantByCodeResult, m.selectBOMVariantByCodeErr
+}
+func (m *mockStore) selectBOMComponentsByVariantID(_ context.Context, _ uuid.UUID) ([]BOMComponent, error) {
+	return m.selectBOMComponentsByVariantIDResult, m.selectBOMComponentsByVariantIDErr
+}
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -112,11 +139,11 @@ func newMaterial(name string) Material {
 
 func newSKU(code, name string) SKU {
 	return SKU{
-		ID:        uuid.New(),
-		Code:      code,
-		Name:      name,
+		ID:         uuid.New(),
+		Code:       code,
+		Name:       name,
 		Dimensions: domain.Dimension{LengthMM: 1200, WidthMM: 600},
-		CreatedAt: time.Now().UTC(),
+		CreatedAt:  time.Now().UTC(),
 	}
 }
 
@@ -371,5 +398,221 @@ func TestCreateSKU_InvalidDimensions_Rejected(t *testing.T) {
 	})
 	if !errors.Is(err, domain.ErrInvalidInput) {
 		t.Errorf("expected ErrInvalidInput for zero/negative dimensions, got %v", err)
+	}
+}
+
+// ── CreateBOMVariant ──────────────────────────────────────────────────────────
+
+func TestCreateBOMVariant_HappyPath_ReturnsVariant(t *testing.T) {
+	skuID := uuid.New()
+	matID := uuid.New()
+	st := &mockStore{
+		selectSKUByIDResult: newSKU("SKU-A", "Panel A"),
+		selectMaterialByIDResult: Material{
+			ID: matID, Type: MaterialTypePlywood, Name: "Oak", Unit: "sheet", IsActive: true,
+		},
+	}
+	svc := NewService(st)
+
+	in := CreateBOMVariantInput{
+		SKUID:       skuID,
+		VariantCode: "VARIANT-1",
+		Name:        "Variant One",
+		Components: []BOMComponent{
+			{MaterialID: matID, MaterialType: MaterialTypePlywood, QuantityPerUnit: 2, Unit: "sheet"},
+		},
+	}
+	v, err := svc.CreateBOMVariant(context.Background(), in)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if v.VariantCode != "VARIANT-1" {
+		t.Errorf("variant_code = %q, want VARIANT-1", v.VariantCode)
+	}
+	if v.IsDefault {
+		t.Error("user-created variant must not be default")
+	}
+}
+
+func TestCreateBOMVariant_ReservedDefaultCode_Rejected(t *testing.T) {
+	svc := NewService(&mockStore{selectSKUByIDResult: newSKU("SKU-A", "Panel A")})
+	_, err := svc.CreateBOMVariant(context.Background(), CreateBOMVariantInput{
+		SKUID:       uuid.New(),
+		VariantCode: "DEFAULT",
+		Name:        "Default",
+	})
+	if !errors.Is(err, domain.ErrInvalidInput) {
+		t.Errorf("expected ErrInvalidInput for reserved code, got %v", err)
+	}
+}
+
+func TestCreateBOMVariant_EmptyCode_Rejected(t *testing.T) {
+	svc := NewService(&mockStore{})
+	_, err := svc.CreateBOMVariant(context.Background(), CreateBOMVariantInput{
+		SKUID: uuid.New(),
+		Name:  "Some Variant",
+	})
+	if !errors.Is(err, domain.ErrInvalidInput) {
+		t.Errorf("expected ErrInvalidInput for empty code, got %v", err)
+	}
+}
+
+func TestCreateBOMVariant_UnknownSKU_ReturnsNotFound(t *testing.T) {
+	st := &mockStore{selectSKUByIDErr: domain.ErrNotFound}
+	svc := NewService(st)
+	_, err := svc.CreateBOMVariant(context.Background(), CreateBOMVariantInput{
+		SKUID:       uuid.New(),
+		VariantCode: "V1",
+		Name:        "V1",
+	})
+	if !errors.Is(err, domain.ErrNotFound) {
+		t.Errorf("expected ErrNotFound for unknown SKU, got %v", err)
+	}
+}
+
+func TestCreateBOMVariant_NegativeQty_Rejected(t *testing.T) {
+	st := &mockStore{selectSKUByIDResult: newSKU("SKU-A", "Panel A")}
+	svc := NewService(st)
+	_, err := svc.CreateBOMVariant(context.Background(), CreateBOMVariantInput{
+		SKUID:       uuid.New(),
+		VariantCode: "V1",
+		Name:        "V1",
+		Components: []BOMComponent{
+			{MaterialID: uuid.New(), MaterialType: MaterialTypePlywood, QuantityPerUnit: -1, Unit: "sheet"},
+		},
+	})
+	if !errors.Is(err, domain.ErrInvalidInput) {
+		t.Errorf("expected ErrInvalidInput for negative qty, got %v", err)
+	}
+}
+
+// ── GetBOMForVariant ──────────────────────────────────────────────────────────
+
+func TestGetBOMForVariant_ExplicitCode_ReturnsVariantComponents(t *testing.T) {
+	skuID := uuid.New()
+	variantID := uuid.New()
+	matID := uuid.New()
+	st := &mockStore{
+		selectSKUByIDResult: newSKU("SKU-A", "Panel A"),
+		selectBOMVariantByCodeResult: BOMVariant{
+			ID: variantID, SKUID: skuID, VariantCode: "VARIANT-1", Name: "V1",
+		},
+		selectBOMComponentsByVariantIDResult: []BOMComponent{
+			{MaterialID: matID, MaterialType: MaterialTypePlywood, QuantityPerUnit: 3, Unit: "sheet"},
+		},
+	}
+	svc := NewService(st)
+
+	bom, err := svc.GetBOMForVariant(context.Background(), skuID, "VARIANT-1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(bom.Components) != 1 {
+		t.Errorf("components = %d, want 1", len(bom.Components))
+	}
+	if bom.Components[0].QuantityPerUnit != 3 {
+		t.Errorf("qty = %v, want 3", bom.Components[0].QuantityPerUnit)
+	}
+}
+
+func TestGetBOMForVariant_EmptyCode_FallsBackToDefault(t *testing.T) {
+	skuID := uuid.New()
+	variantID := uuid.New()
+	matID := uuid.New()
+	st := &mockStore{
+		selectSKUByIDResult: newSKU("SKU-A", "Panel A"),
+		selectBOMVariantByCodeResult: BOMVariant{
+			ID: variantID, SKUID: skuID, VariantCode: "DEFAULT", Name: "Default", IsDefault: true,
+		},
+		selectBOMComponentsByVariantIDResult: []BOMComponent{
+			{MaterialID: matID, MaterialType: MaterialTypePlywood, QuantityPerUnit: 1, Unit: "sheet"},
+		},
+	}
+	svc := NewService(st)
+
+	bom, err := svc.GetBOMForVariant(context.Background(), skuID, "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(bom.Components) != 1 {
+		t.Errorf("components = %d, want 1", len(bom.Components))
+	}
+}
+
+func TestGetBOMForVariant_EmptyCode_NoDefaultVariant_FallsBackToLegacy(t *testing.T) {
+	skuID := uuid.New()
+	matID := uuid.New()
+	st := &mockStore{
+		selectSKUByIDResult:       newSKU("SKU-A", "Panel A"),
+		selectBOMVariantByCodeErr: domain.ErrNotFound,
+		selectBOMBySKUResult: BOM{
+			SKUID: skuID,
+			Components: []BOMComponent{
+				{MaterialID: matID, MaterialType: MaterialTypePlywood, QuantityPerUnit: 2, Unit: "sheet"},
+			},
+		},
+	}
+	svc := NewService(st)
+
+	bom, err := svc.GetBOMForVariant(context.Background(), skuID, "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(bom.Components) != 1 {
+		t.Errorf("components = %d, want 1 (legacy fallback)", len(bom.Components))
+	}
+}
+
+func TestGetBOMForVariant_UnknownExplicitCode_ReturnsNotFound(t *testing.T) {
+	st := &mockStore{
+		selectSKUByIDResult:       newSKU("SKU-A", "Panel A"),
+		selectBOMVariantByCodeErr: domain.ErrNotFound,
+	}
+	svc := NewService(st)
+
+	_, err := svc.GetBOMForVariant(context.Background(), uuid.New(), "NONEXISTENT")
+	if !errors.Is(err, domain.ErrNotFound) {
+		t.Errorf("expected ErrNotFound for unknown variant code, got %v", err)
+	}
+}
+
+// ── ListBOMVariants ───────────────────────────────────────────────────────────
+
+func TestListBOMVariants_ReturnsList(t *testing.T) {
+	skuID := uuid.New()
+	st := &mockStore{
+		selectSKUByIDResult: newSKU("SKU-A", "Panel A"),
+		selectBOMVariantsBySkuIDResult: []BOMVariant{
+			{ID: uuid.New(), SKUID: skuID, VariantCode: "DEFAULT", Name: "Default", IsDefault: true},
+			{ID: uuid.New(), SKUID: skuID, VariantCode: "V1", Name: "Variant 1"},
+		},
+	}
+	svc := NewService(st)
+
+	variants, err := svc.ListBOMVariants(context.Background(), skuID)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(variants) != 2 {
+		t.Errorf("variants = %d, want 2", len(variants))
+	}
+}
+
+func TestListBOMVariants_NoVariants_ReturnsEmptySlice(t *testing.T) {
+	st := &mockStore{
+		selectSKUByIDResult:            newSKU("SKU-A", "Panel A"),
+		selectBOMVariantsBySkuIDResult: nil,
+	}
+	svc := NewService(st)
+
+	variants, err := svc.ListBOMVariants(context.Background(), uuid.New())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if variants == nil {
+		t.Error("variants must not be nil (should be empty slice for JSON [])")
+	}
+	if len(variants) != 0 {
+		t.Errorf("variants = %d, want 0", len(variants))
 	}
 }

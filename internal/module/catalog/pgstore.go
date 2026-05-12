@@ -304,3 +304,92 @@ func (s *pgStore) selectBOMBySKU(ctx context.Context, skuID uuid.UUID) (BOM, err
 
 	return BOM{SKUID: skuID, Components: components}, nil
 }
+
+func (s *pgStore) insertBOMVariant(ctx context.Context, v BOMVariant, components []BOMComponent) error {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	_, err = tx.Exec(ctx,
+		`INSERT INTO bom_variants (id, sku_id, variant_code, name, is_default, created_at)
+		 VALUES ($1, $2, $3, $4, $5, $6)`,
+		v.ID, v.SKUID, v.VariantCode, v.Name, v.IsDefault, v.CreatedAt,
+	)
+	if err != nil {
+		return err
+	}
+
+	for _, c := range components {
+		_, err = tx.Exec(ctx,
+			`INSERT INTO bom_variant_components (id, variant_id, material_id, material_type, quantity_per_unit, unit)
+			 VALUES (gen_random_uuid(), $1, $2, $3, $4, $5)`,
+			v.ID, c.MaterialID, c.MaterialType, c.QuantityPerUnit, c.Unit,
+		)
+		if err != nil {
+			return err
+		}
+	}
+	return tx.Commit(ctx)
+}
+
+func (s *pgStore) selectBOMVariantsBySkuID(ctx context.Context, skuID uuid.UUID) ([]BOMVariant, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT id, sku_id, variant_code, name, is_default, created_at
+		 FROM bom_variants WHERE sku_id = $1 ORDER BY is_default DESC, created_at ASC`,
+		skuID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []BOMVariant
+	for rows.Next() {
+		var v BOMVariant
+		if err := rows.Scan(&v.ID, &v.SKUID, &v.VariantCode, &v.Name, &v.IsDefault, &v.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, v)
+	}
+	return out, rows.Err()
+}
+
+func (s *pgStore) selectBOMVariantByCode(ctx context.Context, skuID uuid.UUID, variantCode string) (BOMVariant, error) {
+	var v BOMVariant
+	err := s.pool.QueryRow(ctx,
+		`SELECT id, sku_id, variant_code, name, is_default, created_at
+		 FROM bom_variants WHERE sku_id = $1 AND variant_code = $2`,
+		skuID, variantCode,
+	).Scan(&v.ID, &v.SKUID, &v.VariantCode, &v.Name, &v.IsDefault, &v.CreatedAt)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return BOMVariant{}, domain.ErrNotFound
+		}
+		return BOMVariant{}, err
+	}
+	return v, nil
+}
+
+func (s *pgStore) selectBOMComponentsByVariantID(ctx context.Context, variantID uuid.UUID) ([]BOMComponent, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT material_id, material_type, quantity_per_unit, unit
+		 FROM bom_variant_components WHERE variant_id = $1`,
+		variantID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []BOMComponent
+	for rows.Next() {
+		var c BOMComponent
+		if err := rows.Scan(&c.MaterialID, &c.MaterialType, &c.QuantityPerUnit, &c.Unit); err != nil {
+			return nil, err
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}

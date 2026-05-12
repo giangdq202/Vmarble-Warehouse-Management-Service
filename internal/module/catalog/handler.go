@@ -31,6 +31,9 @@ func (h *Handler) Register(rg *gin.RouterGroup) {
 
 	rg.PUT("/skus/:id/bom", auth.RequireRole(auth.RoleWarehouse, auth.RolePlanner, auth.RoleAdmin), h.setBOM)
 	rg.GET("/skus/:id/bom", h.getBOM)
+
+	rg.POST("/skus/:id/variants", auth.RequireRole(auth.RoleWarehouse, auth.RolePlanner, auth.RoleAdmin), h.createBOMVariant)
+	rg.GET("/skus/:id/variants", h.listBOMVariants)
 }
 
 // createMaterial godoc
@@ -278,10 +281,11 @@ func (h *Handler) setBOM(c *gin.Context) {
 
 // getBOM godoc
 //
-// @Summary      Get BOM for SKU
+// @Summary      Get BOM for SKU (optionally resolved for a variant)
 // @Tags         catalog
 // @Produce      json
-// @Param        id   path      string  true  "sku id (uuid)"
+// @Param        id       path      string  true   "sku id (uuid)"
+// @Param        variant  query     string  false  "variant_code; omit for default"
 // @Success      200  {object}  BOM
 // @Failure      400  {object}  map[string]string
 // @Failure      404  {object}  map[string]string
@@ -294,10 +298,75 @@ func (h *Handler) getBOM(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
 		return
 	}
-	bom, err := h.svc.GetBOM(c.Request.Context(), skuID)
+	variantCode := c.Query("variant")
+	var bom BOM
+	if variantCode != "" {
+		bom, err = h.svc.GetBOMForVariant(c.Request.Context(), skuID, variantCode)
+	} else {
+		bom, err = h.svc.GetBOM(c.Request.Context(), skuID)
+	}
 	if err != nil {
 		httpkit.Error(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, bom)
+}
+
+// createBOMVariant godoc
+//
+// @Summary      Create a BOM variant for a SKU
+// @Tags         catalog
+// @Accept       json
+// @Produce      json
+// @Param        id    path      string                 true  "sku id (uuid)"
+// @Param        body  body      CreateBOMVariantInput  true  "payload"
+// @Success      201   {object}  BOMVariant
+// @Failure      400   {object}  map[string]string
+// @Failure      404   {object}  map[string]string
+// @Security     BearerAuth
+// @Failure      401  {object}  map[string]string
+// @Router       /api/v1/skus/{id}/variants [post]
+func (h *Handler) createBOMVariant(c *gin.Context) {
+	skuID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+	var in CreateBOMVariantInput
+	if !httpkit.Bind(c, &in) {
+		return
+	}
+	in.SKUID = skuID
+	v, err := h.svc.CreateBOMVariant(c.Request.Context(), in)
+	if err != nil {
+		httpkit.Error(c, err)
+		return
+	}
+	c.JSON(http.StatusCreated, v)
+}
+
+// listBOMVariants godoc
+//
+// @Summary      List BOM variants for a SKU
+// @Tags         catalog
+// @Produce      json
+// @Param        id   path      string  true  "sku id (uuid)"
+// @Success      200  {array}   BOMVariant
+// @Failure      400  {object}  map[string]string
+// @Failure      404  {object}  map[string]string
+// @Security     BearerAuth
+// @Failure      401  {object}  map[string]string
+// @Router       /api/v1/skus/{id}/variants [get]
+func (h *Handler) listBOMVariants(c *gin.Context) {
+	skuID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+	variants, err := h.svc.ListBOMVariants(c.Request.Context(), skuID)
+	if err != nil {
+		httpkit.Error(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, variants)
 }
