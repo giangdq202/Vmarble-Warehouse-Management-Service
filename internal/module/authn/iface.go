@@ -69,6 +69,16 @@ type ListUsersParams struct {
 	IsActive *bool    `json:"is_active"`
 }
 
+// WorkerSummary is a non-sensitive user view for dropdown population.
+// It omits email and timestamps to limit exposure to non-admin callers.
+type WorkerSummary struct {
+	ID       uuid.UUID `json:"id"`
+	Username string    `json:"username"`
+	FullName string    `json:"full_name"`
+	Role     string    `json:"role"`
+	IsActive bool      `json:"is_active"`
+}
+
 // Service is the public contract for the authn module.
 type Service interface {
 	Login(ctx context.Context, in LoginInput) (LoginResult, error)
@@ -81,4 +91,8 @@ type Service interface {
 	UpdateUser(ctx context.Context, userID uuid.UUID, in UpdateUserInput) (UserDetail, error)
 	UpdatePassword(ctx context.Context, userID uuid.UUID, in UpdatePasswordInput) error
 	DeactivateUser(ctx context.Context, targetID uuid.UUID, actorID uuid.UUID) error
+
+	// ListWorkers returns a non-sensitive user list for any authenticated caller.
+	// Supports role and is_active filters identical to ListUsers.
+	ListWorkers(ctx context.Context, params ListUsersParams) ([]WorkerSummary, error)
 }

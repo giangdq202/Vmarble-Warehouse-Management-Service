@@ -146,6 +146,24 @@ func (s *service) DeactivateUser(ctx context.Context, targetID uuid.UUID, actorI
 	return s.st.deactivateUser(ctx, targetID)
 }
 
+func (s *service) ListWorkers(ctx context.Context, params ListUsersParams) ([]WorkerSummary, error) {
+	users, _, err := s.st.selectUsers(ctx, params)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]WorkerSummary, len(users))
+	for i, u := range users {
+		out[i] = WorkerSummary{
+			ID:       u.ID,
+			Username: u.Username,
+			FullName: u.FullName,
+			Role:     u.Role,
+			IsActive: u.IsActive,
+		}
+	}
+	return out, nil
+}
+
 func (s *service) mapUserToDetail(u user) UserDetail {
 	return UserDetail{
 		ID:        u.ID,
