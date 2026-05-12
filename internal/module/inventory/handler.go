@@ -49,6 +49,8 @@ func (h *Handler) Register(rg *gin.RouterGroup) {
 	inv.POST("/cycle-counts/:id/post", auth.RequireRole(auth.RoleWarehouse, auth.RoleAdmin), h.postCycleCount)
 	inv.POST("/cycle-counts/:id/cancel", auth.RequireRole(auth.RoleWarehouse, auth.RoleAdmin), h.cancelCycleCount)
 
+	inv.GET("/work-orders/:id/pick-slip", auth.RequireRole(auth.RoleWarehouse, auth.RoleCNC, auth.RoleCNCManager, auth.RoleForeman, auth.RoleAdmin), h.getPickSlipPDF)
+
 	rg.GET("/storage-locations", h.listStorageLocations)
 }
 
@@ -829,5 +831,32 @@ func (h *Handler) generateCutLabels(c *gin.Context) {
 		return
 	}
 	c.Header("Content-Disposition", "inline; filename=cut-labels-"+id.String()+"-"+string(size)+".pdf")
+	c.Data(http.StatusOK, "application/pdf", pdf)
+}
+
+// getPickSlipPDF godoc
+//
+// @Summary      Generate pick-slip PDF for a work order
+// @Description  Returns an A4 PDF listing every ALLOCATED remnant for the work order, grouped by storage zone for efficient walking order. Returns 404 when no remnants are allocated.
+// @Tags         inventory
+// @Produce      application/pdf
+// @Param        id   path      string  true  "work order id (uuid)"
+// @Success      200  {file}    binary
+// @Failure      400  {object}  map[string]string
+// @Failure      404  {object}  map[string]string
+// @Security     BearerAuth
+// @Router       /api/v1/inventory/work-orders/{id}/pick-slip [get]
+func (h *Handler) getPickSlipPDF(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+	pdf, err := h.svc.GeneratePickSlipPDF(c.Request.Context(), id)
+	if err != nil {
+		httpkit.Error(c, err)
+		return
+	}
+	c.Header("Content-Disposition", "inline; filename=pick-slip-"+id.String()+".pdf")
 	c.Data(http.StatusOK, "application/pdf", pdf)
 }

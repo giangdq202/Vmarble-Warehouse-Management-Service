@@ -246,6 +246,9 @@ func (s *concurrentMockStore) postCycleCountAtomically(_ context.Context, _ cycl
 func (s *concurrentMockStore) selectCuttingRecordDetails(_ context.Context, _ uuid.UUID) (CuttingRecordDetails, error) {
 	return CuttingRecordDetails{}, nil
 }
+func (s *concurrentMockStore) selectAllocatedRemnantsByWO(_ context.Context, _ uuid.UUID) ([]PickSlipLine, error) {
+	return nil, nil
+}
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 

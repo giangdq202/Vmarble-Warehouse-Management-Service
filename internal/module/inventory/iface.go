@@ -356,4 +356,21 @@ type Service interface {
 	// additional remnant label page. Used by the cutting kiosk to auto-print
 	// labels at the moment a cut is reported.
 	GenerateCutLabelsPDF(ctx context.Context, in CutLabelsInput) ([]byte, error)
+
+	// GeneratePickSlipPDF renders an A4 pick-slip PDF listing every ALLOCATED
+	// remnant for the given work order, grouped by storage zone for efficient
+	// walking order. Returns ErrNotFound when the work order has no allocated
+	// remnants.
+	GeneratePickSlipPDF(ctx context.Context, workOrderID uuid.UUID) ([]byte, error)
+}
+
+// PickSlipLine is one row on the pick slip — one allocated remnant.
+type PickSlipLine struct {
+	RemnantID  uuid.UUID
+	Dimensions domain.Dimension
+	Zone       string // empty string when no bin location assigned
+	Rack       string
+	Shelf      string
+	Label      string // human-readable bin label, e.g. "A-01-03"
+	BinBarcode string // machine-readable barcode on the bin
 }

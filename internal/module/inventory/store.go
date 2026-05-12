@@ -55,6 +55,11 @@ type store interface {
 	// field matches exactly (case-sensitive). Returns ErrNotFound if no match.
 	selectStorageLocationByBarcode(ctx context.Context, barcode string) (StorageLocation, error)
 
+	// selectAllocatedRemnantsByWO returns all ALLOCATED remnants for the given
+	// work order, LEFT JOINed with storage_locations, ordered by zone/rack/shelf
+	// for efficient walking order on the pick slip.
+	selectAllocatedRemnantsByWO(ctx context.Context, workOrderID uuid.UUID) ([]PickSlipLine, error)
+
 	// insertAuditLog persists an inventory change audit event.
 	insertAuditLog(ctx context.Context, entry AuditLogEntry) error
 	// selectAuditLogByEntity returns audit entries for the given entity, newest first.
