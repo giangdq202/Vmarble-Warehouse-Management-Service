@@ -67,6 +67,22 @@ type SetBOMInput struct {
 	Components []BOMComponent `json:"components"`
 }
 
+type BOMVariant struct {
+	ID          uuid.UUID `json:"id"`
+	SKUID       uuid.UUID `json:"sku_id"`
+	VariantCode string    `json:"variant_code"`
+	Name        string    `json:"name"`
+	IsDefault   bool      `json:"is_default"`
+	CreatedAt   time.Time `json:"created_at"`
+}
+
+type CreateBOMVariantInput struct {
+	SKUID       uuid.UUID      `json:"sku_id"`
+	VariantCode string         `json:"variant_code"`
+	Name        string         `json:"name"`
+	Components  []BOMComponent `json:"components"`
+}
+
 type Service interface {
 	CreateMaterial(ctx context.Context, in CreateMaterialInput) (Material, error)
 	ListMaterials(ctx context.Context, p httpkit.PageParams) (httpkit.PagedResult[Material], error)
@@ -80,4 +96,13 @@ type Service interface {
 
 	SetBOM(ctx context.Context, in SetBOMInput) (BOM, error)
 	GetBOM(ctx context.Context, skuID uuid.UUID) (BOM, error)
+
+	// CreateBOMVariant registers a named variant with its own component list.
+	// variant_code must be unique per SKU and must not be "DEFAULT".
+	CreateBOMVariant(ctx context.Context, in CreateBOMVariantInput) (BOMVariant, error)
+	ListBOMVariants(ctx context.Context, skuID uuid.UUID) ([]BOMVariant, error)
+	// GetBOMForVariant returns the BOM for the given variant code.
+	// When variantCode is empty it falls back to the DEFAULT variant, then to
+	// the legacy bom_components table if no DEFAULT variant exists.
+	GetBOMForVariant(ctx context.Context, skuID uuid.UUID, variantCode string) (BOM, error)
 }

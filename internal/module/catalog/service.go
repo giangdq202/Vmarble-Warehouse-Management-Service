@@ -2,6 +2,7 @@ package catalog
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -130,4 +131,88 @@ func (s *service) SetBOM(ctx context.Context, in SetBOMInput) (BOM, error) {
 
 func (s *service) GetBOM(ctx context.Context, skuID uuid.UUID) (BOM, error) {
 	return s.st.selectBOMBySKU(ctx, skuID)
+}
+
+const defaultVariantCode = "DEFAULT"
+
+func (s *service) CreateBOMVariant(ctx context.Context, in CreateBOMVariantInput) (BOMVariant, error) {
+	if in.VariantCode == "" {
+		return BOMVariant{}, domain.NewBizError(domain.ErrInvalidInput, "variant_code is required")
+	}
+	if in.VariantCode == defaultVariantCode {
+		return BOMVariant{}, domain.NewBizError(domain.ErrInvalidInput, "variant_code 'DEFAULT' is reserved")
+	}
+	if in.Name == "" {
+		return BOMVariant{}, domain.NewBizError(domain.ErrInvalidInput, "variant name is required")
+	}
+	if _, err := s.st.selectSKUByID(ctx, in.SKUID); err != nil {
+		return BOMVariant{}, err
+	}
+	for i, c := range in.Components {
+		if !validMaterialType(c.MaterialType) {
+			return BOMVariant{}, domain.NewBizError(domain.ErrInvalidInput, fmt.Sprintf("invalid material type in component %d", i+1))
+		}
+		if c.QuantityPerUnit <= 0 {
+			return BOMVariant{}, domain.NewBizError(domain.ErrInvalidInput, fmt.Sprintf("quantity_per_unit must be positive in component %d", i+1))
+		}
+		if _, err := s.st.selectMaterialByID(ctx, c.MaterialID); err != nil {
+			return BOMVariant{}, err
+		}
+	}
+
+	v := BOMVariant{
+		ID:          uuid.New(),
+		SKUID:       in.SKUID,
+		VariantCode: in.VariantCode,
+		Name:        in.Name,
+		IsDefault:   false,
+		CreatedAt:   time.Now().UTC(),
+	}
+	if err := s.st.insertBOMVariant(ctx, v, in.Components); err != nil {
+		return BOMVariant{}, err
+	}
+	return v, nil
+}
+
+func (s *service) ListBOMVariants(ctx context.Context, skuID uuid.UUID) ([]BOMVariant, error) {
+	if _, err := s.st.selectSKUByID(ctx, skuID); err != nil {
+		return nil, err
+	}
+	variants, err := s.st.selectBOMVariantsBySkuID(ctx, skuID)
+	if err != nil {
+		return nil, err
+	}
+	if variants == nil {
+		variants = []BOMVariant{}
+	}
+	return variants, nil
+}
+
+func (s *service) GetBOMForVariant(ctx context.Context, skuID uuid.UUID, variantCode string) (BOM, error) {
+	if _, err := s.st.selectSKUByID(ctx, skuID); err != nil {
+		return BOM{}, err
+	}
+
+	code := variantCode
+	if code == "" {
+		code = defaultVariantCode
+	}
+
+	variant, err := s.st.selectBOMVariantByCode(ctx, skuID, code)
+	if err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			if variantCode == "" {
+				// No DEFAULT variant — fall back to legacy bom_components.
+				return s.st.selectBOMBySKU(ctx, skuID)
+			}
+			return BOM{}, domain.NewBizError(domain.ErrNotFound, fmt.Sprintf("variant '%s' not found for this SKU", variantCode))
+		}
+		return BOM{}, err
+	}
+
+	components, err := s.st.selectBOMComponentsByVariantID(ctx, variant.ID)
+	if err != nil {
+		return BOM{}, err
+	}
+	return BOM{SKUID: skuID, Components: components}, nil
 }

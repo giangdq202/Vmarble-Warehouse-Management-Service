@@ -22,4 +22,9 @@ type store interface {
 
 	upsertBOM(ctx context.Context, skuID uuid.UUID, components []BOMComponent) error
 	selectBOMBySKU(ctx context.Context, skuID uuid.UUID) (BOM, error)
+
+	insertBOMVariant(ctx context.Context, v BOMVariant, components []BOMComponent) error
+	selectBOMVariantsBySkuID(ctx context.Context, skuID uuid.UUID) ([]BOMVariant, error)
+	selectBOMVariantByCode(ctx context.Context, skuID uuid.UUID, variantCode string) (BOMVariant, error)
+	selectBOMComponentsByVariantID(ctx context.Context, variantID uuid.UUID) ([]BOMComponent, error)
 }
