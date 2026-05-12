@@ -29,3 +29,11 @@ jobs:
 
       - name: Build
         run: go build ./...
+
+      - name: Verify swagger is up to date
+        run: |
+          make swagger
+          if ! git diff --exit-code docs/; then
+            echo "::error::Swagger is out of date. Run 'make swagger' locally and commit the result."
+            exit 1
+          fi
