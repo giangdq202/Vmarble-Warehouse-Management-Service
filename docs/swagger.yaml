@@ -318,6 +318,19 @@ definitions:
       username:
         type: string
     type: object
+  internal_module_authn.WorkerSummary:
+    properties:
+      full_name:
+        type: string
+      id:
+        type: string
+      is_active:
+        type: boolean
+      role:
+        type: string
+      username:
+        type: string
+    type: object
   internal_module_barcode.Barcode:
     properties:
       created_at:
@@ -479,6 +492,34 @@ definitions:
       quantity_per_unit:
         type: number
       unit:
+        type: string
+    type: object
+  internal_module_catalog.BOMVariant:
+    properties:
+      created_at:
+        type: string
+      id:
+        type: string
+      is_default:
+        type: boolean
+      name:
+        type: string
+      sku_id:
+        type: string
+      variant_code:
+        type: string
+    type: object
+  internal_module_catalog.CreateBOMVariantInput:
+    properties:
+      components:
+        items:
+          $ref: '#/definitions/internal_module_catalog.BOMComponent'
+        type: array
+      name:
+        type: string
+      sku_id:
+        type: string
+      variant_code:
         type: string
     type: object
   internal_module_catalog.CreateMaterialInput:
@@ -1286,6 +1327,8 @@ definitions:
         $ref: '#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.LaborStage'
       work_order_id:
         type: string
+      worker_id:
+        type: string
     type: object
   internal_module_production.Machine:
     properties:
@@ -1344,6 +1387,8 @@ definitions:
         type: integer
       stage:
         $ref: '#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.LaborStage'
+      worker_id:
+        type: string
     type: object
   internal_module_production.ScheduleSuggestion:
     properties:
@@ -3320,6 +3365,41 @@ paths:
       summary: Transfer inventory item to a new bin location
       tags:
       - inventory
+  /api/v1/inventory/work-orders/{id}/pick-slip:
+    get:
+      description: Returns an A4 PDF listing every ALLOCATED remnant for the work
+        order, grouped by storage zone for efficient walking order. Returns 404 when
+        no remnants are allocated.
+      parameters:
+      - description: work order id (uuid)
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/pdf
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: file
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Generate pick-slip PDF for a work order
+      tags:
+      - inventory
   /api/v1/machines:
     get:
       produces:
@@ -4500,6 +4580,10 @@ paths:
         name: id
         required: true
         type: string
+      - description: variant_code; omit for default
+        in: query
+        name: variant
+        type: string
       produces:
       - application/json
       responses:
@@ -4527,7 +4611,7 @@ paths:
             type: object
       security:
       - BearerAuth: []
-      summary: Get BOM for SKU
+      summary: Get BOM for SKU (optionally resolved for a variant)
       tags:
       - catalog
     put:
@@ -4573,6 +4657,91 @@ paths:
       security:
       - BearerAuth: []
       summary: Set BOM for SKU
+      tags:
+      - catalog
+  /api/v1/skus/{id}/variants:
+    get:
+      parameters:
+      - description: sku id (uuid)
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/internal_module_catalog.BOMVariant'
+            type: array
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: List BOM variants for a SKU
+      tags:
+      - catalog
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: sku id (uuid)
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: payload
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_module_catalog.CreateBOMVariantInput'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/internal_module_catalog.BOMVariant'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Create a BOM variant for a SKU
       tags:
       - catalog
   /api/v1/slots/{slotID}:
@@ -4662,6 +4831,33 @@ paths:
       summary: Get current user profile
       tags:
       - auth
+  /api/v1/users/workers:
+    get:
+      description: Returns a non-sensitive user list accessible to any authenticated
+        role.
+      parameters:
+      - description: filter by role (comma-separated)
+        in: query
+        name: role
+        type: string
+      - description: filter by active status
+        in: query
+        name: is_active
+        type: boolean
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/internal_module_authn.WorkerSummary'
+            type: array
+      security:
+      - BearerAuth: []
+      summary: List workers for dropdown population
+      tags:
+      - users
   /api/v1/work-orders:
     get:
       parameters:
