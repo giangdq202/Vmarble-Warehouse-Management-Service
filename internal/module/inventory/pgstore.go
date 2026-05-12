@@ -957,6 +957,47 @@ func nullStringPtr(v sql.NullString) *string {
 	return &s
 }
 
+func (s *pgStore) selectAllocatedRemnantsByWO(ctx context.Context, workOrderID uuid.UUID) ([]PickSlipLine, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT
+			r.id,
+			r.length_mm, r.width_mm,
+			COALESCE(sl.zone,  '')    AS zone,
+			COALESCE(sl.rack,  '')    AS rack,
+			COALESCE(sl.shelf, '')    AS shelf,
+			COALESCE(sl.label, '')    AS label,
+			COALESCE(sl.barcode, '')  AS bin_barcode
+		 FROM remnants r
+		 LEFT JOIN storage_locations sl ON sl.id = r.bin_location_id AND sl.is_active = TRUE
+		 WHERE r.allocated_to_wo_id = $1
+		   AND r.status = 'ALLOCATED'
+		 ORDER BY
+			COALESCE(sl.zone,  '') ASC,
+			COALESCE(sl.rack,  '') ASC,
+			COALESCE(sl.shelf, '') ASC,
+			r.created_at ASC`,
+		workOrderID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []PickSlipLine
+	for rows.Next() {
+		var line PickSlipLine
+		if err := rows.Scan(
+			&line.RemnantID,
+			&line.Dimensions.LengthMM, &line.Dimensions.WidthMM,
+			&line.Zone, &line.Rack, &line.Shelf, &line.Label, &line.BinBarcode,
+		); err != nil {
+			return nil, err
+		}
+		out = append(out, line)
+	}
+	return out, rows.Err()
+}
+
 func nullInt32Ptr(v sql.NullInt32) *int {
 	if !v.Valid {
 		return nil

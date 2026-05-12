@@ -1022,3 +1022,101 @@ func (s *service) GenerateCutLabelsPDF(ctx context.Context, in CutLabelsInput) (
 	}
 	return out.Bytes(), nil
 }
+
+// ── Pick-slip PDF ─────────────────────────────────────────────────────────────
+
+// pickSlipPageWidthMM / pickSlipPageHeightMM are standard A4 dimensions.
+const (
+	pickSlipPageWidthMM  = 210.0
+	pickSlipPageHeightMM = 297.0
+	pickSlipMarginMM     = 15.0
+)
+
+func (s *service) GeneratePickSlipPDF(ctx context.Context, workOrderID uuid.UUID) ([]byte, error) {
+	lines, err := s.st.selectAllocatedRemnantsByWO(ctx, workOrderID)
+	if err != nil {
+		return nil, err
+	}
+	if len(lines) == 0 {
+		return nil, domain.NewBizError(domain.ErrNotFound, "no allocated remnants found for this work order")
+	}
+
+	pdf := gofpdf.New("P", "mm", "A4", "")
+	pdf.SetMargins(pickSlipMarginMM, pickSlipMarginMM, pickSlipMarginMM)
+	pdf.SetAutoPageBreak(true, pickSlipMarginMM)
+	pdf.AddPage()
+
+	contentW := pickSlipPageWidthMM - 2*pickSlipMarginMM
+
+	// Header
+	pdf.SetFont("Arial", "B", 14)
+	pdf.CellFormat(contentW, 8, "PICK SLIP", "", 1, "C", false, 0, "")
+	pdf.SetFont("Arial", "", 9)
+	pdf.CellFormat(contentW, 5, "Work Order: "+workOrderID.String(), "", 1, "C", false, 0, "")
+	pdf.Ln(4)
+
+	// Column widths: Zone | Label | Remnant ID | Dimensions | Bin Barcode
+	colZone := 20.0
+	colLabel := 30.0
+	colID := 55.0
+	colDim := 35.0
+	colBarcode := contentW - colZone - colLabel - colID - colDim
+
+	// Table header
+	pdf.SetFont("Arial", "B", 9)
+	pdf.SetFillColor(220, 220, 220)
+	pdf.CellFormat(colZone, 7, "Zone", "1", 0, "C", true, 0, "")
+	pdf.CellFormat(colLabel, 7, "Bin Label", "1", 0, "C", true, 0, "")
+	pdf.CellFormat(colID, 7, "Remnant ID", "1", 0, "C", true, 0, "")
+	pdf.CellFormat(colDim, 7, "Dimensions", "1", 0, "C", true, 0, "")
+	pdf.CellFormat(colBarcode, 7, "Bin Barcode", "1", 1, "C", true, 0, "")
+
+	// Rows, grouped by zone (already sorted by zone/rack/shelf from the query)
+	pdf.SetFont("Arial", "", 9)
+	pdf.SetFillColor(255, 255, 255)
+	currentZone := ""
+	fill := false
+	for _, line := range lines {
+		zone := line.Zone
+		if zone == "" {
+			zone = "—"
+		}
+		label := line.Label
+		if label == "" {
+			label = "—"
+		}
+		barcode := line.BinBarcode
+		if barcode == "" {
+			barcode = "—"
+		}
+		dimText := fmt.Sprintf("%d × %d mm", line.Dimensions.LengthMM, line.Dimensions.WidthMM)
+
+		// Shade alternate zones for readability.
+		if zone != currentZone {
+			currentZone = zone
+			fill = !fill
+		}
+		if fill {
+			pdf.SetFillColor(245, 245, 245)
+		} else {
+			pdf.SetFillColor(255, 255, 255)
+		}
+
+		pdf.CellFormat(colZone, 6, zone, "1", 0, "C", fill, 0, "")
+		pdf.CellFormat(colLabel, 6, label, "1", 0, "L", fill, 0, "")
+		pdf.CellFormat(colID, 6, line.RemnantID.String(), "1", 0, "L", fill, 0, "")
+		pdf.CellFormat(colDim, 6, dimText, "1", 0, "C", fill, 0, "")
+		pdf.CellFormat(colBarcode, 6, barcode, "1", 1, "L", fill, 0, "")
+	}
+
+	// Footer: total count
+	pdf.Ln(3)
+	pdf.SetFont("Arial", "I", 8)
+	pdf.CellFormat(contentW, 5, fmt.Sprintf("Total: %d remnant(s)", len(lines)), "", 1, "R", false, 0, "")
+
+	var buf bytes.Buffer
+	if err := pdf.Output(&buf); err != nil {
+		return nil, fmt.Errorf("render pick slip pdf: %w", err)
+	}
+	return buf.Bytes(), nil
+}

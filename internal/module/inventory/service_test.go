@@ -160,6 +160,10 @@ type mockStore struct {
 	// selectCuttingRecordDetails
 	selectCuttingRecordDetailsResult CuttingRecordDetails
 	selectCuttingRecordDetailsErr    error
+
+	// selectAllocatedRemnantsByWO
+	selectAllocatedRemnantsByWOResult []PickSlipLine
+	selectAllocatedRemnantsByWOErr    error
 }
 
 func (m *mockStore) insertLot(_ context.Context, _ InventoryLot) error {
@@ -293,6 +297,10 @@ func (m *mockStore) postCycleCountAtomically(_ context.Context, op cycleCountPos
 
 func (m *mockStore) selectCuttingRecordDetails(_ context.Context, _ uuid.UUID) (CuttingRecordDetails, error) {
 	return m.selectCuttingRecordDetailsResult, m.selectCuttingRecordDetailsErr
+}
+
+func (m *mockStore) selectAllocatedRemnantsByWO(_ context.Context, _ uuid.UUID) ([]PickSlipLine, error) {
+	return m.selectAllocatedRemnantsByWOResult, m.selectAllocatedRemnantsByWOErr
 }
 
 // ── helpers ──────────────────────────────────────────────────────────────────
@@ -4393,5 +4401,69 @@ func TestGenerateCutLabelsPDF_InvalidSize_ReturnsError(t *testing.T) {
 	})
 	if !errors.Is(err, domain.ErrInvalidInput) {
 		t.Errorf("want ErrInvalidInput, got %v", err)
+	}
+}
+
+// ── GeneratePickSlipPDF ───────────────────────────────────────────────────────
+
+func TestGeneratePickSlipPDF_HappyPath_ThreeRemnantsAcrossTwoZones(t *testing.T) {
+	woID := uuid.New()
+	lines := []PickSlipLine{
+		{RemnantID: uuid.New(), Dimensions: domain.Dimension{LengthMM: 800, WidthMM: 400}, Zone: "A", Rack: "01", Shelf: "02", Label: "A-01-02", BinBarcode: "LOC-A0102"},
+		{RemnantID: uuid.New(), Dimensions: domain.Dimension{LengthMM: 600, WidthMM: 300}, Zone: "A", Rack: "01", Shelf: "03", Label: "A-01-03", BinBarcode: "LOC-A0103"},
+		{RemnantID: uuid.New(), Dimensions: domain.Dimension{LengthMM: 500, WidthMM: 250}, Zone: "B", Rack: "02", Shelf: "01", Label: "B-02-01", BinBarcode: "LOC-B0201"},
+	}
+	st := &mockStore{selectAllocatedRemnantsByWOResult: lines}
+	svc := NewService(st, nil)
+
+	pdf, err := svc.GeneratePickSlipPDF(context.Background(), woID)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(pdf) == 0 {
+		t.Fatal("expected non-empty PDF bytes")
+	}
+	// Verify it starts with the PDF magic bytes.
+	if string(pdf[:4]) != "%PDF" {
+		t.Errorf("output does not look like a PDF (first 4 bytes: %q)", pdf[:4])
+	}
+}
+
+func TestGeneratePickSlipPDF_NoAllocatedRemnants_ReturnsNotFound(t *testing.T) {
+	st := &mockStore{selectAllocatedRemnantsByWOResult: nil}
+	svc := NewService(st, nil)
+
+	_, err := svc.GeneratePickSlipPDF(context.Background(), uuid.New())
+	if !errors.Is(err, domain.ErrNotFound) {
+		t.Errorf("want ErrNotFound, got %v", err)
+	}
+}
+
+func TestGeneratePickSlipPDF_StoreError_Propagates(t *testing.T) {
+	storeErr := errors.New("db error")
+	st := &mockStore{selectAllocatedRemnantsByWOErr: storeErr}
+	svc := NewService(st, nil)
+
+	_, err := svc.GeneratePickSlipPDF(context.Background(), uuid.New())
+	if !errors.Is(err, storeErr) {
+		t.Errorf("want store error to propagate, got %v", err)
+	}
+}
+
+func TestGeneratePickSlipPDF_RemnantWithNoLocation_ShowsDash(t *testing.T) {
+	// Remnant with no bin location assigned — Zone/Label/BinBarcode are empty strings.
+	// The service should still render without error (shows "—" in the PDF).
+	lines := []PickSlipLine{
+		{RemnantID: uuid.New(), Dimensions: domain.Dimension{LengthMM: 700, WidthMM: 350}, Zone: "", Rack: "", Shelf: "", Label: "", BinBarcode: ""},
+	}
+	st := &mockStore{selectAllocatedRemnantsByWOResult: lines}
+	svc := NewService(st, nil)
+
+	pdf, err := svc.GeneratePickSlipPDF(context.Background(), uuid.New())
+	if err != nil {
+		t.Fatalf("unexpected error for remnant with no location: %v", err)
+	}
+	if len(pdf) == 0 {
+		t.Fatal("expected non-empty PDF bytes")
 	}
 }
