@@ -2899,6 +2899,58 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/inventory/work-orders/{id}/pick-slip": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns an A4 PDF listing every ALLOCATED remnant for the work order, grouped by storage zone for efficient walking order. Returns 404 when no remnants are allocated.",
+                "produces": [
+                    "application/pdf"
+                ],
+                "tags": [
+                    "inventory"
+                ],
+                "summary": "Generate pick-slip PDF for a work order",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "work order id (uuid)",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "file"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/machines": {
             "get": {
                 "security": [
@@ -4766,7 +4818,7 @@ const docTemplate = `{
                 "tags": [
                     "catalog"
                 ],
-                "summary": "Get BOM for SKU",
+                "summary": "Get BOM for SKU (optionally resolved for a variant)",
                 "parameters": [
                     {
                         "type": "string",
@@ -4774,6 +4826,12 @@ const docTemplate = `{
                         "name": "id",
                         "in": "path",
                         "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "variant_code; omit for default",
+                        "name": "variant",
+                        "in": "query"
                     }
                 ],
                 "responses": {
@@ -4851,6 +4909,139 @@ const docTemplate = `{
                         "description": "OK",
                         "schema": {
                             "$ref": "#/definitions/internal_module_catalog.BOM"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/skus/{id}/variants": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "catalog"
+                ],
+                "summary": "List BOM variants for a SKU",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "sku id (uuid)",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/internal_module_catalog.BOMVariant"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "catalog"
+                ],
+                "summary": "Create a BOM variant for a SKU",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "sku id (uuid)",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "payload",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_module_catalog.CreateBOMVariantInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/internal_module_catalog.BOMVariant"
                         }
                     },
                     "400": {
@@ -5018,6 +5209,48 @@ const docTemplate = `{
                         "description": "OK",
                         "schema": {
                             "$ref": "#/definitions/internal_module_authn.UserDetail"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/users/workers": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns a non-sensitive user list accessible to any authenticated role.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "users"
+                ],
+                "summary": "List workers for dropdown population",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "filter by role (comma-separated)",
+                        "name": "role",
+                        "in": "query"
+                    },
+                    {
+                        "type": "boolean",
+                        "description": "filter by active status",
+                        "name": "is_active",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/internal_module_authn.WorkerSummary"
+                            }
                         }
                     }
                 }
@@ -6518,6 +6751,26 @@ const docTemplate = `{
                 }
             }
         },
+        "internal_module_authn.WorkerSummary": {
+            "type": "object",
+            "properties": {
+                "full_name": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "is_active": {
+                    "type": "boolean"
+                },
+                "role": {
+                    "type": "string"
+                },
+                "username": {
+                    "type": "string"
+                }
+            }
+        },
         "internal_module_barcode.Barcode": {
             "type": "object",
             "properties": {
@@ -6760,6 +7013,49 @@ const docTemplate = `{
                     "type": "number"
                 },
                 "unit": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_module_catalog.BOMVariant": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "is_default": {
+                    "type": "boolean"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "sku_id": {
+                    "type": "string"
+                },
+                "variant_code": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_module_catalog.CreateBOMVariantInput": {
+            "type": "object",
+            "properties": {
+                "components": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_module_catalog.BOMComponent"
+                    }
+                },
+                "name": {
+                    "type": "string"
+                },
+                "sku_id": {
+                    "type": "string"
+                },
+                "variant_code": {
                     "type": "string"
                 }
             }
@@ -7979,6 +8275,9 @@ const docTemplate = `{
                 },
                 "work_order_id": {
                     "type": "string"
+                },
+                "worker_id": {
+                    "type": "string"
                 }
             }
         },
@@ -8068,6 +8367,9 @@ const docTemplate = `{
                 },
                 "stage": {
                     "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.LaborStage"
+                },
+                "worker_id": {
+                    "type": "string"
                 }
             }
         },
