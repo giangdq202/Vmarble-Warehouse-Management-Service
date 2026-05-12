@@ -29,6 +29,7 @@ func (h *Handler) Register(rg *gin.RouterGroup) {
 // rg should already have auth.Middleware applied.
 func (h *Handler) RegisterProtected(rg *gin.RouterGroup) {
 	rg.GET("/me", h.getMe)
+	rg.GET("/workers", h.listWorkers)
 }
 
 // RegisterAdmin mounts the protected administrative routes on rg.
@@ -68,6 +69,37 @@ func (h *Handler) login(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, result)
+}
+
+// listWorkers godoc
+//
+// @Summary      List workers for dropdown population
+// @Description  Returns a non-sensitive user list accessible to any authenticated role.
+// @Tags         users
+// @Produce      json
+// @Param        role       query     string  false  "filter by role (comma-separated)"
+// @Param        is_active  query     bool    false  "filter by active status"
+// @Success      200  {array}   WorkerSummary
+// @Security     BearerAuth
+// @Router       /api/v1/users/workers [get]
+func (h *Handler) listWorkers(c *gin.Context) {
+	params := ListUsersParams{}
+
+	if role := c.Query("role"); role != "" {
+		params.Roles = strings.Split(role, ",")
+	}
+
+	if isActive := c.Query("is_active"); isActive != "" {
+		val := isActive == "true"
+		params.IsActive = &val
+	}
+
+	workers, err := h.svc.ListWorkers(c.Request.Context(), params)
+	if err != nil {
+		httpkit.Error(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, workers)
 }
 
 // getMe godoc

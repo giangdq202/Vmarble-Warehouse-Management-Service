@@ -141,3 +141,58 @@ func TestService_ListUsers(t *testing.T) {
 		st.AssertExpectations(t)
 	})
 }
+
+func TestService_ListWorkers(t *testing.T) {
+	st := new(mockStore)
+	svc := NewService(st, "secret")
+	ctx := context.Background()
+
+	t.Run("returns worker summaries without sensitive fields", func(t *testing.T) {
+		params := ListUsersParams{
+			Roles: []string{string(auth.RoleCNC), string(auth.RoleForeman)},
+		}
+		expectedUsers := []user{
+			{ID: uuid.New(), Username: "cnc1", FullName: "CNC Worker", Role: string(auth.RoleCNC), IsActive: true},
+			{ID: uuid.New(), Username: "foreman1", FullName: "Floor Foreman", Role: string(auth.RoleForeman), IsActive: true},
+		}
+
+		st.On("selectUsers", ctx, params).Return(expectedUsers, 2, nil).Once()
+
+		result, err := svc.ListWorkers(ctx, params)
+		assert.NoError(t, err)
+		assert.Len(t, result, 2)
+		assert.Equal(t, "cnc1", result[0].Username)
+		assert.Equal(t, "CNC Worker", result[0].FullName)
+		assert.Equal(t, string(auth.RoleCNC), result[0].Role)
+		assert.True(t, result[0].IsActive)
+		st.AssertExpectations(t)
+	})
+
+	t.Run("is_active filter respected", func(t *testing.T) {
+		active := true
+		params := ListUsersParams{IsActive: &active}
+		expectedUsers := []user{
+			{ID: uuid.New(), Username: "active1", Role: string(auth.RolePlanner), IsActive: true},
+		}
+
+		st.On("selectUsers", ctx, params).Return(expectedUsers, 1, nil).Once()
+
+		result, err := svc.ListWorkers(ctx, params)
+		assert.NoError(t, err)
+		assert.Len(t, result, 1)
+		assert.True(t, result[0].IsActive)
+		st.AssertExpectations(t)
+	})
+
+	t.Run("empty result returns empty slice not nil", func(t *testing.T) {
+		params := ListUsersParams{Roles: []string{"nonexistent"}}
+
+		st.On("selectUsers", ctx, params).Return([]user{}, 0, nil).Once()
+
+		result, err := svc.ListWorkers(ctx, params)
+		assert.NoError(t, err)
+		assert.NotNil(t, result)
+		assert.Len(t, result, 0)
+		st.AssertExpectations(t)
+	})
+}
