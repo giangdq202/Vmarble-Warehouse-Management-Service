@@ -1,46 +1,47 @@
 #!/usr/bin/env bash
-# Luồng:
-#   1. Lưu image hiện tại để rollback nếu cần
-#   2. Pull image mới
-#   3. Restart app container (postgres KHÔNG bị ảnh hưởng)
-#   4. Health check tối đa 60s
-#   5a. OK    → Cập nhật state, exit 0
-#   5b. FAIL  → Rollback về image cũ, exit 1
-
 set -euo pipefail
 
-DEPLOY_DIR="/home/deploy_vwms/projects/vwms-staging"
-COMPOSE_FILE="${DEPLOY_DIR}/docker-compose.staging.yml"
-ENV_FILE="${DEPLOY_DIR}/.env.staging"
-STATE_FILE="${DEPLOY_DIR}/.last_good_image"
-HEALTH_URL="http://localhost:8080/healthz"
-HEALTH_RETRIES=12
-HEALTH_INTERVAL=5
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$SCRIPT_DIR"
 
-NEW_IMAGE="${1:?[deploy] Thiếu argument: full image path}"
-
-cd "$DEPLOY_DIR"
-
-PREV_IMAGE=$(cat "$STATE_FILE" 2>/dev/null || true)
-docker pull "$NEW_IMAGE"
-
-APP_IMAGE="$NEW_IMAGE" docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d app
-
-IS_HEALTHY=false
-for i in $(seq 1 $HEALTH_RETRIES); do
-    sleep "$HEALTH_INTERVAL"
-    if curl -sf --max-time 3 "$HEALTH_URL" > /dev/null 2>&1; then
-        IS_HEALTHY=true
-        break
-    fi
-done
-
-if $IS_HEALTHY; then
-    echo "$NEW_IMAGE" > "$STATE_FILE"
-    exit 0
+# Load environment variables
+if [[ ! -f ".env" ]]; then
+  echo "Error: .env file not found in $SCRIPT_DIR"
+  exit 1
 fi
 
-# ... logic rollback ...
-APP_IMAGE="$PREV_IMAGE" docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d app
-# ... xác nhận rollback ...
+set -a
+source .env
+set +a
+
+# Validate required variables
+if [[ -z "${APP_IMAGE:-}" || -z "${SERVICE_NAME:-}" || -z "${HEALTH_URL:-}" ]]; then
+  echo "Error: Missing required variables in .env (APP_IMAGE, SERVICE_NAME, HEALTH_URL)"
+  exit 1
+fi
+
+COMPOSE_FILE="compose.yaml"
+
+# Pull new image
+echo "Pulling image: $APP_IMAGE"
+docker compose pull "$SERVICE_NAME"
+
+# Deploy
+echo "Deploying $SERVICE_NAME with image: $APP_IMAGE"
+docker compose -f "$COMPOSE_FILE" up -d "$SERVICE_NAME"
+
+# Health check (20 seconds timeout - Go app needs more startup time than Node.js)
+echo "Waiting for health check: $HEALTH_URL"
+for i in $(seq 1 20); do
+  if curl -fsS "$HEALTH_URL" >/dev/null 2>&1; then
+    echo "✅ Health check passed (${i}s)"
+    echo "✅ Deploy successful: $APP_IMAGE"
+    exit 0
+  fi
+  sleep 1
+done
+
+# Health check failed
+echo "❌ Health check failed after 20s"
+echo "⚠️  Container may be unhealthy. Check logs: docker logs $SERVICE_NAME"
 exit 1
