@@ -436,6 +436,17 @@ func (s *service) ListRemnants(ctx context.Context, f RemnantFilter, p httpkit.P
 	return httpkit.NewPagedResult(items, total, p), nil
 }
 
+func (s *service) ListCuttingRecords(ctx context.Context, f CuttingRecordFilter, p httpkit.PageParams) (httpkit.PagedResult[CuttingRecordReport], error) {
+	if !f.From.IsZero() && !f.To.IsZero() && f.To.Before(f.From) {
+		return httpkit.PagedResult[CuttingRecordReport]{}, domain.NewBizError(domain.ErrInvalidInput, "to must be greater than or equal to from")
+	}
+	items, total, err := s.st.selectCuttingRecordsReport(ctx, f, p)
+	if err != nil {
+		return httpkit.PagedResult[CuttingRecordReport]{}, err
+	}
+	return httpkit.NewPagedResult(items, total, p), nil
+}
+
 func (s *service) GetRemnantLineageByRemnant(ctx context.Context, remnantID uuid.UUID) ([]Remnant, error) {
 	remnant, err := s.st.selectRemnantByID(ctx, remnantID)
 	if err != nil {

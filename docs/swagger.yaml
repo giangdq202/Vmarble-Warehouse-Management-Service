@@ -137,6 +137,21 @@ definitions:
       total_pages:
         type: integer
     type: object
+  ? github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_inventory_CuttingRecordReport
+  : properties:
+      current_page:
+        type: integer
+      items:
+        items:
+          $ref: '#/definitions/internal_module_inventory.CuttingRecordReport'
+        type: array
+      limit:
+        type: integer
+      total_items:
+        type: integer
+      total_pages:
+        type: integer
+    type: object
   github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_inventory_InventoryLot:
     properties:
       current_page:
@@ -922,6 +937,36 @@ definitions:
       cutting_record_id:
         type: string
       remnant_id:
+        type: string
+    type: object
+  internal_module_inventory.CuttingRecordReport:
+    properties:
+      assigned_full_name:
+        type: string
+      assigned_to:
+        type: string
+      assigned_username:
+        type: string
+      created_at:
+        type: string
+      id:
+        type: string
+      produced_remnant_id:
+        type: string
+      sku_code:
+        type: string
+      sku_id:
+        type: string
+      sku_name:
+        type: string
+      source_id:
+        type: string
+      source_type:
+        description: '"SHEET" | "REMNANT"'
+        type: string
+      used_dimension:
+        $ref: '#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.Dimension'
+      work_order_id:
         type: string
     type: object
   internal_module_inventory.CycleCountLine:
@@ -2540,6 +2585,60 @@ paths:
       security:
       - BearerAuth: []
       summary: Record cutting operation
+      tags:
+      - inventory
+  /api/v1/inventory/cutting-records:
+    get:
+      description: 'Returns a paginated history of cut events enriched with SKU code/name
+        and the work-order assignee. Ordered by created_at DESC. Optional filters:
+        user_id (maps to work_orders.assigned_to), work_order_id, from/to (RFC3339).'
+      parameters:
+      - description: filter by assigned worker (uuid)
+        in: query
+        name: user_id
+        type: string
+      - description: filter by work order (uuid)
+        in: query
+        name: work_order_id
+        type: string
+      - description: start of date range (RFC3339)
+        in: query
+        name: from
+        type: string
+      - description: end of date range (RFC3339)
+        in: query
+        name: to
+        type: string
+      - description: page number (default 1)
+        in: query
+        name: page
+        type: integer
+      - description: items per page (default 10, max 100)
+        in: query
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_inventory_CuttingRecordReport'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: List cutting records (history report)
       tags:
       - inventory
   /api/v1/inventory/cutting-records/{id}/labels:
