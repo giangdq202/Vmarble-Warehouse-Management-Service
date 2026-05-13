@@ -1598,6 +1598,87 @@
                 }
             }
         },
+        "/api/v1/inventory/cutting-records": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns a paginated history of cut events enriched with SKU code/name and the work-order assignee. Ordered by created_at DESC. Optional filters: user_id (maps to work_orders.assigned_to), work_order_id, from/to (RFC3339).",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "inventory"
+                ],
+                "summary": "List cutting records (history report)",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "filter by assigned worker (uuid)",
+                        "name": "user_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "filter by work order (uuid)",
+                        "name": "work_order_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "start of date range (RFC3339)",
+                        "name": "from",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "end of date range (RFC3339)",
+                        "name": "to",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "page number (default 1)",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "items per page (default 10, max 100)",
+                        "name": "limit",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_inventory_CuttingRecordReport"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/inventory/cutting-records/{id}/labels": {
             "post": {
                 "security": [
@@ -6468,6 +6549,29 @@
                 }
             }
         },
+        "github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_inventory_CuttingRecordReport": {
+            "type": "object",
+            "properties": {
+                "current_page": {
+                    "type": "integer"
+                },
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_module_inventory.CuttingRecordReport"
+                    }
+                },
+                "limit": {
+                    "type": "integer"
+                },
+                "total_items": {
+                    "type": "integer"
+                },
+                "total_pages": {
+                    "type": "integer"
+                }
+            }
+        },
         "github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_inventory_InventoryLot": {
             "type": "object",
             "properties": {
@@ -7661,6 +7765,51 @@
                     "type": "string"
                 },
                 "remnant_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_module_inventory.CuttingRecordReport": {
+            "type": "object",
+            "properties": {
+                "assigned_full_name": {
+                    "type": "string"
+                },
+                "assigned_to": {
+                    "type": "string"
+                },
+                "assigned_username": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "produced_remnant_id": {
+                    "type": "string"
+                },
+                "sku_code": {
+                    "type": "string"
+                },
+                "sku_id": {
+                    "type": "string"
+                },
+                "sku_name": {
+                    "type": "string"
+                },
+                "source_id": {
+                    "type": "string"
+                },
+                "source_type": {
+                    "description": "\"SHEET\" | \"REMNANT\"",
+                    "type": "string"
+                },
+                "used_dimension": {
+                    "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.Dimension"
+                },
+                "work_order_id": {
                     "type": "string"
                 }
             }

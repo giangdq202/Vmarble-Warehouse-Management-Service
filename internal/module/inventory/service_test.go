@@ -164,6 +164,12 @@ type mockStore struct {
 	// selectAllocatedRemnantsByWO
 	selectAllocatedRemnantsByWOResult []PickSlipLine
 	selectAllocatedRemnantsByWOErr    error
+
+	// selectCuttingRecordsReport
+	selectCuttingRecordsReportResult []CuttingRecordReport
+	selectCuttingRecordsReportTotal  int
+	selectCuttingRecordsReportErr    error
+	selectCuttingRecordsReportFilter CuttingRecordFilter
 }
 
 func (m *mockStore) insertLot(_ context.Context, _ InventoryLot) error {
@@ -301,6 +307,11 @@ func (m *mockStore) selectCuttingRecordDetails(_ context.Context, _ uuid.UUID) (
 
 func (m *mockStore) selectAllocatedRemnantsByWO(_ context.Context, _ uuid.UUID) ([]PickSlipLine, error) {
 	return m.selectAllocatedRemnantsByWOResult, m.selectAllocatedRemnantsByWOErr
+}
+
+func (m *mockStore) selectCuttingRecordsReport(_ context.Context, f CuttingRecordFilter, _ httpkit.PageParams) ([]CuttingRecordReport, int, error) {
+	m.selectCuttingRecordsReportFilter = f
+	return m.selectCuttingRecordsReportResult, m.selectCuttingRecordsReportTotal, m.selectCuttingRecordsReportErr
 }
 
 // ── helpers ──────────────────────────────────────────────────────────────────
@@ -4465,5 +4476,101 @@ func TestGeneratePickSlipPDF_RemnantWithNoLocation_ShowsDash(t *testing.T) {
 	}
 	if len(pdf) == 0 {
 		t.Fatal("expected non-empty PDF bytes")
+	}
+}
+
+// ── ListCuttingRecords ───────────────────────────────────────────────────────
+
+func TestListCuttingRecords_HappyPath_ReturnsPagedResult(t *testing.T) {
+	woID := uuid.New()
+	skuID := uuid.New()
+	userID := uuid.New()
+	username := "worker1"
+	fullName := "Nguyễn Văn A"
+
+	items := []CuttingRecordReport{
+		{
+			ID:               uuid.New(),
+			WorkOrderID:      woID,
+			SKUID:            skuID,
+			SKUCode:          "SKU-001",
+			SKUName:          "Đá xanh A",
+			SourceType:       "SHEET",
+			SourceID:         uuid.New(),
+			UsedDimension:    domain.Dimension{LengthMM: 1200, WidthMM: 600},
+			AssignedTo:       &userID,
+			AssignedUsername: &username,
+			AssignedFullName: &fullName,
+			CreatedAt:        time.Date(2026, 5, 10, 9, 0, 0, 0, time.UTC),
+		},
+	}
+	st := &mockStore{
+		selectCuttingRecordsReportResult: items,
+		selectCuttingRecordsReportTotal:  1,
+	}
+	svc := NewService(st, nil)
+
+	res, err := svc.ListCuttingRecords(context.Background(),
+		CuttingRecordFilter{UserID: &userID},
+		httpkit.PageParams{Page: 1, Limit: 10},
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if res.TotalItems != 1 {
+		t.Fatalf("total = %d, want 1", res.TotalItems)
+	}
+	if len(res.Items) != 1 || res.Items[0].SKUCode != "SKU-001" {
+		t.Fatalf("unexpected items: %+v", res.Items)
+	}
+	if st.selectCuttingRecordsReportFilter.UserID == nil || *st.selectCuttingRecordsReportFilter.UserID != userID {
+		t.Fatalf("filter not forwarded: got %+v", st.selectCuttingRecordsReportFilter)
+	}
+}
+
+func TestListCuttingRecords_EmptyResult(t *testing.T) {
+	st := &mockStore{
+		selectCuttingRecordsReportResult: []CuttingRecordReport{},
+		selectCuttingRecordsReportTotal:  0,
+	}
+	svc := NewService(st, nil)
+
+	res, err := svc.ListCuttingRecords(context.Background(),
+		CuttingRecordFilter{}, httpkit.PageParams{Page: 1, Limit: 10},
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if res.TotalItems != 0 || len(res.Items) != 0 {
+		t.Fatalf("expected empty result, got %+v", res)
+	}
+}
+
+func TestListCuttingRecords_InvalidDateRange_ReturnsInvalidInput(t *testing.T) {
+	st := &mockStore{}
+	svc := NewService(st, nil)
+
+	from := time.Date(2026, 5, 10, 0, 0, 0, 0, time.UTC)
+	to := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
+
+	_, err := svc.ListCuttingRecords(context.Background(),
+		CuttingRecordFilter{From: from, To: to},
+		httpkit.PageParams{Page: 1, Limit: 10},
+	)
+	if !errors.Is(err, domain.ErrInvalidInput) {
+		t.Fatalf("got %v, want ErrInvalidInput", err)
+	}
+}
+
+func TestListCuttingRecords_StoreError_Propagates(t *testing.T) {
+	storeErr := errors.New("db down")
+	st := &mockStore{selectCuttingRecordsReportErr: storeErr}
+	svc := NewService(st, nil)
+
+	_, err := svc.ListCuttingRecords(context.Background(),
+		CuttingRecordFilter{}, httpkit.PageParams{Page: 1, Limit: 10},
+	)
+	if err == nil || !errors.Is(err, storeErr) {
+		t.Fatalf("got %v, want %v", err, storeErr)
 	}
 }

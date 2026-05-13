@@ -3,6 +3,7 @@ package inventory
 import (
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -29,6 +30,7 @@ func (h *Handler) Register(rg *gin.RouterGroup) {
 	inv.GET("/sheets/:id", h.getSheet)
 	inv.GET("/sheets/:id/lineage", h.lineage)
 	inv.POST("/cuts", auth.RequireRole(auth.RoleWarehouse, auth.RoleCNC, auth.RoleCNCManager, auth.RoleAdmin), h.recordCut)
+	inv.GET("/cutting-records", h.listCuttingRecords)
 	inv.GET("/remnants", h.listRemnants)
 	inv.GET("/remnants/suggestions", h.suggestRemnants)
 	inv.GET("/remnants/:id", h.getRemnant)
@@ -251,6 +253,68 @@ func (h *Handler) recordCut(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusCreated, result)
+}
+
+// listCuttingRecords godoc
+//
+// @Summary      List cutting records (history report)
+// @Description  Returns a paginated history of cut events enriched with SKU code/name and the work-order assignee. Ordered by created_at DESC. Optional filters: user_id (maps to work_orders.assigned_to), work_order_id, from/to (RFC3339).
+// @Tags         inventory
+// @Produce      json
+// @Param        user_id         query     string  false  "filter by assigned worker (uuid)"
+// @Param        work_order_id   query     string  false  "filter by work order (uuid)"
+// @Param        from            query     string  false  "start of date range (RFC3339)"
+// @Param        to              query     string  false  "end of date range (RFC3339)"
+// @Param        page            query     int     false  "page number (default 1)"
+// @Param        limit           query     int     false  "items per page (default 10, max 100)"
+// @Security     BearerAuth
+// @Success      200  {object}  httpkit.PagedResult[CuttingRecordReport]
+// @Failure      400  {object}  map[string]string
+// @Failure      500  {object}  map[string]string
+// @Router       /api/v1/inventory/cutting-records [get]
+func (h *Handler) listCuttingRecords(c *gin.Context) {
+	f := CuttingRecordFilter{}
+
+	if s := c.Query("user_id"); s != "" {
+		id, err := uuid.Parse(s)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid user_id"})
+			return
+		}
+		f.UserID = &id
+	}
+	if s := c.Query("work_order_id"); s != "" {
+		id, err := uuid.Parse(s)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid work_order_id"})
+			return
+		}
+		f.WorkOrderID = &id
+	}
+	if s := c.Query("from"); s != "" {
+		t, err := time.Parse(time.RFC3339, s)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid from (RFC3339 expected)"})
+			return
+		}
+		f.From = t
+	}
+	if s := c.Query("to"); s != "" {
+		t, err := time.Parse(time.RFC3339, s)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid to (RFC3339 expected)"})
+			return
+		}
+		f.To = t
+	}
+
+	p := httpkit.BindPageParams(c)
+	result, err := h.svc.ListCuttingRecords(c.Request.Context(), f, p)
+	if err != nil {
+		httpkit.Error(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, result)
 }
 
 // listRemnants godoc

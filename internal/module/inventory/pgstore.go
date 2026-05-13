@@ -372,6 +372,116 @@ func (s *pgStore) selectCuttingRecordDetails(ctx context.Context, id uuid.UUID) 
 	return d, nil
 }
 
+// selectCuttingRecordsReport returns a paginated, SKU + assignee-enriched view
+// of cutting_records ordered by created_at DESC. Filters are all optional:
+// UserID maps to work_orders.assigned_to (see CuttingRecordFilter.UserID),
+// WorkOrderID and the From/To timestamps narrow the result set.
+func (s *pgStore) selectCuttingRecordsReport(ctx context.Context, f CuttingRecordFilter, p httpkit.PageParams) ([]CuttingRecordReport, int, error) {
+	var (
+		userID    any = nil
+		woID      any = nil
+		fromTime  any = nil
+		toTime    any = nil
+	)
+	if f.UserID != nil {
+		userID = *f.UserID
+	}
+	if f.WorkOrderID != nil {
+		woID = *f.WorkOrderID
+	}
+	if !f.From.IsZero() {
+		fromTime = f.From
+	}
+	if !f.To.IsZero() {
+		toTime = f.To
+	}
+
+	whereClause := `
+		WHERE ($1::uuid IS NULL OR wo.assigned_to = $1)
+		  AND ($2::uuid IS NULL OR cr.work_order_id = $2)
+		  AND ($3::timestamptz IS NULL OR cr.created_at >= $3)
+		  AND ($4::timestamptz IS NULL OR cr.created_at <= $4)`
+
+	var total int
+	if err := s.pool.QueryRow(ctx,
+		`SELECT COUNT(*)
+		   FROM cutting_records cr
+		   LEFT JOIN work_orders wo ON wo.id = cr.work_order_id`+whereClause,
+		userID, woID, fromTime, toTime,
+	).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("count cutting_records: %w", err)
+	}
+	if total == 0 {
+		return []CuttingRecordReport{}, 0, nil
+	}
+
+	rows, err := s.pool.Query(ctx,
+		`SELECT cr.id, cr.work_order_id, cr.sku_id,
+		        COALESCE(sk.code, ''), COALESCE(sk.name, ''),
+		        cr.sheet_id, cr.remnant_source_id,
+		        cr.used_length_mm, cr.used_width_mm,
+		        cr.produced_remnant_id,
+		        wo.assigned_to,
+		        u.username, u.full_name,
+		        cr.created_at
+		   FROM cutting_records cr
+		   LEFT JOIN work_orders wo ON wo.id = cr.work_order_id
+		   LEFT JOIN skus sk        ON sk.id = cr.sku_id
+		   LEFT JOIN users u        ON u.id = wo.assigned_to`+whereClause+`
+		  ORDER BY cr.created_at DESC
+		  LIMIT $5 OFFSET $6`,
+		userID, woID, fromTime, toTime, p.Limit, p.Offset(),
+	)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+
+	out := make([]CuttingRecordReport, 0, p.Limit)
+	for rows.Next() {
+		var (
+			r           CuttingRecordReport
+			sheetID     *uuid.UUID
+			remnantSrc  *uuid.UUID
+			username    sql.NullString
+			fullName    sql.NullString
+			usedLenMM   int
+			usedWidthMM int
+		)
+		if err := rows.Scan(
+			&r.ID, &r.WorkOrderID, &r.SKUID,
+			&r.SKUCode, &r.SKUName,
+			&sheetID, &remnantSrc,
+			&usedLenMM, &usedWidthMM,
+			&r.ProducedRemnantID,
+			&r.AssignedTo,
+			&username, &fullName,
+			&r.CreatedAt,
+		); err != nil {
+			return nil, 0, err
+		}
+		r.UsedDimension = domain.Dimension{LengthMM: usedLenMM, WidthMM: usedWidthMM}
+		switch {
+		case sheetID != nil:
+			r.SourceType = "SHEET"
+			r.SourceID = *sheetID
+		case remnantSrc != nil:
+			r.SourceType = "REMNANT"
+			r.SourceID = *remnantSrc
+		}
+		if username.Valid {
+			v := username.String
+			r.AssignedUsername = &v
+		}
+		if fullName.Valid && fullName.String != "" {
+			v := fullName.String
+			r.AssignedFullName = &v
+		}
+		out = append(out, r)
+	}
+	return out, total, rows.Err()
+}
+
 func (s *pgStore) insertRemnant(ctx context.Context, r Remnant) error {
 	_, err := s.pool.Exec(ctx,
 		`INSERT INTO remnants (

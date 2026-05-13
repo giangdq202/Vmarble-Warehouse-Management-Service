@@ -362,6 +362,11 @@ type Service interface {
 	// walking order. Returns ErrNotFound when the work order has no allocated
 	// remnants.
 	GeneratePickSlipPDF(ctx context.Context, workOrderID uuid.UUID) ([]byte, error)
+
+	// ListCuttingRecords returns a paginated history of cutting records,
+	// enriched with SKU code/name and the work-order assignee. The result is
+	// ordered by created_at DESC.
+	ListCuttingRecords(ctx context.Context, f CuttingRecordFilter, p httpkit.PageParams) (httpkit.PagedResult[CuttingRecordReport], error)
 }
 
 // PickSlipLine is one row on the pick slip — one allocated remnant.
@@ -373,4 +378,38 @@ type PickSlipLine struct {
 	Shelf      string
 	Label      string // human-readable bin label, e.g. "A-01-03"
 	BinBarcode string // machine-readable barcode on the bin
+}
+
+// CuttingRecordReport is a read-only view of a cutting record enriched with
+// SKU + work-order assignee information for the cut-history report screen.
+type CuttingRecordReport struct {
+	ID                uuid.UUID        `json:"id"`
+	WorkOrderID       uuid.UUID        `json:"work_order_id"`
+	SKUID             uuid.UUID        `json:"sku_id"`
+	SKUCode           string           `json:"sku_code"`
+	SKUName           string           `json:"sku_name"`
+	SourceType        string           `json:"source_type"` // "SHEET" | "REMNANT"
+	SourceID          uuid.UUID        `json:"source_id"`
+	UsedDimension     domain.Dimension `json:"used_dimension"`
+	ProducedRemnantID *uuid.UUID       `json:"produced_remnant_id,omitempty"`
+	AssignedTo        *uuid.UUID       `json:"assigned_to,omitempty"`
+	AssignedUsername  *string          `json:"assigned_username,omitempty"`
+	AssignedFullName  *string          `json:"assigned_full_name,omitempty"`
+	CreatedAt         time.Time        `json:"created_at"`
+}
+
+// CuttingRecordFilter narrows the cut-history report.
+// Zero values are treated as "no filter" for the corresponding field.
+type CuttingRecordFilter struct {
+	// UserID restricts results to cuts on work orders currently assigned to
+	// this user. Note: this uses work_orders.assigned_to as a proxy for the
+	// cutting worker because cutting_records does not yet have a created_by
+	// column (tracked as a follow-up).
+	UserID *uuid.UUID
+	// WorkOrderID restricts to a single work order.
+	WorkOrderID *uuid.UUID
+	// From/To bound cutting_records.created_at (inclusive). Zero values
+	// disable the corresponding bound.
+	From time.Time
+	To   time.Time
 }
