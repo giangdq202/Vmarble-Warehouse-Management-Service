@@ -137,7 +137,6 @@ jobs:
           images: ${{ env.REGISTRY }}/${{ steps.vars.outputs.image }}
           tags: |
             type=sha,prefix=sha-,format=short
-            type=raw,value=staging-latest
 
       - name: Build and push image
         uses: docker/build-push-action@v6
@@ -231,7 +230,9 @@ jobs:
           envs:     FULL_IMAGE,GHCR_USER,GHCR_TOKEN
           script: |
             echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
-            /home/deploy_vwms/projects/vwms-staging/deploy.sh "$FULL_IMAGE"
+            cd /opt/stacks/vwms-be
+            sed -i "s|^APP_IMAGE=.*|APP_IMAGE=$FULL_IMAGE|g" .env
+            ./deploy.sh
 
       # ── Thông báo Discord ─────────────────────────────────────────────────
       - name: "[Discord] 🚀 Deploy thành công"
