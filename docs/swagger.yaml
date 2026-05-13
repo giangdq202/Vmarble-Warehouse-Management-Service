@@ -2252,6 +2252,11 @@ paths:
       - costing
   /api/v1/costing/{workOrderID}/compute:
     post:
+      description: Computes (or re-computes) the costing record for a work order.
+        ACTUAL costing on a COMPLETED WO requires at least one non-zero cost component
+        (material/auxiliary/labor); otherwise returns 412 with the Vietnamese message
+        "WO chưa có chi phí vật tư/nhân công, không thể tính giá thành". Estimated
+        costing on PLANNED WOs is exempt.
       parameters:
       - description: work order id (uuid)
         in: path
@@ -2279,6 +2284,12 @@ paths:
             type: object
         "409":
           description: Conflict
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "412":
+          description: Precondition Failed
           schema:
             additionalProperties:
               type: string
