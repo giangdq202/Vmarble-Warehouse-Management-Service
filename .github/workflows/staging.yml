@@ -223,7 +223,7 @@ jobs:
           GHCR_TOKEN:  ${{ secrets.GITHUB_TOKEN }}
         with:
           host:     ${{ secrets.STAGING_HOST }}
-          username: deploy_vwms
+          username: ${{ secrets.STAGING_USER }}
           key: ${{ secrets.STAGING_SSH_KEY }}
           port:     ${{ secrets.STAGING_SSH_PORT }}
           timeout:  180s
