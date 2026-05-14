@@ -127,6 +127,17 @@ func (m *mockCONR) GetConsumptionCostForWO(_ context.Context, _ uuid.UUID) (doma
 	return m.result, m.err
 }
 
+// ── mockLBR (LaborDataReader) ────────────────────────────────────────────────
+
+type mockLBR struct {
+	result domain.Money
+	err    error
+}
+
+func (m *mockLBR) GetLaborCostForWO(_ context.Context, _ uuid.UUID) (domain.Money, error) {
+	return m.result, m.err
+}
+
 // ── helpers ───────────────────────────────────────────────────────────────────
 
 func completedWO(woID, skuID uuid.UUID) WOInfo {
@@ -207,7 +218,14 @@ func TestComputeCost_CompletedWO_CreatesActualRecord(t *testing.T) {
 	skuID := uuid.New()
 	st := notFoundStore()
 	wor := &mockWOR{result: completedWO(woID, skuID)}
-	svc := newSvc(st, wor, &mockCDR{result: []CuttingData{}}, zeroCONR())
+	// At least one non-zero cost component is required for ACTUAL costing —
+	// otherwise the zero-cost guard rejects the compute.
+	cdr := &mockCDR{result: []CuttingData{{
+		SheetCost:    domain.Money{Amount: 50_000, Currency: "VND"},
+		SheetAreaMM2: 2_000_000,
+		UsedAreaMM2:  2_000_000,
+	}}}
+	svc := newSvc(st, wor, cdr, zeroCONR())
 
 	got, err := svc.ComputeCost(context.Background(), woID)
 	if err != nil {
@@ -215,6 +233,98 @@ func TestComputeCost_CompletedWO_CreatesActualRecord(t *testing.T) {
 	}
 	if got.CostingType != CostingTypeActual {
 		t.Errorf("CostingType = %v, want ACTUAL", got.CostingType)
+	}
+}
+
+// ── Zero-cost guard (issue #255) ─────────────────────────────────────────────
+//
+// For ACTUAL costing on a COMPLETED WO, at least one non-zero cost component
+// (material / auxiliary / labor) must exist. Empty ACTUAL records are almost
+// always a data entry gap and must be rejected. Estimated runs on PLANNED WOs
+// are exempt because upstream data may legitimately still be empty.
+
+func TestComputeCost_CompletedWO_NoCosts_ReturnsPreconditionFailed(t *testing.T) {
+	woID := uuid.New()
+	skuID := uuid.New()
+	st := notFoundStore()
+	wor := &mockWOR{result: completedWO(woID, skuID)}
+	svc := newSvc(st, wor, &mockCDR{result: []CuttingData{}}, zeroCONR())
+
+	_, err := svc.ComputeCost(context.Background(), woID)
+
+	if !errors.Is(err, domain.ErrPreconditionFailed) {
+		t.Fatalf("expected ErrPreconditionFailed, got %v", err)
+	}
+	if st.insertCalled || st.updateCalled {
+		t.Error("store must not be written to when guard rejects")
+	}
+}
+
+func TestComputeCost_PlannedWO_NoCosts_AllowsZeroTotal(t *testing.T) {
+	// PLANNED costing is estimated and legitimately may start at 0đ.
+	woID := uuid.New()
+	skuID := uuid.New()
+	st := notFoundStore()
+	wor := &mockWOR{result: plannedWO(woID, skuID)}
+	svc := newSvc(st, wor, &mockCDR{result: []CuttingData{}}, zeroCONR())
+
+	got, err := svc.ComputeCost(context.Background(), woID)
+	if err != nil {
+		t.Fatalf("PLANNED zero-cost must be allowed, got %v", err)
+	}
+	if got.TotalCost.Amount != 0 {
+		t.Errorf("TotalCost = %d, want 0", got.TotalCost.Amount)
+	}
+	if !st.insertCalled {
+		t.Error("PLANNED zero-cost record must still be persisted")
+	}
+}
+
+// Labor-only ACTUAL compute must succeed — confirms the guard accepts any
+// single non-zero component, not just material.
+func TestComputeCost_CompletedWO_LaborOnly_Succeeds(t *testing.T) {
+	woID := uuid.New()
+	skuID := uuid.New()
+
+	st := notFoundStore()
+	wor := &mockWOR{result: completedWO(woID, skuID)}
+	cdr := &mockCDR{result: []CuttingData{}}
+	lbr := &mockLBR{result: domain.Money{Amount: 30_000, Currency: "VND"}}
+	svc := NewService(st, wor, cdr, zeroCONR(), lbr)
+
+	got, err := svc.ComputeCost(context.Background(), woID)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got.LaborCost.Amount != 30_000 {
+		t.Errorf("LaborCost.Amount = %d, want 30_000", got.LaborCost.Amount)
+	}
+	if got.TotalCost.Amount != 30_000 {
+		t.Errorf("TotalCost.Amount = %d, want 30_000", got.TotalCost.Amount)
+	}
+}
+
+// Finalized check must still take precedence over the zero-cost guard —
+// BR-C04 should win, not leak the VN precondition message.
+func TestComputeCost_AlreadyFinalized_ZeroCost_ReturnsAlreadyFinalized(t *testing.T) {
+	woID := uuid.New()
+	skuID := uuid.New()
+
+	st := &mockStore{
+		selectByWOResult: CostingRecord{
+			ID:          uuid.New(),
+			WorkOrderID: woID,
+			SKUID:       skuID,
+			Finalized:   true,
+		},
+	}
+	wor := &mockWOR{result: completedWO(woID, skuID)}
+	svc := newSvc(st, wor, &mockCDR{result: []CuttingData{}}, zeroCONR())
+
+	_, err := svc.ComputeCost(context.Background(), woID)
+
+	if !errors.Is(err, domain.ErrAlreadyFinalized) {
+		t.Fatalf("BR-C04 must win over zero-cost guard, got %v", err)
 	}
 }
 
@@ -377,11 +487,12 @@ func TestComputeCost_SheetAreaZero_IsSkipped(t *testing.T) {
 
 func TestComputeCost_NegativeSheetArea_IsSkipped(t *testing.T) {
 	// SheetAreaMM2 < 0 must also be skipped (guard condition is <= 0).
+	// Use PLANNED WO so the zero-cost guard (ACTUAL only) does not interfere.
 	woID := uuid.New()
 	skuID := uuid.New()
 
 	st := notFoundStore()
-	wor := &mockWOR{result: completedWO(woID, skuID)}
+	wor := &mockWOR{result: plannedWO(woID, skuID)}
 	cdr := &mockCDR{result: []CuttingData{
 		{
 			SheetCost:    domain.Money{Amount: 50_000, Currency: "VND"},
@@ -467,11 +578,13 @@ func TestComputeCost_CuttingDataReaderError_Propagates(t *testing.T) {
 // ── TestComputeCost: create vs update path ────────────────────────────────────
 
 func TestComputeCost_NoExistingRecord_InsertsNew(t *testing.T) {
+	// Uses PLANNED WO so the ACTUAL-only zero-cost guard does not fire on the
+	// empty cutting data — this test focuses on the insert path, not costing math.
 	woID := uuid.New()
 	skuID := uuid.New()
 
 	st := notFoundStore()
-	wor := &mockWOR{result: completedWO(woID, skuID)}
+	wor := &mockWOR{result: plannedWO(woID, skuID)}
 	svc := newSvc(st, wor, &mockCDR{result: []CuttingData{}}, zeroCONR())
 
 	got, err := svc.ComputeCost(context.Background(), woID)
@@ -511,7 +624,9 @@ func TestComputeCost_ExistingUnfinalizedRecord_UpdatesInPlace(t *testing.T) {
 			CreatedAt:   existingTime,
 		},
 	}
-	wor := &mockWOR{result: completedWO(woID, skuID)}
+	// PLANNED WO avoids the ACTUAL zero-cost guard — focus of this test is the
+	// update path, not the dollar math.
+	wor := &mockWOR{result: plannedWO(woID, skuID)}
 	svc := newSvc(st, wor, &mockCDR{result: []CuttingData{}}, zeroCONR())
 
 	got, err := svc.ComputeCost(context.Background(), woID)
@@ -588,7 +703,8 @@ func TestComputeCost_StoreInsertError_Propagates(t *testing.T) {
 
 	st := notFoundStore()
 	st.insertErr = dbErr
-	wor := &mockWOR{result: completedWO(woID, skuID)}
+	// PLANNED avoids the ACTUAL zero-cost guard; we only care that insert errors propagate.
+	wor := &mockWOR{result: plannedWO(woID, skuID)}
 	svc := newSvc(st, wor, &mockCDR{result: []CuttingData{}}, zeroCONR())
 
 	_, err := svc.ComputeCost(context.Background(), woID)
@@ -607,7 +723,8 @@ func TestComputeCost_StoreUpdateError_Propagates(t *testing.T) {
 		selectByWOResult: CostingRecord{ID: uuid.New(), Finalized: false},
 		updateErr:        dbErr,
 	}
-	wor := &mockWOR{result: completedWO(woID, skuID)}
+	// PLANNED avoids the ACTUAL zero-cost guard; we only care that update errors propagate.
+	wor := &mockWOR{result: plannedWO(woID, skuID)}
 	svc := newSvc(st, wor, &mockCDR{result: []CuttingData{}}, zeroCONR())
 
 	_, err := svc.ComputeCost(context.Background(), woID)

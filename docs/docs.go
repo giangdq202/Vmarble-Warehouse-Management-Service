@@ -1168,6 +1168,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
+                "description": "Computes (or re-computes) the costing record for a work order. ACTUAL costing on a COMPLETED WO requires at least one non-zero cost component (material/auxiliary/labor); otherwise returns 412 with the Vietnamese message \"WO chưa có chi phí vật tư/nhân công, không thể tính giá thành\". Estimated costing on PLANNED WOs is exempt.",
                 "produces": [
                     "application/json"
                 ],
@@ -1211,6 +1212,15 @@ const docTemplate = `{
                     },
                     "409": {
                         "description": "Conflict",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "412": {
+                        "description": "Precondition Failed",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {

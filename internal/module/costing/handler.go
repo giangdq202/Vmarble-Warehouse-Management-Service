@@ -42,12 +42,14 @@ func (h *Handler) Register(rg *gin.RouterGroup) {
 // computeCost godoc
 //
 // @Summary      Compute costing for a work order
+// @Description  Computes (or re-computes) the costing record for a work order. ACTUAL costing on a COMPLETED WO requires at least one non-zero cost component (material/auxiliary/labor); otherwise returns 412 with the Vietnamese message "WO chưa có chi phí vật tư/nhân công, không thể tính giá thành". Estimated costing on PLANNED WOs is exempt.
 // @Tags         costing
 // @Produce      json
 // @Param        workOrderID  path      string  true  "work order id (uuid)"
 // @Success      200          {object}  CostingRecord
 // @Failure      400          {object}  map[string]string
 // @Failure      409          {object}  map[string]string
+// @Failure      412          {object}  map[string]string
 // @Failure      422          {object}  map[string]string
 // @Security     BearerAuth
 // @Failure      401  {object}  map[string]string

@@ -80,19 +80,30 @@ func (s *service) ComputeCost(ctx context.Context, workOrderID uuid.UUID) (Costi
 	}
 
 	existing, err := s.st.selectCostingRecordByWO(ctx, workOrderID)
+	if err != nil && !errors.Is(err, domain.ErrNotFound) {
+		return CostingRecord{}, err
+	}
+	if err == nil && existing.Finalized {
+		return CostingRecord{}, domain.NewBizError(domain.ErrAlreadyFinalized, "costing record already finalized, create an adjustment instead")
+	}
+
+	// Sprint 6 guard: ACTUAL costing for a COMPLETED work order requires at
+	// least one non-zero cost component (material, auxiliary, or labor). A
+	// zero-total ACTUAL record is almost always a data entry gap (missing
+	// consumption or labor). Estimated runs on PLANNED WOs are exempt because
+	// upstream data may still be empty by design. Evaluated AFTER the finalized
+	// check so that BR-C04 continues to take precedence.
+	if costingType == CostingTypeActual && totalCost.Amount == 0 {
+		return CostingRecord{}, domain.NewBizError(domain.ErrPreconditionFailed, "WO chưa có chi phí vật tư/nhân công, không thể tính giá thành")
+	}
+
 	if err == nil {
-		if existing.Finalized {
-			return CostingRecord{}, domain.NewBizError(domain.ErrAlreadyFinalized, "costing record already finalized, create an adjustment instead")
-		}
 		record.ID = existing.ID
 		record.CreatedAt = existing.CreatedAt
 		if err := s.st.updateCostingRecord(ctx, record); err != nil {
 			return CostingRecord{}, err
 		}
 		return record, nil
-	}
-	if !errors.Is(err, domain.ErrNotFound) {
-		return CostingRecord{}, err
 	}
 
 	record.ID = uuid.New()
