@@ -176,6 +176,18 @@ func (s *service) RecordCut(ctx context.Context, in RecordCutInput) (CutResult, 
 	if in.RemnantDimension != nil && !in.RemnantDimension.Valid() {
 		return CutResult{}, domain.NewBizError(domain.ErrInvalidInput, "invalid remnant dimension")
 	}
+	// BR-K02: every cut must declare its leftover outcome explicitly — either
+	// the remnant dimensions are supplied OR is_waste=true. Empty + false is
+	// ambiguous (looks like a missing field) and is rejected so implicit waste
+	// cannot slip through. Both being set together is also rejected because
+	// the caller's intent is contradictory.
+	hasRemnant := in.RemnantDimension != nil
+	switch {
+	case hasRemnant && in.IsWaste:
+		return CutResult{}, domain.NewBizError(domain.ErrInvalidInput, "remnant_dimension and is_waste cannot both be set")
+	case !hasRemnant && !in.IsWaste:
+		return CutResult{}, domain.NewBizError(domain.ErrInvalidInput, "must provide remnant_dimension or set is_waste=true")
+	}
 	if in.ShapeType == "" {
 		in.ShapeType = "rectangle"
 	}
