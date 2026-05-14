@@ -445,7 +445,8 @@ func TestRecordCut_FromSheet_NoRemnant(t *testing.T) {
 		SheetID:       ptr(sheetID),
 		WorkOrderID:   woID,
 		SKUID:         skuID,
-		UsedDimension: dim1000x500, // 500_000 mm² ≤ 2_000_000 mm²
+		UsedDimension: dim1000x500, // 500_000 mm² ≤ 2_000_000 mm²,
+		IsWaste:       true,
 	}
 
 	result, err := svc.RecordCut(context.Background(), in)
@@ -550,7 +551,8 @@ func TestRecordCut_FromRemnant_NoRemnant(t *testing.T) {
 		RemnantID:     ptr(remnantID),
 		WorkOrderID:   woID,
 		SKUID:         skuID,
-		UsedDimension: dim100x100, // 10_000 mm² ≤ 500_000 mm²
+		UsedDimension: dim100x100, // 10_000 mm² ≤ 500_000 mm²,
+		IsWaste:       true,
 	}
 
 	result, err := svc.RecordCut(context.Background(), in)
@@ -631,6 +633,7 @@ func TestRecordCut_BothSourcesProvided_IsInvalidInput(t *testing.T) {
 		WorkOrderID:   uuid.New(),
 		SKUID:         uuid.New(),
 		UsedDimension: dim100x100,
+		IsWaste:       true,
 	})
 	if !errors.Is(err, domain.ErrInvalidInput) {
 		t.Errorf("expected ErrInvalidInput, got %v", err)
@@ -643,9 +646,87 @@ func TestRecordCut_NoSourceProvided_IsInvalidInput(t *testing.T) {
 		WorkOrderID:   uuid.New(),
 		SKUID:         uuid.New(),
 		UsedDimension: dim100x100,
+		IsWaste:       true,
 	})
 	if !errors.Is(err, domain.ErrInvalidInput) {
 		t.Errorf("expected ErrInvalidInput, got %v", err)
+	}
+}
+
+// ── BR-K02: explicit waste flag ──────────────────────────────────────────────
+
+// TestRecordCut_BRK02_NeitherRemnantNorWaste rejects an input where the caller
+// supplied neither remnant_dimension nor is_waste — that ambiguity is exactly
+// what BR-K02 forbids. Without this guard, an empty leftover field implicitly
+// produced waste with no explicit declaration.
+func TestRecordCut_BRK02_NeitherRemnantNorWaste(t *testing.T) {
+	sheetID := uuid.New()
+	svc := NewService(&mockStore{}, nil)
+	_, err := svc.RecordCut(context.Background(), RecordCutInput{
+		SheetID:       ptr(sheetID),
+		WorkOrderID:   uuid.New(),
+		SKUID:         uuid.New(),
+		UsedDimension: dim100x100,
+		// No RemnantDimension, IsWaste defaults to false → must reject.
+	})
+	if !errors.Is(err, domain.ErrInvalidInput) {
+		t.Errorf("expected ErrInvalidInput, got %v", err)
+	}
+}
+
+// TestRecordCut_BRK02_BothRemnantAndWaste rejects an input where the caller
+// supplied both a remnant dimension and is_waste=true. Intent is contradictory
+// — leftover cannot be both salvaged and discarded.
+func TestRecordCut_BRK02_BothRemnantAndWaste(t *testing.T) {
+	sheetID := uuid.New()
+	rem := domain.Dimension{LengthMM: 200, WidthMM: 200}
+
+	svc := NewService(&mockStore{}, nil)
+	_, err := svc.RecordCut(context.Background(), RecordCutInput{
+		SheetID:          ptr(sheetID),
+		WorkOrderID:      uuid.New(),
+		SKUID:            uuid.New(),
+		UsedDimension:    dim100x100,
+		RemnantDimension: &rem,
+		IsWaste:          true,
+	})
+	if !errors.Is(err, domain.ErrInvalidInput) {
+		t.Errorf("expected ErrInvalidInput, got %v", err)
+	}
+}
+
+// TestRecordCut_BRK02_WasteOnly_Succeeds confirms that is_waste=true alone is
+// a valid declaration and does not produce a new remnant row. This is the
+// counterpart that proves the new guard does not over-restrict legitimate
+// waste-only cuts.
+func TestRecordCut_BRK02_WasteOnly_Succeeds(t *testing.T) {
+	sheetID := uuid.New()
+	woID := uuid.New()
+	skuID := uuid.New()
+
+	st := &mockStore{
+		selectSheetByIDResult: BoardSheet{
+			ID:           sheetID,
+			LotID:        uuid.New(),
+			Dimensions:   dim2000x1000,
+			CostPerSheet: domain.Money{Amount: 100_000, Currency: "VND"},
+			Status:       "AVAILABLE",
+		},
+		selectOverflowSheetArea: 1, // non-zero so overflow check passes
+	}
+	svc := NewService(st, nil)
+	result, err := svc.RecordCut(context.Background(), RecordCutInput{
+		SheetID:       ptr(sheetID),
+		WorkOrderID:   woID,
+		SKUID:         skuID,
+		UsedDimension: dim1000x500,
+		IsWaste:       true,
+	})
+	if err != nil {
+		t.Fatalf("waste-only cut should succeed, got %v", err)
+	}
+	if result.RemnantID != nil {
+		t.Errorf("waste cut must not produce a remnant, got %v", *result.RemnantID)
 	}
 }
 
@@ -656,6 +737,7 @@ func TestRecordCut_ZeroUsedDimension_IsInvalidInput(t *testing.T) {
 		WorkOrderID:   uuid.New(),
 		SKUID:         uuid.New(),
 		UsedDimension: dimZero,
+		IsWaste:       true,
 	})
 	if !errors.Is(err, domain.ErrInvalidInput) {
 		t.Errorf("expected ErrInvalidInput, got %v", err)
@@ -669,6 +751,7 @@ func TestRecordCut_NegativeUsedDimension_IsInvalidInput(t *testing.T) {
 		WorkOrderID:   uuid.New(),
 		SKUID:         uuid.New(),
 		UsedDimension: dimNegative,
+		IsWaste:       true,
 	})
 	if !errors.Is(err, domain.ErrInvalidInput) {
 		t.Errorf("expected ErrInvalidInput, got %v", err)
@@ -708,6 +791,7 @@ func TestRecordCut_AreaConservation_UsedExceedsSource(t *testing.T) {
 		WorkOrderID:   uuid.New(),
 		SKUID:         uuid.New(),
 		UsedDimension: overDim,
+		IsWaste:       true,
 	})
 	if !errors.Is(err, domain.ErrAreaConservation) {
 		t.Errorf("expected ErrAreaConservation, got %v", err)
@@ -780,6 +864,7 @@ func TestRecordCut_SheetNotAvailable_IsInvalidInput(t *testing.T) {
 		WorkOrderID:   uuid.New(),
 		SKUID:         uuid.New(),
 		UsedDimension: dim100x100,
+		IsWaste:       true,
 	})
 	if !errors.Is(err, domain.ErrInvalidInput) {
 		t.Errorf("expected ErrInvalidInput for non-AVAILABLE sheet, got %v", err)
@@ -803,6 +888,7 @@ func TestRecordCut_RemnantConsumed_IsInvalidInput(t *testing.T) {
 		WorkOrderID:   uuid.New(),
 		SKUID:         uuid.New(),
 		UsedDimension: dim100x100,
+		IsWaste:       true,
 	})
 	if !errors.Is(err, domain.ErrInvalidInput) {
 		t.Errorf("expected ErrInvalidInput for CONSUMED remnant, got %v", err)
@@ -830,6 +916,7 @@ func TestRecordCut_AllocatedRemnant_Succeeds(t *testing.T) {
 		WorkOrderID:   woID,
 		SKUID:         uuid.New(),
 		UsedDimension: dim100x100,
+		IsWaste:       true,
 	})
 	if err != nil {
 		t.Fatalf("expected RecordCut to succeed for ALLOCATED remnant, got %v", err)
@@ -853,6 +940,7 @@ func TestRecordCut_SheetNotFound_PropagatesError(t *testing.T) {
 		WorkOrderID:   uuid.New(),
 		SKUID:         uuid.New(),
 		UsedDimension: dim100x100,
+		IsWaste:       true,
 	})
 	if !errors.Is(err, domain.ErrNotFound) {
 		t.Errorf("expected ErrNotFound to propagate, got %v", err)
@@ -876,6 +964,7 @@ func TestRecordCut_AtomicStoreError_PropagatesAndDoesNotReturnResult(t *testing.
 		WorkOrderID:   uuid.New(),
 		SKUID:         uuid.New(),
 		UsedDimension: dim100x100,
+		IsWaste:       true,
 	})
 	if err == nil {
 		t.Fatal("expected error from store, got nil")
@@ -1270,6 +1359,7 @@ func TestRecordCut_RemnantNotFound_PropagatesError(t *testing.T) {
 		WorkOrderID:   uuid.New(),
 		SKUID:         uuid.New(),
 		UsedDimension: dim100x100,
+		IsWaste:       true,
 	})
 	if !errors.Is(err, domain.ErrNotFound) {
 		t.Errorf("expected ErrNotFound to propagate, got %v", err)
@@ -1595,6 +1685,7 @@ func TestRecordCut_AreaConservation_UsedExceedsByOneMM2(t *testing.T) {
 		WorkOrderID:   uuid.New(),
 		SKUID:         uuid.New(),
 		UsedDimension: over,
+		IsWaste:       true,
 	})
 	if !errors.Is(err, domain.ErrAreaConservation) {
 		t.Errorf("expected ErrAreaConservation for 1mm² over, got %v", err)
@@ -1990,6 +2081,7 @@ func TestRecordCut_NoNewRemnant_NoInheritanceAttempted(t *testing.T) {
 		WorkOrderID:   uuid.New(),
 		SKUID:         uuid.New(),
 		UsedDimension: dim1000x500,
+		IsWaste:       true,
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -2873,6 +2965,7 @@ func TestRecordCut_AutoAdvances_WorkOrderToInProcessing(t *testing.T) {
 		WorkOrderID:   woID,
 		SKUID:         skuID,
 		UsedDimension: domain.Dimension{LengthMM: 500, WidthMM: 400},
+		IsWaste:       true,
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -2905,6 +2998,7 @@ func TestRecordCut_AutoAdvance_InvalidTransition_IsSilentlyIgnored(t *testing.T)
 		WorkOrderID:   woID,
 		SKUID:         skuID,
 		UsedDimension: domain.Dimension{LengthMM: 500, WidthMM: 400},
+		IsWaste:       true,
 	})
 	if err != nil {
 		t.Errorf("ErrInvalidTransition from auto-advance must be ignored, got: %v", err)
@@ -2926,6 +3020,7 @@ func TestRecordCut_AutoAdvance_OtherError_IsSilentlyLogged(t *testing.T) {
 		WorkOrderID:   woID,
 		SKUID:         skuID,
 		UsedDimension: domain.Dimension{LengthMM: 500, WidthMM: 400},
+		IsWaste:       true,
 	})
 	if err != nil {
 		t.Errorf("advancer errors must not fail RecordCut, got: %v", err)
@@ -2946,6 +3041,7 @@ func TestRecordCut_NoAdvancer_DoesNotPanic(t *testing.T) {
 		WorkOrderID:   woID,
 		SKUID:         skuID,
 		UsedDimension: domain.Dimension{LengthMM: 500, WidthMM: 400},
+		IsWaste:       true,
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -3014,6 +3110,7 @@ func TestRecordCut_BarcodeGenerator_Error_DoesNotFailRecordCut(t *testing.T) {
 		WorkOrderID:   woID,
 		SKUID:         skuID,
 		UsedDimension: domain.Dimension{LengthMM: 500, WidthMM: 400},
+		IsWaste:       true,
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -3040,6 +3137,7 @@ func TestRecordCut_NoBarcodeGenerator_LeavesBarcodeIDsEmpty(t *testing.T) {
 		WorkOrderID:   woID,
 		SKUID:         skuID,
 		UsedDimension: domain.Dimension{LengthMM: 500, WidthMM: 400},
+		IsWaste:       true,
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -3809,6 +3907,7 @@ func TestRecordCut_FromSheet_RedOverflow_BlocksIssue(t *testing.T) {
 		WorkOrderID:   uuid.New(),
 		SKUID:         uuid.New(),
 		UsedDimension: dim100x100,
+		IsWaste:       true,
 	})
 	if !errors.Is(err, domain.ErrPreconditionFailed) {
 		t.Errorf("want ErrPreconditionFailed, got %v", err)
@@ -3833,6 +3932,7 @@ func TestRecordCut_FromRemnant_RedOverflow_StillAllowed(t *testing.T) {
 		WorkOrderID:   uuid.New(),
 		SKUID:         uuid.New(),
 		UsedDimension: dim100x100,
+		IsWaste:       true,
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)

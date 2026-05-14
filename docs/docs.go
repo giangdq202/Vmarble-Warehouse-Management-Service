@@ -7977,6 +7977,10 @@ const docTemplate = `{
                 "bounding_box_width_mm": {
                     "type": "integer"
                 },
+                "is_waste": {
+                    "description": "IsWaste signals that the leftover area is intentionally discarded\n(BR-K02). Exactly one of RemnantDimension or IsWaste must indicate\nthe leftover outcome — leaving both nil/false is rejected so that\nimplicit waste cannot slip through.",
+                    "type": "boolean"
+                },
                 "remnant_dimension": {
                     "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.Dimension"
                 },

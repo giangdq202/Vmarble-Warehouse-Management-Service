@@ -51,6 +51,11 @@ type RecordCutInput struct {
 	SKUID            uuid.UUID         `json:"sku_id"`
 	UsedDimension    domain.Dimension  `json:"used_dimension"`
 	RemnantDimension *domain.Dimension `json:"remnant_dimension,omitempty"`
+	// IsWaste signals that the leftover area is intentionally discarded
+	// (BR-K02). Exactly one of RemnantDimension or IsWaste must indicate
+	// the leftover outcome — leaving both nil/false is rejected so that
+	// implicit waste cannot slip through.
+	IsWaste bool `json:"is_waste,omitempty"`
 	// BoundingBoxLengthMM and BoundingBoxWidthMM define the usable area of the
 	// new remnant produced by this cut (e.g. after a chipped corner is excluded).
 	// Both must be provided together. If omitted, the system defaults to the

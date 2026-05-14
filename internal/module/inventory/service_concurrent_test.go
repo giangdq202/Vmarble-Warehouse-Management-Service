@@ -298,6 +298,7 @@ func TestConcurrentRecordCut_SameSheet(t *testing.T) {
 				WorkOrderID:   uuid.New(),
 				SKUID:         uuid.New(),
 				UsedDimension: dim1000x500,
+				IsWaste:       true,
 			})
 			mu.Lock()
 			defer mu.Unlock()
@@ -352,6 +353,7 @@ func TestConcurrentRecordCut_SameRemnant(t *testing.T) {
 				WorkOrderID:   uuid.New(),
 				SKUID:         uuid.New(),
 				UsedDimension: dim100x100,
+				IsWaste:       true,
 			})
 			mu.Lock()
 			defer mu.Unlock()
