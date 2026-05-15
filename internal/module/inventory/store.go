@@ -19,6 +19,9 @@ type store interface {
 	selectSheetByID(ctx context.Context, id uuid.UUID) (BoardSheet, error)
 	selectAvailableSheets(ctx context.Context) ([]BoardSheet, error)
 	selectAvailableSheetsPaged(ctx context.Context, p httpkit.PageParams, materialID *uuid.UUID) ([]BoardSheet, int, error)
+	// countAvailableSheetsByMaterial returns the count of board_sheets rows in
+	// AVAILABLE status whose lot's material_id matches the given id.
+	countAvailableSheetsByMaterial(ctx context.Context, materialID uuid.UUID) (int, error)
 	selectOverflowAreas(ctx context.Context) (int64, int64, error)
 	updateSheetStatus(ctx context.Context, id uuid.UUID, status string, issuedToWO *uuid.UUID) error
 	// preAssignSheet sets issued_to_work_order_id on an AVAILABLE sheet inside a

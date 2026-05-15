@@ -3,6 +3,7 @@ package production
 import (
 	"context"
 	"log/slog"
+	"strconv"
 	"time"
 
 	"github.com/google/uuid"
@@ -19,6 +20,8 @@ type service struct {
 	sa       SheetAssigner
 	cc       CostingChecker
 	ra       RemnantAdvisor
+	stk      StockChecker
+	br       BOMReader
 	notifier WorkOrderNotifier
 }
 
@@ -32,6 +35,15 @@ func NewService(s store, pc PlanChecker, sc SKUChecker, uc UserChecker, sa Sheet
 // .LogRemnantBypass writes a REMNANT_BYPASSED audit row (BR-K05).
 func NewServiceWithRemnantAdvisor(s store, pc PlanChecker, sc SKUChecker, uc UserChecker, sa SheetAssigner, cc CostingChecker, notifier WorkOrderNotifier, ra RemnantAdvisor) Service {
 	return &service{s: s, pc: pc, sc: sc, uc: uc, sa: sa, cc: cc, ra: ra, notifier: notifier}
+}
+
+// NewServiceFull constructs a production Service with both BR-K05 advisory
+// (RemnantAdvisor) and BR-K01 aggregate stock check (StockChecker + BOMReader).
+// Used by cmd/server/main.go in production. Tests that don't exercise these
+// paths can keep using NewService / NewServiceWithRemnantAdvisor — both leave
+// the new fields nil and the corresponding code paths are skipped.
+func NewServiceFull(s store, pc PlanChecker, sc SKUChecker, uc UserChecker, sa SheetAssigner, cc CostingChecker, notifier WorkOrderNotifier, ra RemnantAdvisor, stk StockChecker, br BOMReader) Service {
+	return &service{s: s, pc: pc, sc: sc, uc: uc, sa: sa, cc: cc, ra: ra, stk: stk, br: br, notifier: notifier}
 }
 
 func (svc *service) CreateWorkOrder(ctx context.Context, in CreateWOInput) (WorkOrder, error) {
@@ -54,6 +66,31 @@ func (svc *service) CreateWorkOrder(ctx context.Context, in CreateWOInput) (Work
 	sku, err := svc.sc.GetSKU(ctx, in.SKUID)
 	if err != nil {
 		return WorkOrder{}, err
+	}
+
+	// BR-K01: aggregate stock check. For every SHEET-type material in the SKU's
+	// BOM, the warehouse must have at least `Quantity` AVAILABLE board sheets.
+	// We floor at one sheet per unit because partial sheets cannot be issued —
+	// quantity_per_unit is intentionally NOT multiplied here, that interpretation
+	// is tracked as a future refinement once the BOM unit semantics are agreed.
+	// Both deps must be wired together; if either is nil we skip the check so
+	// existing test fixtures (and the legacy NewService constructor) keep
+	// working without the cross-module wire-up.
+	if svc.stk != nil && svc.br != nil {
+		reqs, err := svc.br.GetSheetMaterials(ctx, in.SKUID)
+		if err != nil {
+			return WorkOrder{}, err
+		}
+		for _, r := range reqs {
+			n, err := svc.stk.CountAvailableSheetsByMaterial(ctx, r.MaterialID)
+			if err != nil {
+				return WorkOrder{}, err
+			}
+			if n < in.Quantity {
+				return WorkOrder{}, domain.NewBizError(domain.ErrInsufficientStock,
+					"không đủ tấm vật tư khả dụng cho work order — cần "+strconv.Itoa(in.Quantity)+", còn "+strconv.Itoa(n))
+			}
+		}
 	}
 
 	now := time.Now()

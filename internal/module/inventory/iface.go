@@ -282,6 +282,10 @@ type Service interface {
 	GetSheet(ctx context.Context, sheetID uuid.UUID) (BoardSheet, error)
 	// ListAvailableSheets returns AVAILABLE sheets, optionally filtered by materialID.
 	ListAvailableSheets(ctx context.Context, p httpkit.PageParams, materialID *uuid.UUID) (httpkit.PagedResult[BoardSheet], error)
+	// CountAvailableSheetsByMaterial returns the total number of AVAILABLE board
+	// sheets backing the given material. Used by the production module to
+	// enforce BR-K01 aggregate stock check before a work order is created.
+	CountAvailableSheetsByMaterial(ctx context.Context, materialID uuid.UUID) (int, error)
 	GetOverflowStatus(ctx context.Context) (OverflowStatus, error)
 	// PreAssignSheet stamps issued_to_work_order_id on a board sheet that is still
 	// AVAILABLE, reserving it for a work order before cutting begins.

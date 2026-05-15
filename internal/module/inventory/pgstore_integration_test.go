@@ -804,6 +804,70 @@ func TestIntegration_ListAvailableSheets_Empty_WhenNoneAvailable(t *testing.T) {
 	}
 }
 
+// BR-K01 — aggregate stock check: count must reflect AVAILABLE sheets per
+// material, ignoring sheets in any other status (issued, cut, etc.).
+func TestIntegration_CountAvailableSheetsByMaterial(t *testing.T) {
+	pool := getPool(t)
+	truncateInventory(t)
+	matA := seedMaterial(t, pool)
+	matB := seedMaterial(t, pool)
+	svc := newSvc(pool)
+
+	if _, err := svc.ReceiveStock(context.Background(), ReceiveStockInput{
+		MaterialID: matA, Dimensions: testDim2000x1000, CostPerSheet: testCost, Quantity: 3, SupplierRef: "SUP-A",
+	}); err != nil {
+		t.Fatalf("ReceiveStock matA: %v", err)
+	}
+	if _, err := svc.ReceiveStock(context.Background(), ReceiveStockInput{
+		MaterialID: matB, Dimensions: testDim2000x1000, CostPerSheet: testCost, Quantity: 5, SupplierRef: "SUP-B",
+	}); err != nil {
+		t.Fatalf("ReceiveStock matB: %v", err)
+	}
+
+	gotA, err := svc.CountAvailableSheetsByMaterial(context.Background(), matA)
+	if err != nil {
+		t.Fatalf("CountAvailableSheetsByMaterial matA: %v", err)
+	}
+	if gotA != 3 {
+		t.Errorf("count matA = %d, want 3", gotA)
+	}
+	gotB, err := svc.CountAvailableSheetsByMaterial(context.Background(), matB)
+	if err != nil {
+		t.Fatalf("CountAvailableSheetsByMaterial matB: %v", err)
+	}
+	if gotB != 5 {
+		t.Errorf("count matB = %d, want 5", gotB)
+	}
+
+	// Reserve one matA sheet to a work order (status → ISSUED) — count drops by 1.
+	sheetsResult, _ := svc.ListAvailableSheets(context.Background(), httpkit.PageParams{Page: 1, Limit: 1000}, &matA)
+	if len(sheetsResult.Items) == 0 {
+		t.Fatal("expected at least one matA sheet to issue")
+	}
+	woID := uuid.New()
+	if err := svc.PreAssignSheet(context.Background(), PreAssignSheetInput{
+		SheetID: sheetsResult.Items[0].ID, WorkOrderID: woID,
+	}); err != nil {
+		t.Fatalf("PreAssignSheet: %v", err)
+	}
+	gotA2, err := svc.CountAvailableSheetsByMaterial(context.Background(), matA)
+	if err != nil {
+		t.Fatalf("CountAvailableSheetsByMaterial after pre-assign: %v", err)
+	}
+	if gotA2 != 2 {
+		t.Errorf("count matA after pre-assign = %d, want 2", gotA2)
+	}
+
+	// Unknown material → 0, not error.
+	gotUnknown, err := svc.CountAvailableSheetsByMaterial(context.Background(), uuid.New())
+	if err != nil {
+		t.Fatalf("CountAvailableSheetsByMaterial unknown: %v", err)
+	}
+	if gotUnknown != 0 {
+		t.Errorf("count unknown material = %d, want 0", gotUnknown)
+	}
+}
+
 // ── Sprint-2 tests (2.7 DoD) ─────────────────────────────────────────────────
 
 // TestPGStore_InheritanceRoundtrip verifies that material attributes set on a

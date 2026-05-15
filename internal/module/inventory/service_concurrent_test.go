@@ -99,6 +99,9 @@ func (s *concurrentMockStore) selectAvailableSheets(_ context.Context) ([]BoardS
 func (s *concurrentMockStore) selectAvailableSheetsPaged(_ context.Context, _ httpkit.PageParams, _ *uuid.UUID) ([]BoardSheet, int, error) {
 	return nil, 0, nil
 }
+func (s *concurrentMockStore) countAvailableSheetsByMaterial(_ context.Context, _ uuid.UUID) (int, error) {
+	return 0, nil
+}
 func (s *concurrentMockStore) updateSheetStatus(_ context.Context, _ uuid.UUID, _ string, _ *uuid.UUID) error {
 	return nil
 }
