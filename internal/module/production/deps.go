@@ -102,3 +102,27 @@ type LogRemnantBypassRequest struct {
 	SuggestedRemnantIDs []uuid.UUID
 	Reason              string
 }
+
+// StockChecker reports how many AVAILABLE board sheets back a given material.
+// Used at CreateWorkOrder time to enforce BR-K01 (aggregate stock check) so a
+// planner cannot create a work order for which the warehouse cannot supply at
+// least one sheet per unit. Implementation lives in the inventory module.
+type StockChecker interface {
+	CountAvailableSheetsByMaterial(ctx context.Context, materialID uuid.UUID) (int, error)
+}
+
+// BOMReader returns the SHEET-type material requirements for a SKU. Production
+// uses it to project a work order's quantity onto materials so StockChecker can
+// be queried per material. The "default" BOM (legacy or DEFAULT variant) is
+// what CreateWorkOrder consults — variant-specific BOMs are out of scope here.
+type BOMReader interface {
+	GetSheetMaterials(ctx context.Context, skuID uuid.UUID) ([]SheetRequirement, error)
+}
+
+// SheetRequirement is one row of the projected stock requirement: a SHEET-type
+// material referenced by the SKU's BOM. The unit is implicit (sheets); the
+// production aggregate check floors the requirement at one sheet per unit
+// regardless of QuantityPerUnit because partial sheets cannot be issued.
+type SheetRequirement struct {
+	MaterialID uuid.UUID
+}

@@ -253,6 +253,25 @@ func (s *pgStore) selectAvailableSheetsPaged(ctx context.Context, p httpkit.Page
 	return sheets, total, rows.Err()
 }
 
+// countAvailableSheetsByMaterial returns the number of AVAILABLE board sheets
+// whose owning lot's material_id matches the given id. Used by the production
+// module's BR-K01 aggregate stock check.
+func (s *pgStore) countAvailableSheetsByMaterial(ctx context.Context, materialID uuid.UUID) (int, error) {
+	var n int
+	err := s.pool.QueryRow(ctx,
+		`SELECT COUNT(*)
+		 FROM board_sheets bs
+		 JOIN inventory_lots il ON il.id = bs.lot_id
+		 WHERE bs.status = 'AVAILABLE'
+		   AND il.material_id = $1`,
+		materialID,
+	).Scan(&n)
+	if err != nil {
+		return 0, fmt.Errorf("count available board_sheets: %w", err)
+	}
+	return n, nil
+}
+
 func (s *pgStore) updateSheetStatus(ctx context.Context, id uuid.UUID, status string, issuedToWO *uuid.UUID) error {
 	tag, err := s.pool.Exec(ctx,
 		`UPDATE board_sheets SET status = $1, issued_to_wo_id = $2 WHERE id = $3`,

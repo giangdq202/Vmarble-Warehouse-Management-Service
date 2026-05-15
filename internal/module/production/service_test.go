@@ -17,7 +17,8 @@ import (
 // mockStore satisfies the full store interface.
 type mockStore struct {
 	// insertWorkOrder
-	insertWorkOrderErr error
+	insertWorkOrderErr    error
+	insertWorkOrderCalled bool
 
 	// selectWorkOrders
 	selectWorkOrdersResult []WorkOrder
@@ -98,6 +99,7 @@ type mockStore struct {
 }
 
 func (m *mockStore) insertWorkOrder(_ context.Context, _ WorkOrder) error {
+	m.insertWorkOrderCalled = true
 	return m.insertWorkOrderErr
 }
 func (m *mockStore) selectWorkOrdersPaged(_ context.Context, _ httpkit.PageParams, f WorkOrderListFilter) ([]WorkOrder, int, error) {
@@ -330,6 +332,42 @@ func skuWithDim(skuID uuid.UUID, dim domain.Dimension) *mockSKUChecker {
 // newSvcWithAdvisor wires a service with a RemnantAdvisor for BR-K05 tests.
 func newSvcWithAdvisor(st *mockStore, pc *mockPlanChecker, sc *mockSKUChecker, ra RemnantAdvisor) Service {
 	return NewServiceWithRemnantAdvisor(st, pc, sc, &mockUserChecker{}, nil, nil, nil, ra)
+}
+
+// ── BR-K01 mocks ──────────────────────────────────────────────────────────────
+
+type mockStockChecker struct {
+	// counts maps materialID -> number of AVAILABLE sheets. Missing key = 0.
+	counts map[uuid.UUID]int
+	err    error
+	calls  []uuid.UUID
+}
+
+func (m *mockStockChecker) CountAvailableSheetsByMaterial(_ context.Context, materialID uuid.UUID) (int, error) {
+	m.calls = append(m.calls, materialID)
+	if m.err != nil {
+		return 0, m.err
+	}
+	if m.counts == nil {
+		return 0, nil
+	}
+	return m.counts[materialID], nil
+}
+
+type mockBOMReader struct {
+	result []SheetRequirement
+	err    error
+	calls  []uuid.UUID
+}
+
+func (m *mockBOMReader) GetSheetMaterials(_ context.Context, skuID uuid.UUID) ([]SheetRequirement, error) {
+	m.calls = append(m.calls, skuID)
+	return m.result, m.err
+}
+
+// newSvcWithStock wires a service with the BR-K01 stock-check deps.
+func newSvcWithStock(st *mockStore, pc *mockPlanChecker, sc *mockSKUChecker, stk StockChecker, br BOMReader) Service {
+	return NewServiceFull(st, pc, sc, &mockUserChecker{}, nil, nil, nil, nil, stk, br)
 }
 
 // plannedWO returns a WorkOrder in PLANNED status.
@@ -704,6 +742,170 @@ func TestCreateWorkOrder_SKUDimInvalid_SkipsAdvisor(t *testing.T) {
 	}
 	if advisor.suggestCalled || advisor.logCalled {
 		t.Error("advisor must not run when SKU dimensions are invalid")
+	}
+}
+
+// ── BR-K01: aggregate stock check ────────────────────────────────────────────
+//
+// These cases lock the contract: when the StockChecker + BOMReader deps are
+// wired (the production deployment in cmd/server/main.go does this), every
+// SHEET-type material in the SKU's BOM must have ≥ Quantity AVAILABLE board
+// sheets. Otherwise CreateWorkOrder returns ErrInsufficientStock (HTTP 422).
+// Tests using legacy NewService leave both deps nil and the guard is skipped —
+// existing fixtures stay focused on their original subject.
+
+func TestCreateWorkOrder_StockSufficient_HappyPath(t *testing.T) {
+	planID := uuid.New()
+	skuID := uuid.New()
+	matA := uuid.New()
+	matB := uuid.New()
+
+	st := &mockStore{}
+	br := &mockBOMReader{result: []SheetRequirement{
+		{MaterialID: matA},
+		{MaterialID: matB},
+	}}
+	stk := &mockStockChecker{counts: map[uuid.UUID]int{
+		matA: 50, // plenty
+		matB: 5,  // exactly the WO quantity
+	}}
+	svc := newSvcWithStock(st, approvedPlan(planID, skuID), skuNoMetal(skuID), stk, br)
+
+	wo, err := svc.CreateWorkOrder(context.Background(), CreateWOInput{
+		PlanID:   planID,
+		SKUID:    skuID,
+		Quantity: 5,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if wo.ID == uuid.Nil {
+		t.Error("wo.ID must be set on happy path")
+	}
+	if len(stk.calls) != 2 {
+		t.Errorf("StockChecker called %d times, want 2 (one per BOM material)", len(stk.calls))
+	}
+}
+
+func TestCreateWorkOrder_StockInsufficient_ReturnsInsufficientStock(t *testing.T) {
+	planID := uuid.New()
+	skuID := uuid.New()
+	matID := uuid.New()
+
+	st := &mockStore{}
+	br := &mockBOMReader{result: []SheetRequirement{{MaterialID: matID}}}
+	// 50 sheets needed, kho only has 10 — exactly the scenario in issue #248.
+	stk := &mockStockChecker{counts: map[uuid.UUID]int{matID: 10}}
+	svc := newSvcWithStock(st, approvedPlan(planID, skuID), skuNoMetal(skuID), stk, br)
+
+	_, err := svc.CreateWorkOrder(context.Background(), CreateWOInput{
+		PlanID:   planID,
+		SKUID:    skuID,
+		Quantity: 50,
+	})
+
+	if !errors.Is(err, domain.ErrInsufficientStock) {
+		t.Fatalf("expected ErrInsufficientStock, got %v", err)
+	}
+	// Store insert MUST not be called — the guard fires before persistence.
+	if st.insertWorkOrderCalled {
+		t.Error("insertWorkOrder must not be called when stock is insufficient")
+	}
+}
+
+func TestCreateWorkOrder_StockInsufficientForOneOfManyMaterials_Rejects(t *testing.T) {
+	// Even one short material rejects the WO — checking aggregate per material
+	// catches "kho có nhiều plywood nhưng vừa hết edge banding ván" cases.
+	planID := uuid.New()
+	skuID := uuid.New()
+	plenty := uuid.New()
+	scarce := uuid.New()
+
+	br := &mockBOMReader{result: []SheetRequirement{
+		{MaterialID: plenty},
+		{MaterialID: scarce},
+	}}
+	stk := &mockStockChecker{counts: map[uuid.UUID]int{
+		plenty: 1000,
+		scarce: 2,
+	}}
+	svc := newSvcWithStock(&mockStore{}, approvedPlan(planID, skuID), skuNoMetal(skuID), stk, br)
+
+	_, err := svc.CreateWorkOrder(context.Background(), CreateWOInput{
+		PlanID:   planID,
+		SKUID:    skuID,
+		Quantity: 10,
+	})
+
+	if !errors.Is(err, domain.ErrInsufficientStock) {
+		t.Fatalf("expected ErrInsufficientStock when any material short, got %v", err)
+	}
+}
+
+func TestCreateWorkOrder_BOMReaderError_PropagatesNoStockCall(t *testing.T) {
+	planID := uuid.New()
+	skuID := uuid.New()
+
+	bomErr := errors.New("bom query failed")
+	br := &mockBOMReader{err: bomErr}
+	stk := &mockStockChecker{}
+	svc := newSvcWithStock(&mockStore{}, approvedPlan(planID, skuID), skuNoMetal(skuID), stk, br)
+
+	_, err := svc.CreateWorkOrder(context.Background(), CreateWOInput{
+		PlanID:   planID,
+		SKUID:    skuID,
+		Quantity: 1,
+	})
+
+	if !errors.Is(err, bomErr) {
+		t.Errorf("expected BOMReader error to propagate, got %v", err)
+	}
+	if len(stk.calls) != 0 {
+		t.Error("StockChecker must not be called when BOMReader fails")
+	}
+}
+
+func TestCreateWorkOrder_StockCheckerError_Propagates(t *testing.T) {
+	planID := uuid.New()
+	skuID := uuid.New()
+	matID := uuid.New()
+
+	stkErr := errors.New("count query failed")
+	br := &mockBOMReader{result: []SheetRequirement{{MaterialID: matID}}}
+	stk := &mockStockChecker{err: stkErr}
+	svc := newSvcWithStock(&mockStore{}, approvedPlan(planID, skuID), skuNoMetal(skuID), stk, br)
+
+	_, err := svc.CreateWorkOrder(context.Background(), CreateWOInput{
+		PlanID:   planID,
+		SKUID:    skuID,
+		Quantity: 1,
+	})
+
+	if !errors.Is(err, stkErr) {
+		t.Errorf("expected StockChecker error to propagate, got %v", err)
+	}
+}
+
+func TestCreateWorkOrder_BOMNoSheetMaterials_SkipsCheck(t *testing.T) {
+	// SKU whose BOM only references auxiliary (non-PLYWOOD) materials must NOT
+	// be rejected — the aggregate stock check applies to sheet materials only.
+	planID := uuid.New()
+	skuID := uuid.New()
+
+	br := &mockBOMReader{result: nil}
+	stk := &mockStockChecker{}
+	svc := newSvcWithStock(&mockStore{}, approvedPlan(planID, skuID), skuNoMetal(skuID), stk, br)
+
+	_, err := svc.CreateWorkOrder(context.Background(), CreateWOInput{
+		PlanID:   planID,
+		SKUID:    skuID,
+		Quantity: 100,
+	})
+	if err != nil {
+		t.Fatalf("expected happy path when SKU has no sheet materials, got %v", err)
+	}
+	if len(stk.calls) != 0 {
+		t.Error("StockChecker must not be called when BOM has no sheet materials")
 	}
 }
 
