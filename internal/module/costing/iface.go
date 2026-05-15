@@ -44,6 +44,19 @@ type CostingAdjustment struct {
 	CreatedAt        time.Time    `json:"created_at"`
 }
 
+// CostingRecordDetail bundles a finalized record with all of its adjustments
+// and the running effective total. Effective values fold the original record
+// numbers with the cumulative adjustment deltas so the FE never has to do
+// money arithmetic itself.
+type CostingRecordDetail struct {
+	Record           CostingRecord       `json:"record"`
+	Adjustments      []CostingAdjustment `json:"adjustments"`
+	EffectiveMaterial  domain.Money      `json:"effective_material"`
+	EffectiveAuxiliary domain.Money      `json:"effective_auxiliary"`
+	EffectiveLabor     domain.Money      `json:"effective_labor"`
+	EffectiveTotal     domain.Money      `json:"effective_total"`
+}
+
 type CreateAdjustmentInput struct {
 	WorkOrderID      uuid.UUID    `json:"-"`
 	Reason           string       `json:"reason"`
@@ -78,6 +91,11 @@ type Service interface {
 	ComputeCost(ctx context.Context, workOrderID uuid.UUID) (CostingRecord, error)
 	FinalizeCost(ctx context.Context, workOrderID uuid.UUID, actorID uuid.UUID) error
 	GetCostingRecord(ctx context.Context, workOrderID uuid.UUID) (CostingRecord, error)
+	// GetCostingRecordDetail returns the costing record together with all of
+	// its adjustments and the running effective totals (record + Σ deltas).
+	// Used by the accountant adjustment dialog so the FE never has to do
+	// money arithmetic itself.
+	GetCostingRecordDetail(ctx context.Context, workOrderID uuid.UUID) (CostingRecordDetail, error)
 	ListCostingRecords(ctx context.Context, p httpkit.PageParams, finalized *bool) (httpkit.PagedResult[CostingRecord], error)
 	HasCostingRecord(ctx context.Context, workOrderID uuid.UUID) (bool, error)
 	// IsCostingFinalized reports whether the costing record for the work order

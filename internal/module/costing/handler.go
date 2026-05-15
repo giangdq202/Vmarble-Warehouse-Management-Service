@@ -33,6 +33,7 @@ func (h *Handler) Register(rg *gin.RouterGroup) {
 	rg.POST("/costing/:workOrderID/compute", auth.RequireRole(auth.RoleAccountant, auth.RoleAdmin), h.compute)
 	rg.POST("/costing/:workOrderID/finalize", auth.RequireRole(auth.RoleAccountant, auth.RoleAdmin), h.finalize)
 	rg.GET("/costing/:workOrderID", auth.RequireRole(auth.RoleAccountant, auth.RolePlanner, auth.RoleAdmin), h.get)
+	rg.GET("/costing/:workOrderID/detail", auth.RequireRole(auth.RoleAccountant, auth.RolePlanner, auth.RoleAdmin), h.getDetail)
 	rg.GET("/costing", auth.RequireRole(auth.RoleAccountant, auth.RoleAdmin), h.list)
 	rg.POST("/costing/:workOrderID/adjustments", auth.RequireRole(auth.RoleAccountant, auth.RoleAdmin), h.createAdjustment)
 	rg.GET("/costing/:workOrderID/adjustments", auth.RequireRole(auth.RoleAccountant, auth.RolePlanner, auth.RoleAdmin), h.listAdjustments)
@@ -198,6 +199,33 @@ func (h *Handler) get(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, record)
+}
+
+// getCostingRecordDetail godoc
+//
+// @Summary      Get costing record + adjustments + effective totals
+// @Description  Returns the costing record together with all of its adjustments and the running effective totals (record + Σ deltas). Used by the accountant adjustment dialog so the FE never has to do money arithmetic itself.
+// @Tags         costing
+// @Produce      json
+// @Param        workOrderID  path      string  true  "work order id (uuid)"
+// @Success      200          {object}  CostingRecordDetail
+// @Failure      400          {object}  map[string]string
+// @Failure      404          {object}  map[string]string
+// @Security     BearerAuth
+// @Failure      401  {object}  map[string]string
+// @Router       /api/v1/costing/{workOrderID}/detail [get]
+func (h *Handler) getDetail(c *gin.Context) {
+	woID, err := uuid.Parse(c.Param("workOrderID"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid workOrderID"})
+		return
+	}
+	detail, err := h.svc.GetCostingRecordDetail(c.Request.Context(), woID)
+	if err != nil {
+		httpkit.Error(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, detail)
 }
 
 // wasteReport godoc

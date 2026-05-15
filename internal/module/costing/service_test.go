@@ -976,6 +976,152 @@ func TestGetCostingRecord_NotFound_PropagatesError(t *testing.T) {
 	}
 }
 
+// ── TestGetCostingRecordDetail ────────────────────────────────────────────────
+
+func TestGetCostingRecordDetail_NoAdjustments_EffectiveEqualsRecord(t *testing.T) {
+	woID := uuid.New()
+	record := CostingRecord{
+		ID:            uuid.New(),
+		WorkOrderID:   woID,
+		SKUID:         uuid.New(),
+		MaterialCost:  domain.Money{Amount: 80_000, Currency: "VND"},
+		AuxiliaryCost: domain.Money{Amount: 10_000, Currency: "VND"},
+		LaborCost:     domain.Money{Amount: 20_000, Currency: "VND"},
+		TotalCost:     domain.Money{Amount: 110_000, Currency: "VND"},
+		Finalized:     true,
+	}
+	st := &mockStore{
+		selectByWOResult: record,
+		selectAdjResult:  nil,
+	}
+	svc := newSvc(st, &mockWOR{}, &mockCDR{}, zeroCONR())
+
+	got, err := svc.GetCostingRecordDetail(context.Background(), woID)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got.Record.ID != record.ID {
+		t.Errorf("Record.ID = %v, want %v", got.Record.ID, record.ID)
+	}
+	if got.Adjustments == nil {
+		t.Error("Adjustments must be a non-nil slice when there are zero adjustments")
+	}
+	if len(got.Adjustments) != 0 {
+		t.Errorf("len(Adjustments) = %d, want 0", len(got.Adjustments))
+	}
+	if got.EffectiveMaterial.Amount != 80_000 {
+		t.Errorf("EffectiveMaterial = %d, want 80_000", got.EffectiveMaterial.Amount)
+	}
+	if got.EffectiveAuxiliary.Amount != 10_000 {
+		t.Errorf("EffectiveAuxiliary = %d, want 10_000", got.EffectiveAuxiliary.Amount)
+	}
+	if got.EffectiveLabor.Amount != 20_000 {
+		t.Errorf("EffectiveLabor = %d, want 20_000", got.EffectiveLabor.Amount)
+	}
+	if got.EffectiveTotal.Amount != 110_000 {
+		t.Errorf("EffectiveTotal = %d, want 110_000", got.EffectiveTotal.Amount)
+	}
+}
+
+func TestGetCostingRecordDetail_WithAdjustments_FoldsDeltas(t *testing.T) {
+	// record:        material=100_000, aux=20_000, labor=50_000, total=170_000
+	// adjustment 1:  +5_000 material,  -2_000 aux,  0 labor   → delta_total = +3_000
+	// adjustment 2:  0 material,        0 aux,     +10_000 labor → delta_total = +10_000
+	// effective:     material=105_000, aux=18_000, labor=60_000, total=183_000
+	woID := uuid.New()
+	recordID := uuid.New()
+	record := CostingRecord{
+		ID:            recordID,
+		WorkOrderID:   woID,
+		SKUID:         uuid.New(),
+		MaterialCost:  domain.Money{Amount: 100_000, Currency: "VND"},
+		AuxiliaryCost: domain.Money{Amount: 20_000, Currency: "VND"},
+		LaborCost:     domain.Money{Amount: 50_000, Currency: "VND"},
+		TotalCost:     domain.Money{Amount: 170_000, Currency: "VND"},
+		Finalized:     true,
+	}
+	adjs := []CostingAdjustment{
+		{
+			ID:              uuid.New(),
+			CostingRecordID: recordID,
+			Reason:          "vendor invoice correction",
+			DeltaMaterial:   domain.Money{Amount: 5_000, Currency: "VND"},
+			DeltaAuxiliary:  domain.Money{Amount: -2_000, Currency: "VND"},
+			DeltaLabor:      domain.Money{Amount: 0, Currency: "VND"},
+			DeltaTotal:      domain.Money{Amount: 3_000, Currency: "VND"},
+		},
+		{
+			ID:              uuid.New(),
+			CostingRecordID: recordID,
+			Reason:          "overtime backpay",
+			DeltaMaterial:   domain.Money{Amount: 0, Currency: "VND"},
+			DeltaAuxiliary:  domain.Money{Amount: 0, Currency: "VND"},
+			DeltaLabor:      domain.Money{Amount: 10_000, Currency: "VND"},
+			DeltaTotal:      domain.Money{Amount: 10_000, Currency: "VND"},
+		},
+	}
+	st := &mockStore{
+		selectByWOResult: record,
+		selectAdjResult:  adjs,
+	}
+	svc := newSvc(st, &mockWOR{}, &mockCDR{}, zeroCONR())
+
+	got, err := svc.GetCostingRecordDetail(context.Background(), woID)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(got.Adjustments) != 2 {
+		t.Fatalf("len(Adjustments) = %d, want 2", len(got.Adjustments))
+	}
+	if got.EffectiveMaterial.Amount != 105_000 {
+		t.Errorf("EffectiveMaterial = %d, want 105_000", got.EffectiveMaterial.Amount)
+	}
+	if got.EffectiveAuxiliary.Amount != 18_000 {
+		t.Errorf("EffectiveAuxiliary = %d, want 18_000", got.EffectiveAuxiliary.Amount)
+	}
+	if got.EffectiveLabor.Amount != 60_000 {
+		t.Errorf("EffectiveLabor = %d, want 60_000", got.EffectiveLabor.Amount)
+	}
+	if got.EffectiveTotal.Amount != 183_000 {
+		t.Errorf("EffectiveTotal = %d, want 183_000", got.EffectiveTotal.Amount)
+	}
+	// Original record numbers must remain immutable (BR-C04).
+	if got.Record.MaterialCost.Amount != 100_000 {
+		t.Errorf("Record.MaterialCost mutated to %d, must stay 100_000 (BR-C04)", got.Record.MaterialCost.Amount)
+	}
+	if got.Record.TotalCost.Amount != 170_000 {
+		t.Errorf("Record.TotalCost mutated to %d, must stay 170_000 (BR-C04)", got.Record.TotalCost.Amount)
+	}
+}
+
+func TestGetCostingRecordDetail_RecordNotFound_Propagates(t *testing.T) {
+	st := &mockStore{
+		selectByWOErr: domain.NewBizError(domain.ErrNotFound, "costing record not found"),
+	}
+	svc := newSvc(st, &mockWOR{}, &mockCDR{}, zeroCONR())
+
+	_, err := svc.GetCostingRecordDetail(context.Background(), uuid.New())
+
+	if !errors.Is(err, domain.ErrNotFound) {
+		t.Errorf("expected ErrNotFound to propagate, got %v", err)
+	}
+}
+
+func TestGetCostingRecordDetail_AdjustmentsStoreError_Propagates(t *testing.T) {
+	storeErr := errors.New("adjustments query failed")
+	st := &mockStore{
+		selectByWOResult: CostingRecord{ID: uuid.New(), WorkOrderID: uuid.New(), Finalized: true},
+		selectAdjErr:     storeErr,
+	}
+	svc := newSvc(st, &mockWOR{}, &mockCDR{}, zeroCONR())
+
+	_, err := svc.GetCostingRecordDetail(context.Background(), uuid.New())
+
+	if !errors.Is(err, storeErr) {
+		t.Errorf("expected adjustments error to propagate, got %v", err)
+	}
+}
+
 // ── TestListCostingRecords ────────────────────────────────────────────────────
 
 func TestListCostingRecords_ReturnsAll(t *testing.T) {
