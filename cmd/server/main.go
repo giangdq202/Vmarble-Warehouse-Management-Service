@@ -102,7 +102,7 @@ func main() {
 		barcodeGen,
 	)
 
-	productionSvc := production.NewServiceWithRemnantAdvisor(
+	productionSvc := production.NewServiceFull(
 		productionStore,
 		&planAdapter{svc: planningSvc},
 		&skuAdapter{svc: catalogSvc},
@@ -111,6 +111,8 @@ func main() {
 		costingChecker,
 		eventPublisher,
 		&remnantAdvisorAdapter{svc: inventorySvc},
+		&stockCheckerAdapter{svc: inventorySvc},
+		&bomReaderAdapter{svc: catalogSvc},
 	)
 	barcodeSvc := barcode.NewService(
 		barcodeStore,
@@ -319,6 +321,38 @@ func (a *remnantAdvisorAdapter) LogRemnantBypass(ctx context.Context, in product
 		SuggestedRemnantIDs: in.SuggestedRemnantIDs,
 		Reason:              in.Reason,
 	})
+}
+
+// stockCheckerAdapter implements production.StockChecker.
+// Bridges production → inventory.CountAvailableSheetsByMaterial for BR-K01.
+type stockCheckerAdapter struct {
+	svc inventory.Service
+}
+
+func (a *stockCheckerAdapter) CountAvailableSheetsByMaterial(ctx context.Context, materialID uuid.UUID) (int, error) {
+	return a.svc.CountAvailableSheetsByMaterial(ctx, materialID)
+}
+
+// bomReaderAdapter implements production.BOMReader. Resolves the SKU's BOM
+// (DEFAULT variant or legacy) and returns only the SHEET-type material rows
+// (catalog.MaterialTypePlywood) — auxiliaries (glue, metal) do not participate
+// in the aggregate sheet stock check.
+type bomReaderAdapter struct {
+	svc catalog.Service
+}
+
+func (a *bomReaderAdapter) GetSheetMaterials(ctx context.Context, skuID uuid.UUID) ([]production.SheetRequirement, error) {
+	bom, err := a.svc.GetBOMForVariant(ctx, skuID, "")
+	if err != nil {
+		return nil, err
+	}
+	out := make([]production.SheetRequirement, 0, len(bom.Components))
+	for _, c := range bom.Components {
+		if c.MaterialType == catalog.MaterialTypePlywood {
+			out = append(out, production.SheetRequirement{MaterialID: c.MaterialID})
+		}
+	}
+	return out, nil
 }
 
 // woAdvanceAdapter implements inventory.WorkOrderAdvancer.

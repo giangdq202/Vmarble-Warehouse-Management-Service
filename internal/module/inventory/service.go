@@ -138,6 +138,12 @@ func (s *service) ListAvailableSheets(ctx context.Context, p httpkit.PageParams,
 	return httpkit.NewPagedResult(items, total, p), nil
 }
 
+// CountAvailableSheetsByMaterial returns how many AVAILABLE board sheets back
+// the given material. Used by the production module to enforce BR-K01.
+func (s *service) CountAvailableSheetsByMaterial(ctx context.Context, materialID uuid.UUID) (int, error) {
+	return s.st.countAvailableSheetsByMaterial(ctx, materialID)
+}
+
 func (s *service) GetOverflowStatus(ctx context.Context) (OverflowStatus, error) {
 	totalRemnantAreaMM2, totalSheetAreaMM2, err := s.st.selectOverflowAreas(ctx)
 	if err != nil {

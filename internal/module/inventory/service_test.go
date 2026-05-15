@@ -47,6 +47,11 @@ type mockStore struct {
 	selectAvailableSheetsPagedTotal  int
 	selectAvailableSheetsPagedErr    error
 
+	// countAvailableSheetsByMaterial
+	countAvailableSheetsByMaterialResult int
+	countAvailableSheetsByMaterialErr    error
+	countAvailableSheetsByMaterialArg    uuid.UUID
+
 	// updateSheetStatus
 	updateSheetStatusErr error
 
@@ -195,6 +200,10 @@ func (m *mockStore) selectAvailableSheets(_ context.Context) ([]BoardSheet, erro
 }
 func (m *mockStore) selectAvailableSheetsPaged(_ context.Context, _ httpkit.PageParams, _ *uuid.UUID) ([]BoardSheet, int, error) {
 	return m.selectAvailableSheetsPagedResult, m.selectAvailableSheetsPagedTotal, m.selectAvailableSheetsPagedErr
+}
+func (m *mockStore) countAvailableSheetsByMaterial(_ context.Context, materialID uuid.UUID) (int, error) {
+	m.countAvailableSheetsByMaterialArg = materialID
+	return m.countAvailableSheetsByMaterialResult, m.countAvailableSheetsByMaterialErr
 }
 func (m *mockStore) updateSheetStatus(_ context.Context, _ uuid.UUID, _ string, _ *uuid.UUID) error {
 	return m.updateSheetStatusErr
@@ -2009,6 +2018,36 @@ func TestListAvailableSheets_FilterByMaterialID_PassedToStore(t *testing.T) {
 	}
 	if result.Items[0].MaterialID != matID {
 		t.Errorf("MaterialID = %v, want %v", result.Items[0].MaterialID, matID)
+	}
+}
+
+// ── BR-K01 aggregate stock check helper ──────────────────────────────────────
+
+func TestCountAvailableSheetsByMaterial_DelegatesToStore(t *testing.T) {
+	matID := uuid.New()
+	st := &mockStore{countAvailableSheetsByMaterialResult: 7}
+	svc := NewService(st, nil)
+
+	got, err := svc.CountAvailableSheetsByMaterial(context.Background(), matID)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != 7 {
+		t.Errorf("count = %d, want 7", got)
+	}
+	if st.countAvailableSheetsByMaterialArg != matID {
+		t.Errorf("store called with %v, want %v", st.countAvailableSheetsByMaterialArg, matID)
+	}
+}
+
+func TestCountAvailableSheetsByMaterial_StoreError_Propagates(t *testing.T) {
+	storeErr := errors.New("count failed")
+	st := &mockStore{countAvailableSheetsByMaterialErr: storeErr}
+	svc := NewService(st, nil)
+
+	_, err := svc.CountAvailableSheetsByMaterial(context.Background(), uuid.New())
+	if !errors.Is(err, storeErr) {
+		t.Errorf("expected store error to propagate, got %v", err)
 	}
 }
 
