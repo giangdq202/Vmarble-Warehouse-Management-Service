@@ -658,6 +658,23 @@ definitions:
       work_order_id:
         type: string
     type: object
+  internal_module_costing.CostingRecordDetail:
+    properties:
+      adjustments:
+        items:
+          $ref: '#/definitions/internal_module_costing.CostingAdjustment'
+        type: array
+      effective_auxiliary:
+        $ref: '#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.Money'
+      effective_labor:
+        $ref: '#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.Money'
+      effective_material:
+        $ref: '#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.Money'
+      effective_total:
+        $ref: '#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.Money'
+      record:
+        $ref: '#/definitions/internal_module_costing.CostingRecord'
+    type: object
   internal_module_costing.CostingType:
     enum:
     - ESTIMATED
@@ -2310,6 +2327,47 @@ paths:
       security:
       - BearerAuth: []
       summary: Compute costing for a work order
+      tags:
+      - costing
+  /api/v1/costing/{workOrderID}/detail:
+    get:
+      description: Returns the costing record together with all of its adjustments
+        and the running effective totals (record + Σ deltas). Used by the accountant
+        adjustment dialog so the FE never has to do money arithmetic itself.
+      parameters:
+      - description: work order id (uuid)
+        in: path
+        name: workOrderID
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_module_costing.CostingRecordDetail'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Get costing record + adjustments + effective totals
       tags:
       - costing
   /api/v1/costing/{workOrderID}/finalize:

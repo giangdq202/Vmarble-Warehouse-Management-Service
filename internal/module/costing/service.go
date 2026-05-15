@@ -171,6 +171,47 @@ func (s *service) GetCostingRecord(ctx context.Context, workOrderID uuid.UUID) (
 	return s.st.selectCostingRecordByWO(ctx, workOrderID)
 }
 
+// GetCostingRecordDetail loads the record plus its adjustments and folds the
+// deltas into running "effective" totals. Effective values are simply the
+// per-bucket sums (record + Σ adjustment deltas), so the FE adjustment
+// dialog can render them without re-implementing money arithmetic.
+//
+// The original record numbers stay immutable per BR-C04 — adjustments are
+// the only mechanism that moves the effective totals.
+func (s *service) GetCostingRecordDetail(ctx context.Context, workOrderID uuid.UUID) (CostingRecordDetail, error) {
+	record, err := s.st.selectCostingRecordByWO(ctx, workOrderID)
+	if err != nil {
+		return CostingRecordDetail{}, err
+	}
+	adjs, err := s.st.selectAdjustmentsByRecord(ctx, record.ID)
+	if err != nil {
+		return CostingRecordDetail{}, err
+	}
+	if adjs == nil {
+		adjs = []CostingAdjustment{}
+	}
+
+	effMaterial := record.MaterialCost
+	effAuxiliary := record.AuxiliaryCost
+	effLabor := record.LaborCost
+	effTotal := record.TotalCost
+	for _, a := range adjs {
+		effMaterial = effMaterial.Add(a.DeltaMaterial)
+		effAuxiliary = effAuxiliary.Add(a.DeltaAuxiliary)
+		effLabor = effLabor.Add(a.DeltaLabor)
+		effTotal = effTotal.Add(a.DeltaTotal)
+	}
+
+	return CostingRecordDetail{
+		Record:             record,
+		Adjustments:        adjs,
+		EffectiveMaterial:  effMaterial,
+		EffectiveAuxiliary: effAuxiliary,
+		EffectiveLabor:     effLabor,
+		EffectiveTotal:     effTotal,
+	}, nil
+}
+
 func (s *service) HasCostingRecord(ctx context.Context, workOrderID uuid.UUID) (bool, error) {
 	return s.st.hasCostingRecord(ctx, workOrderID)
 }

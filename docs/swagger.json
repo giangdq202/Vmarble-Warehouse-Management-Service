@@ -1232,6 +1232,67 @@
                 }
             }
         },
+        "/api/v1/costing/{workOrderID}/detail": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns the costing record together with all of its adjustments and the running effective totals (record + Σ deltas). Used by the accountant adjustment dialog so the FE never has to do money arithmetic itself.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "costing"
+                ],
+                "summary": "Get costing record + adjustments + effective totals",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "work order id (uuid)",
+                        "name": "workOrderID",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_module_costing.CostingRecordDetail"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/costing/{workOrderID}/finalize": {
             "post": {
                 "security": [
@@ -7345,6 +7406,32 @@
                 },
                 "work_order_id": {
                     "type": "string"
+                }
+            }
+        },
+        "internal_module_costing.CostingRecordDetail": {
+            "type": "object",
+            "properties": {
+                "adjustments": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_module_costing.CostingAdjustment"
+                    }
+                },
+                "effective_auxiliary": {
+                    "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.Money"
+                },
+                "effective_labor": {
+                    "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.Money"
+                },
+                "effective_material": {
+                    "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.Money"
+                },
+                "effective_total": {
+                    "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.Money"
+                },
+                "record": {
+                    "$ref": "#/definitions/internal_module_costing.CostingRecord"
                 }
             }
         },
