@@ -278,9 +278,9 @@ definitions:
     type: object
   internal_module_authn.LoginInput:
     properties:
-      username:
-        type: string
       password:
+        type: string
+      username:
         type: string
     required:
     - password
