@@ -42,7 +42,7 @@ const (
 // scaffolding.
 func build(sheet string, headers []string, rows [][]any, dataFormatters map[int]string) ([]byte, error) {
 	f := excelize.NewFile()
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	idx, err := f.NewSheet(sheet)
 	if err != nil {

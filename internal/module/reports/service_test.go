@@ -20,7 +20,7 @@ func readSheet(t *testing.T, raw []byte, sheet string) [][]string {
 	if err != nil {
 		t.Fatalf("open generated xlsx: %v", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	rows, err := f.GetRows(sheet)
 	if err != nil {
 		t.Fatalf("get rows from %s: %v", sheet, err)
