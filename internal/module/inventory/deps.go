@@ -41,3 +41,11 @@ type BarcodeForCutOutput struct {
 type AdvanceWOInput struct {
 	To domain.WorkOrderStatus
 }
+
+// CutNotifier fires a CUTTING_RECORDED SSE event after RecordCut commits so
+// the planner queue and accountant cost panel refresh without polling.
+// Implementation lives in internal/platform/events; wired in main.go. Calls
+// are best-effort: a non-nil error is logged and the request still succeeds.
+type CutNotifier interface {
+	NotifyCuttingRecorded(ctx context.Context, woID, cuttingRecordID string) error
+}

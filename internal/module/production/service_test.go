@@ -219,13 +219,20 @@ func (m *mockUserChecker) GetUser(_ context.Context, _ uuid.UUID) (UserInfo, err
 
 // mockWorkOrderNotifier satisfies WorkOrderNotifier.
 type mockWorkOrderNotifier struct {
-	called bool
-	err    error
+	called             bool
+	err                error
+	statusCalls        []string // status values seen by NotifyWOStatusChanged
+	statusErr          error
 }
 
 func (m *mockWorkOrderNotifier) NotifyAssignment(_ context.Context, _, _, _ string) error {
 	m.called = true
 	return m.err
+}
+
+func (m *mockWorkOrderNotifier) NotifyWOStatusChanged(_ context.Context, _, status string) error {
+	m.statusCalls = append(m.statusCalls, status)
+	return m.statusErr
 }
 
 // mockSheetAssigner satisfies SheetAssigner.
@@ -3010,5 +3017,60 @@ func TestSumLaborCost_MissingWO_ReturnsInvalidInput(t *testing.T) {
 	_, err := svc.SumLaborCost(context.Background(), uuid.Nil)
 	if !errors.Is(err, domain.ErrInvalidInput) {
 		t.Fatalf("err = %v, want ErrInvalidInput", err)
+	}
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// AdvanceStatus — WO_STATUS_CHANGED publish (#258)
+// ═════════════════════════════════════════════════════════════════════════════
+
+func TestAdvanceStatus_HappyPath_PublishesWOStatusChanged(t *testing.T) {
+	woID := uuid.New()
+	wo, _ := assignedWO(woID, domain.WOPlanned)
+	st := &mockStore{selectWorkOrderByIDResult: wo}
+	notifier := &mockWorkOrderNotifier{}
+
+	svc := NewService(st, approvedPlan(uuid.New()), skuNoMetal(uuid.New()),
+		&mockUserChecker{}, nil, nil, notifier)
+
+	if err := svc.AdvanceStatus(context.Background(), woID, AdvanceStatusInput{To: domain.WOInCutting}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(notifier.statusCalls) != 1 || notifier.statusCalls[0] != string(domain.WOInCutting) {
+		t.Errorf("statusCalls = %v, want exactly one IN_CUTTING entry", notifier.statusCalls)
+	}
+}
+
+func TestAdvanceStatus_NotifierError_DoesNotFailRequest(t *testing.T) {
+	woID := uuid.New()
+	wo, _ := assignedWO(woID, domain.WOPlanned)
+	st := &mockStore{selectWorkOrderByIDResult: wo}
+	notifier := &mockWorkOrderNotifier{statusErr: errors.New("broker down")}
+
+	svc := NewService(st, approvedPlan(uuid.New()), skuNoMetal(uuid.New()),
+		&mockUserChecker{}, nil, nil, notifier)
+
+	if err := svc.AdvanceStatus(context.Background(), woID, AdvanceStatusInput{To: domain.WOInCutting}); err != nil {
+		t.Errorf("notifier failure must not fail request, got: %v", err)
+	}
+	if !st.updateWorkOrderStatusCalled {
+		t.Error("status update must still commit")
+	}
+}
+
+func TestAdvanceStatus_InvalidTransition_NotifierNotCalled(t *testing.T) {
+	woID := uuid.New()
+	st := &mockStore{selectWorkOrderByIDResult: woWithStatus(woID, domain.WOInCutting)}
+	notifier := &mockWorkOrderNotifier{}
+
+	svc := NewService(st, approvedPlan(uuid.New()), skuNoMetal(uuid.New()),
+		&mockUserChecker{}, nil, nil, notifier)
+
+	err := svc.AdvanceStatus(context.Background(), woID, AdvanceStatusInput{To: domain.WOPlanned})
+	if !errors.Is(err, domain.ErrInvalidTransition) {
+		t.Fatalf("expected ErrInvalidTransition, got %v", err)
+	}
+	if len(notifier.statusCalls) != 0 {
+		t.Errorf("notifier must not fire on invalid transition, got %v", notifier.statusCalls)
 	}
 }

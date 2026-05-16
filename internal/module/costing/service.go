@@ -3,6 +3,7 @@ package costing
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"time"
 
 	"github.com/google/uuid"
@@ -11,15 +12,24 @@ import (
 )
 
 type service struct {
-	st   store
-	wor  WorkOrderReader
-	cdr  CuttingDataReader
-	conr ConsumptionDataReader
-	lbr  LaborDataReader
+	st       store
+	wor      WorkOrderReader
+	cdr      CuttingDataReader
+	conr     ConsumptionDataReader
+	lbr      LaborDataReader
+	notifier CostingNotifier
 }
 
 func NewService(st store, wor WorkOrderReader, cdr CuttingDataReader, conr ConsumptionDataReader, lbr LaborDataReader) Service {
 	return &service{st: st, wor: wor, cdr: cdr, conr: conr, lbr: lbr}
+}
+
+// NewServiceWithNotifier wires an optional SSE notifier so ComputeCost can fan
+// out COSTING_COMPUTED to accountant + admin dashboards. Notifier failures are
+// best-effort (logged, not returned) so the persisted record is never rolled
+// back by a transient broker outage.
+func NewServiceWithNotifier(st store, wor WorkOrderReader, cdr CuttingDataReader, conr ConsumptionDataReader, lbr LaborDataReader, notifier CostingNotifier) Service {
+	return &service{st: st, wor: wor, cdr: cdr, conr: conr, lbr: lbr, notifier: notifier}
 }
 
 func (s *service) ComputeCost(ctx context.Context, workOrderID uuid.UUID) (CostingRecord, error) {
@@ -103,6 +113,7 @@ func (s *service) ComputeCost(ctx context.Context, workOrderID uuid.UUID) (Costi
 		if err := s.st.updateCostingRecord(ctx, record); err != nil {
 			return CostingRecord{}, err
 		}
+		s.notifyComputed(ctx, record)
 		return record, nil
 	}
 
@@ -110,7 +121,21 @@ func (s *service) ComputeCost(ctx context.Context, workOrderID uuid.UUID) (Costi
 	if err := s.st.insertCostingRecord(ctx, record); err != nil {
 		return CostingRecord{}, err
 	}
+	s.notifyComputed(ctx, record)
 	return record, nil
+}
+
+// notifyComputed broadcasts COSTING_COMPUTED to subscribed accountants/admins.
+// Best-effort: a non-nil notifier error is logged and the request still
+// succeeds so a transient broker outage never rolls back the persisted record.
+func (s *service) notifyComputed(ctx context.Context, record CostingRecord) {
+	if s.notifier == nil {
+		return
+	}
+	if err := s.notifier.NotifyCostingComputed(ctx, record.WorkOrderID.String(), string(record.CostingType)); err != nil {
+		slog.Warn("costing: notify costing computed failed",
+			"work_order_id", record.WorkOrderID, "costing_type", record.CostingType, "err", err)
+	}
 }
 
 func (s *service) FinalizeCost(ctx context.Context, workOrderID uuid.UUID, actorID uuid.UUID) error {

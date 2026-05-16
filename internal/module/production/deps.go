@@ -41,10 +41,19 @@ type UserInfo struct {
 	IsActive bool
 }
 
-// WorkOrderNotifier fires a notification after a work order is assigned.
+// WorkOrderNotifier fires SSE notifications for work-order events.
 // Implementation lives in internal/platform/events; wired in main.go.
+//
+// Both methods are best-effort: callers must continue past a non-nil error so a
+// transient broker failure never aborts the business write.
 type WorkOrderNotifier interface {
+	// NotifyAssignment is fired after a planner assigns a CNC operator. Routed
+	// to the assignee plus the manager-side audience.
 	NotifyAssignment(ctx context.Context, userID, woID, sku string) error
+	// NotifyWOStatusChanged is fired after AdvanceStatus persists a transition.
+	// Routed to planner + manager + accountant + admin so dashboards can refresh
+	// without polling.
+	NotifyWOStatusChanged(ctx context.Context, woID, status string) error
 }
 
 // SheetAssigner pre-assigns a board sheet to a work order when the work order

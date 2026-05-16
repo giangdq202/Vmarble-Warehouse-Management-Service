@@ -3893,6 +3893,30 @@ paths:
       summary: Get material
       tags:
       - catalog
+  /api/v1/notifications/stream:
+    get:
+      description: |-
+        Server-Sent Events stream of events for the authenticated user
+        and their role audience. Emits NEW_ASSIGNMENT, WO_STATUS_CHANGED,
+        CUTTING_RECORDED, SCAN_CHECKPOINT, COSTING_COMPUTED.
+      produces:
+      - text/event-stream
+      responses:
+        "200":
+          description: event-stream
+          schema:
+            type: string
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Subscribe to realtime notifications (SSE)
+      tags:
+      - events
   /api/v1/plans:
     get:
       parameters:

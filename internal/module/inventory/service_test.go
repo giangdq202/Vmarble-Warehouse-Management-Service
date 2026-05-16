@@ -4713,3 +4713,98 @@ func TestListCuttingRecords_StoreError_Propagates(t *testing.T) {
 		t.Fatalf("got %v, want %v", err, storeErr)
 	}
 }
+
+// ── CUTTING_RECORDED notifier (#258) ─────────────────────────────────────────
+
+type mockCutNotifier struct {
+	calls []struct {
+		WO  string
+		Cut string
+	}
+	err error
+}
+
+func (m *mockCutNotifier) NotifyCuttingRecorded(_ context.Context, woID, cuttingRecordID string) error {
+	m.calls = append(m.calls, struct {
+		WO  string
+		Cut string
+	}{woID, cuttingRecordID})
+	return m.err
+}
+
+func TestRecordCut_HappyPath_PublishesCuttingRecorded(t *testing.T) {
+	sheetID := uuid.New()
+	woID := uuid.New()
+	skuID := uuid.New()
+
+	st := &mockStore{
+		selectSheetByIDResult:   availableSheet(sheetID),
+		selectOverflowSheetArea: 1,
+	}
+	notifier := &mockCutNotifier{}
+	svc := NewServiceFull(st, nil, nil, notifier, 0)
+
+	result, err := svc.RecordCut(context.Background(), RecordCutInput{
+		SheetID:       ptr(sheetID),
+		WorkOrderID:   woID,
+		SKUID:         skuID,
+		UsedDimension: dim1000x500,
+		IsWaste:       true,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(notifier.calls) != 1 {
+		t.Fatalf("notifier calls = %d, want 1", len(notifier.calls))
+	}
+	if notifier.calls[0].WO != woID.String() {
+		t.Errorf("WO = %q, want %q", notifier.calls[0].WO, woID.String())
+	}
+	if notifier.calls[0].Cut != result.CuttingRecordID.String() {
+		t.Errorf("Cut = %q, want %q", notifier.calls[0].Cut, result.CuttingRecordID.String())
+	}
+}
+
+func TestRecordCut_NotifierError_DoesNotFailRequest(t *testing.T) {
+	sheetID := uuid.New()
+	woID := uuid.New()
+
+	st := &mockStore{
+		selectSheetByIDResult:   availableSheet(sheetID),
+		selectOverflowSheetArea: 1,
+	}
+	notifier := &mockCutNotifier{err: errors.New("broker down")}
+	svc := NewServiceFull(st, nil, nil, notifier, 0)
+
+	if _, err := svc.RecordCut(context.Background(), RecordCutInput{
+		SheetID:       ptr(sheetID),
+		WorkOrderID:   woID,
+		SKUID:         uuid.New(),
+		UsedDimension: dim1000x500,
+		IsWaste:       true,
+	}); err != nil {
+		t.Errorf("notifier failure must not fail RecordCut, got: %v", err)
+	}
+	if !st.recordCutAtomicallyCalled {
+		t.Error("cut must still commit when notifier fails")
+	}
+}
+
+func TestRecordCut_ValidationFails_NotifierNotCalled(t *testing.T) {
+	notifier := &mockCutNotifier{}
+	svc := NewServiceFull(&mockStore{}, nil, nil, notifier, 0)
+
+	_, err := svc.RecordCut(context.Background(), RecordCutInput{
+		WorkOrderID: uuid.New(),
+		SKUID:       uuid.New(),
+		// Both source IDs nil — validation rejects.
+		UsedDimension: dim1000x500,
+		IsWaste:       true,
+	})
+	if err == nil {
+		t.Fatal("expected validation error")
+	}
+	if len(notifier.calls) != 0 {
+		t.Errorf("notifier must not fire on validation failure, got %v", notifier.calls)
+	}
+}

@@ -762,3 +762,89 @@ func TestGenerateBatchLabelPDF_HappyPath_ReturnsMultiPagePDF(t *testing.T) {
 		}
 	}
 }
+
+// ── SCAN_CHECKPOINT notifier (#258) ──────────────────────────────────────────
+
+type mockScanNotifier struct {
+	calls []struct {
+		WO  string
+		Cpt string
+	}
+	err error
+}
+
+func (m *mockScanNotifier) NotifyScanCheckpoint(_ context.Context, woID, checkpoint string) error {
+	m.calls = append(m.calls, struct {
+		WO  string
+		Cpt string
+	}{woID, checkpoint})
+	return m.err
+}
+
+func TestRecordScan_HappyPath_PublishesScanCheckpoint(t *testing.T) {
+	barcodeID := uuid.New()
+	bc := storedBarcode(barcodeID)
+	st := &mockStore{
+		selectBarcodeByIDResult: bc,
+		selectLastScanEventErr:  domain.NewBizError(domain.ErrNotFound, "no prior scan"),
+	}
+	wo := &mockWOGateway{status: domain.WOInCutting}
+	notifier := &mockScanNotifier{}
+	svc := NewService(st, wo, notifier)
+
+	if _, err := svc.RecordScan(context.Background(), RecordScanInput{
+		BarcodeID:  barcodeID,
+		Checkpoint: CheckpointCNCComplete,
+		ScannedBy:  uuid.New(),
+	}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(notifier.calls) != 1 {
+		t.Fatalf("notifier calls = %d, want 1", len(notifier.calls))
+	}
+	if notifier.calls[0].WO != bc.WorkOrderID.String() {
+		t.Errorf("WO = %q, want %q", notifier.calls[0].WO, bc.WorkOrderID.String())
+	}
+	if notifier.calls[0].Cpt != string(CheckpointCNCComplete) {
+		t.Errorf("Cpt = %q, want %q", notifier.calls[0].Cpt, CheckpointCNCComplete)
+	}
+}
+
+func TestRecordScan_NotifierError_DoesNotFailRequest(t *testing.T) {
+	barcodeID := uuid.New()
+	bc := storedBarcode(barcodeID)
+	st := &mockStore{
+		selectBarcodeByIDResult: bc,
+		selectLastScanEventErr:  domain.NewBizError(domain.ErrNotFound, "no prior scan"),
+	}
+	wo := &mockWOGateway{status: domain.WOInCutting}
+	notifier := &mockScanNotifier{err: errors.New("broker down")}
+	svc := NewService(st, wo, notifier)
+
+	if _, err := svc.RecordScan(context.Background(), RecordScanInput{
+		BarcodeID:  barcodeID,
+		Checkpoint: CheckpointCNCComplete,
+		ScannedBy:  uuid.New(),
+	}); err != nil {
+		t.Errorf("notifier failure must not fail RecordScan, got: %v", err)
+	}
+	if !st.insertScanEventCalled {
+		t.Error("scan must still commit when notifier fails")
+	}
+}
+
+func TestRecordScan_ValidationFails_NotifierNotCalled(t *testing.T) {
+	notifier := &mockScanNotifier{}
+	svc := NewService(&mockStore{}, &mockWOGateway{}, notifier)
+
+	if _, err := svc.RecordScan(context.Background(), RecordScanInput{
+		BarcodeID:  uuid.New(),
+		Checkpoint: "BAD_CHECKPOINT",
+		ScannedBy:  uuid.New(),
+	}); err == nil {
+		t.Fatal("expected validation error")
+	}
+	if len(notifier.calls) != 0 {
+		t.Errorf("notifier must not fire on validation failure, got %v", notifier.calls)
+	}
+}

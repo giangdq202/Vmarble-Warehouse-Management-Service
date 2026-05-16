@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -49,9 +50,10 @@ type labelLayout struct {
 }
 
 type service struct {
-	st  store
-	wo  WorkOrderGateway
-	usr UserLookup
+	st       store
+	wo       WorkOrderGateway
+	usr      UserLookup
+	notifier ScanNotifier
 }
 
 func NewService(st store, deps ...any) Service {
@@ -62,6 +64,8 @@ func NewService(st store, deps ...any) Service {
 			svc.wo = d
 		case UserLookup:
 			svc.usr = d
+		case ScanNotifier:
+			svc.notifier = d
 		}
 	}
 	return svc
@@ -305,6 +309,15 @@ func (s *service) RecordScan(ctx context.Context, in RecordScanInput) (ScanResul
 		u, err := s.usr.GetUser(ctx, in.ScannedBy)
 		if err == nil && u.Username != "" {
 			scannedByName = u.Username
+		}
+	}
+
+	// Best-effort SSE notification — log + continue if the broker is down so a
+	// transient failure never rolls back the persisted scan event.
+	if s.notifier != nil {
+		if err := s.notifier.NotifyScanCheckpoint(ctx, bc.WorkOrderID.String(), string(in.Checkpoint)); err != nil {
+			slog.Warn("barcode: notify scan checkpoint failed",
+				"work_order_id", bc.WorkOrderID, "checkpoint", in.Checkpoint, "err", err)
 		}
 	}
 

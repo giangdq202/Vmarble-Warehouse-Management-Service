@@ -3600,6 +3600,40 @@
                 }
             }
         },
+        "/api/v1/notifications/stream": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Server-Sent Events stream of events for the authenticated user\nand their role audience. Emits NEW_ASSIGNMENT, WO_STATUS_CHANGED,\nCUTTING_RECORDED, SCAN_CHECKPOINT, COSTING_COMPUTED.",
+                "produces": [
+                    "text/event-stream"
+                ],
+                "tags": [
+                    "events"
+                ],
+                "summary": "Subscribe to realtime notifications (SSE)",
+                "responses": {
+                    "200": {
+                        "description": "event-stream",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/plans": {
             "get": {
                 "security": [
