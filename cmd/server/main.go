@@ -24,6 +24,7 @@ import (
 	"github.com/vmarble/warehouse-management-service/internal/module/planning"
 	"github.com/vmarble/warehouse-management-service/internal/module/production"
 	"github.com/vmarble/warehouse-management-service/internal/module/purchasing"
+	"github.com/vmarble/warehouse-management-service/internal/module/reports"
 	"github.com/vmarble/warehouse-management-service/internal/platform/auth"
 	"github.com/vmarble/warehouse-management-service/internal/platform/config"
 	"github.com/vmarble/warehouse-management-service/internal/platform/events"
@@ -142,6 +143,14 @@ func main() {
 		&purchasingStockAdapter{svc: inventorySvc},
 	)
 
+	reportsSvc := reports.NewService(
+		&reportsCostingAdapter{pool: pool},
+		&reportsPOAdapter{pool: pool},
+		&reportsSKUAdapter{pool: pool},
+		&reportsWOAdapter{pool: pool},
+		&reportsWasteAdapter{svc: costingSvc},
+	)
+
 	// ── Background: auto-release expired remnant allocations ─────────────────
 	// Ticks every cfg.RemnantAllocCheckInterval. Remnants that have been
 	// ALLOCATED for longer than cfg.RemnantAllocTimeout without being consumed
@@ -196,6 +205,7 @@ func main() {
 	barcode.NewHandler(barcodeSvc).Register(api)
 	events.NewHandler(eventBroker).Register(api)
 	purchasing.NewHandler(purchasingSvc).Register(api)
+	reports.NewHandler(reportsSvc).Register(api)
 
 	srv := &http.Server{
 		Addr:         ":" + cfg.Port,
@@ -562,4 +572,163 @@ type laborDataAdapter struct {
 
 func (a *laborDataAdapter) GetLaborCostForWO(ctx context.Context, woID uuid.UUID) (domain.Money, error) {
 	return a.svc.SumLaborCost(ctx, woID)
+}
+
+// ── Reports adapters (#257) ─────────────────────────────────────────────────
+//
+// Each adapter projects pgxpool rows directly to reports.<Row>. Reads happen
+// through SQL with optional [from, to) bounds so the export endpoints can
+// filter by period without touching the source-module list APIs.
+
+type reportsCostingAdapter struct{ pool *pgxpool.Pool }
+
+func (a *reportsCostingAdapter) ListCostingsInPeriod(ctx context.Context, p reports.Period) ([]reports.CostingRow, error) {
+	q := `
+		SELECT cr.work_order_id, s.code, s.name, cr.costing_type,
+		       cr.material_cost_amount, cr.auxiliary_cost_amount, cr.labor_cost_amount, cr.total_cost_amount,
+		       cr.finalized, cr.created_at
+		FROM costing_records cr
+		JOIN skus s ON s.id = cr.sku_id
+		WHERE ($1::timestamptz IS NULL OR cr.created_at >= $1)
+		  AND ($2::timestamptz IS NULL OR cr.created_at <  $2)
+		ORDER BY cr.created_at DESC`
+	rows, err := a.pool.Query(ctx, q, p.From, p.To)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []reports.CostingRow
+	for rows.Next() {
+		var r reports.CostingRow
+		if err := rows.Scan(&r.WorkOrderID, &r.SKUCode, &r.SKUName, &r.CostingType,
+			&r.MaterialCost, &r.AuxiliaryCost, &r.LaborCost, &r.TotalCost,
+			&r.Finalized, &r.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+type reportsPOAdapter struct{ pool *pgxpool.Pool }
+
+func (a *reportsPOAdapter) ListPOsInPeriod(ctx context.Context, p reports.Period) ([]reports.PORow, error) {
+	q := `
+		SELECT po.code, COALESCE(po.supplier, ''), po.status, COALESCE(m.name, ''),
+		       po.ordered_at, po.received_at,
+		       COALESCE((
+		           SELECT string_agg(
+		                  i.quantity || '×' || i.length_mm || '×' || i.width_mm
+		                  || ' @' || i.unit_cost_amount,
+		                  '; ' ORDER BY i.id)
+		           FROM material_purchase_order_items i WHERE i.po_id = po.id
+		       ), ''),
+		       COALESCE((
+		           SELECT SUM(i.quantity::bigint * i.unit_cost_amount)
+		           FROM material_purchase_order_items i WHERE i.po_id = po.id
+		       ), 0),
+		       po.created_at
+		FROM material_purchase_orders po
+		LEFT JOIN materials m ON m.id = po.material_id
+		WHERE ($1::timestamptz IS NULL OR po.created_at >= $1)
+		  AND ($2::timestamptz IS NULL OR po.created_at <  $2)
+		ORDER BY po.created_at DESC`
+	rows, err := a.pool.Query(ctx, q, p.From, p.To)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []reports.PORow
+	for rows.Next() {
+		var r reports.PORow
+		if err := rows.Scan(&r.Code, &r.Supplier, &r.Status, &r.MaterialName,
+			&r.OrderedAt, &r.ReceivedAt, &r.Items, &r.TotalCost, &r.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+type reportsSKUAdapter struct{ pool *pgxpool.Pool }
+
+func (a *reportsSKUAdapter) ListAllSKUs(ctx context.Context) ([]reports.SKURow, error) {
+	q := `
+		SELECT s.code, s.name, s.length_mm, s.width_mm, s.requires_metal,
+		       COALESCE(s.is_active, true),
+		       COALESCE((
+		           SELECT string_agg(m.name || ' × ' || bc.quantity_per_unit, '; ' ORDER BY m.name)
+		           FROM bom_components bc JOIN materials m ON m.id = bc.material_id
+		           WHERE bc.sku_id = s.id
+		       ), '')
+		FROM skus s
+		ORDER BY s.code`
+	rows, err := a.pool.Query(ctx, q)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []reports.SKURow
+	for rows.Next() {
+		var r reports.SKURow
+		if err := rows.Scan(&r.Code, &r.Name, &r.LengthMM, &r.WidthMM,
+			&r.RequiresMetal, &r.IsActive, &r.BOMSummary); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+type reportsWOAdapter struct{ pool *pgxpool.Pool }
+
+func (a *reportsWOAdapter) ListWorkOrdersInPeriod(ctx context.Context, p reports.Period) ([]reports.WORow, error) {
+	q := `
+		SELECT wo.id::text, s.code, s.name, wo.quantity, wo.status,
+		       wo.assigned_at, wo.created_at,
+		       (SELECT cr.total_cost_amount FROM costing_records cr WHERE cr.work_order_id = wo.id LIMIT 1)
+		FROM work_orders wo
+		JOIN skus s ON s.id = wo.sku_id
+		WHERE ($1::timestamptz IS NULL OR wo.created_at >= $1)
+		  AND ($2::timestamptz IS NULL OR wo.created_at <  $2)
+		ORDER BY wo.created_at DESC`
+	rows, err := a.pool.Query(ctx, q, p.From, p.To)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []reports.WORow
+	for rows.Next() {
+		var r reports.WORow
+		var totalCost *int64
+		if err := rows.Scan(&r.ID, &r.SKUCode, &r.SKUName, &r.Quantity, &r.Status,
+			&r.AssignedAt, &r.CreatedAt, &totalCost); err != nil {
+			return nil, err
+		}
+		r.TotalCost = totalCost
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// reportsWasteAdapter delegates to costing.Service.ListWasteReport so the
+// per-material aggregation logic stays single-sourced.
+type reportsWasteAdapter struct{ svc costing.Service }
+
+func (a *reportsWasteAdapter) ListWasteInPeriod(ctx context.Context, p reports.Period) ([]reports.WasteRow, error) {
+	rows, err := a.svc.ListWasteReport(ctx, costing.WasteReportFilter{From: p.From, To: p.To})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]reports.WasteRow, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, reports.WasteRow{
+			MaterialName:   r.MaterialName,
+			SheetsConsumed: r.SheetsConsumed,
+			WasteAreaMM2:   r.WasteAreaMM2,
+			AvgSheetCost:   r.AvgSheetCost.Amount,
+			TotalWasteCost: r.TotalWasteCost.Amount,
+		})
+	}
+	return out, nil
 }

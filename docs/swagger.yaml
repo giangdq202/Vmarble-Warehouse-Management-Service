@@ -4593,6 +4593,142 @@ paths:
       summary: Mark an ORDERED PO as RECEIVED and create inventory lots
       tags:
       - purchasing
+  /api/v1/reports/export/costings.xlsx:
+    get:
+      parameters:
+      - description: From date (YYYY-MM-DD)
+        in: query
+        name: from
+        type: string
+      - description: To date (YYYY-MM-DD, inclusive)
+        in: query
+        name: to
+        type: string
+      produces:
+      - application/vnd.openxmlformats-officedocument.spreadsheetml.sheet
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: file
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Export costing records to Excel
+      tags:
+      - reports
+  /api/v1/reports/export/purchase-orders.xlsx:
+    get:
+      parameters:
+      - description: From date (YYYY-MM-DD)
+        in: query
+        name: from
+        type: string
+      - description: To date (YYYY-MM-DD, inclusive)
+        in: query
+        name: to
+        type: string
+      produces:
+      - application/vnd.openxmlformats-officedocument.spreadsheetml.sheet
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: file
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Export purchase orders to Excel
+      tags:
+      - reports
+  /api/v1/reports/export/skus.xlsx:
+    get:
+      produces:
+      - application/vnd.openxmlformats-officedocument.spreadsheetml.sheet
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: file
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Export SKU catalog to Excel
+      tags:
+      - reports
+  /api/v1/reports/export/waste.xlsx:
+    get:
+      parameters:
+      - description: From date (YYYY-MM-DD)
+        in: query
+        name: from
+        type: string
+      - description: To date (YYYY-MM-DD, inclusive)
+        in: query
+        name: to
+        type: string
+      produces:
+      - application/vnd.openxmlformats-officedocument.spreadsheetml.sheet
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: file
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Export waste report to Excel
+      tags:
+      - reports
+  /api/v1/reports/export/work-orders.xlsx:
+    get:
+      parameters:
+      - description: From date (YYYY-MM-DD)
+        in: query
+        name: from
+        type: string
+      - description: To date (YYYY-MM-DD, inclusive)
+        in: query
+        name: to
+        type: string
+      produces:
+      - application/vnd.openxmlformats-officedocument.spreadsheetml.sheet
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: file
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Export work orders to Excel
+      tags:
+      - reports
   /api/v1/skus:
     get:
       parameters:
