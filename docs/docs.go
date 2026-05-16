@@ -7067,10 +7067,10 @@ const docTemplate = `{
                 "username"
             ],
             "properties": {
-                "password": {
+                "username": {
                     "type": "string"
                 },
-                "username": {
+                "password": {
                     "type": "string"
                 }
             }
