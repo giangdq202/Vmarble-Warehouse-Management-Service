@@ -21,14 +21,17 @@ type PlanItemInput struct {
 }
 
 type Plan struct {
-	ID        uuid.UUID         `json:"id"`
-	Code      string            `json:"code"`
-	POID      uuid.UUID         `json:"po_id"`
-	POCode    string            `json:"po_code,omitempty"`
-	Status    domain.PlanStatus `json:"status"`
-	Deadline  *time.Time        `json:"deadline,omitempty"`
-	Items     []PlanItem        `json:"items"`
-	CreatedAt time.Time         `json:"created_at"`
+	ID             uuid.UUID         `json:"id"`
+	Code           string            `json:"code"`
+	POID           uuid.UUID         `json:"po_id"`
+	POCode         string            `json:"po_code,omitempty"`
+	Status         domain.PlanStatus `json:"status"`
+	Deadline       *time.Time        `json:"deadline,omitempty"`
+	Items          []PlanItem        `json:"items"`
+	CreatedAt      time.Time         `json:"created_at"`
+	CanceledReason string            `json:"canceled_reason,omitempty"`
+	CanceledAt     *time.Time        `json:"canceled_at,omitempty"`
+	CanceledBy     *uuid.UUID        `json:"canceled_by,omitempty"`
 }
 
 type PlanItem struct {
@@ -58,11 +61,21 @@ type LookupPlansInput struct {
 	Limit        int // capped at maxLookupLimit in service
 }
 
+// CancelPlanInput carries the optional cancellation reason and the actor
+// (planner / admin) who issued the cancel. Reason is required when the plan
+// is APPROVED so the audit trail is meaningful; DRAFT cancels accept an
+// empty reason since there is no business activity to explain away.
+type CancelPlanInput struct {
+	PlanID  uuid.UUID `json:"-"`
+	Reason  string    `json:"reason,omitempty"`
+	ActorID uuid.UUID `json:"-"`
+}
+
 type Service interface {
 	CreatePlan(ctx context.Context, in CreatePlanInput) (Plan, error)
 	GetPlan(ctx context.Context, planID uuid.UUID) (Plan, error)
 	ListPlans(ctx context.Context, p httpkit.PageParams, status string) (httpkit.PagedResult[Plan], error)
 	LookupPlans(ctx context.Context, in LookupPlansInput) (httpkit.PagedResult[PlanLookupItem], error)
 	ApprovePlan(ctx context.Context, planID uuid.UUID) error
-	CancelPlan(ctx context.Context, planID uuid.UUID) error
+	CancelPlan(ctx context.Context, in CancelPlanInput) error
 }

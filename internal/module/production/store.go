@@ -52,6 +52,17 @@ type store interface {
 	// order in dong·minutes; callers divide by 60 to get dong. Returns 0 when
 	// no entries exist.
 	sumLaborMinuteRateByWO(ctx context.Context, woID uuid.UUID) (int64, error)
+
+	// Plan cascade cancel (#249)
+	// listStatusesByPlan returns the current status of every work order tied to
+	// the plan. Used by planning.CancelPlan to verify no WO has progressed past
+	// PLANNED before cascading.
+	listStatusesByPlan(ctx context.Context, planID uuid.UUID) ([]string, error)
+	// cancelPlannedByPlan flips every PLANNED work order under the plan to
+	// CANCELED in a single UPDATE. Returns the affected row count. Bypasses
+	// the AdvanceStatus state machine deliberately — the cascade is only
+	// invoked from planning.CancelPlan after upstream validation.
+	cancelPlannedByPlan(ctx context.Context, planID uuid.UUID) (int64, error)
 }
 
 // assignSlotOp carries the pre-validated data for a single slot assignment.

@@ -10,11 +10,19 @@ import (
 )
 
 type service struct {
-	s store
+	s          store
+	woCanceler WorkOrderCanceller
 }
 
 func NewService(s store) Service {
 	return &service{s: s}
+}
+
+// NewServiceWithDeps wires the optional WorkOrderCanceller used by the
+// APPROVED → CANCELED cascade (#249). Pass nil and the cascade refuses any
+// APPROVED cancel — useful for unit tests that exercise DRAFT-only flows.
+func NewServiceWithDeps(s store, wo WorkOrderCanceller) Service {
+	return &service{s: s, woCanceler: wo}
 }
 
 func (svc *service) CreatePlan(ctx context.Context, in CreatePlanInput) (Plan, error) {
@@ -103,15 +111,49 @@ func (svc *service) ApprovePlan(ctx context.Context, planID uuid.UUID) error {
 	return svc.s.updatePlanStatus(ctx, planID, string(domain.PlanApproved))
 }
 
-func (svc *service) CancelPlan(ctx context.Context, planID uuid.UUID) error {
-	plan, err := svc.s.selectPlanByID(ctx, planID)
+// CancelPlan implements the two-mode cancel introduced in #249.
+//
+//   - DRAFT  → flip status, no audit metadata required (no business activity yet).
+//   - APPROVED → reason mandatory; every linked work order must still be PLANNED.
+//     The cascade flips PLANNED WOs to CANCELED via the production adapter, then
+//     persists status/reason/actor/timestamp atomically on the plan row.
+//
+// Any other source status is rejected with ErrInvalidTransition.
+func (svc *service) CancelPlan(ctx context.Context, in CancelPlanInput) error {
+	plan, err := svc.s.selectPlanByID(ctx, in.PlanID)
 	if err != nil {
 		return err
 	}
-	if plan.Status != domain.PlanDraft {
-		return domain.NewBizError(domain.ErrInvalidTransition, "only draft plans can be canceled")
+
+	switch plan.Status {
+	case domain.PlanDraft:
+		return svc.s.updatePlanStatus(ctx, in.PlanID, string(domain.PlanCanceled))
+
+	case domain.PlanApproved:
+		if in.Reason == "" {
+			return domain.NewBizError(domain.ErrInvalidInput, "cancel reason is required for approved plans")
+		}
+		if svc.woCanceler == nil {
+			return domain.NewBizError(domain.ErrPreconditionFailed, "work order canceler is not configured")
+		}
+		statuses, err := svc.woCanceler.ListStatusesByPlan(ctx, in.PlanID)
+		if err != nil {
+			return err
+		}
+		for _, st := range statuses {
+			if st != domain.WOPlanned && st != domain.WOCanceled {
+				return domain.NewBizError(domain.ErrInvalidTransition,
+					"cannot cancel plan: a work order has progressed past PLANNED")
+			}
+		}
+		if _, err := svc.woCanceler.CancelPlannedByPlan(ctx, in.PlanID); err != nil {
+			return err
+		}
+		return svc.s.cancelPlanWithMetadata(ctx, in.PlanID, in.Reason, in.ActorID, time.Now())
+
+	default:
+		return domain.NewBizError(domain.ErrInvalidTransition, "only draft or approved plans can be canceled")
 	}
-	return svc.s.updatePlanStatus(ctx, planID, string(domain.PlanCanceled))
 }
 
 const maxLookupLimit = 50

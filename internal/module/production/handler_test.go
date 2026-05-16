@@ -85,6 +85,12 @@ func (stubService) ListLaborEntries(context.Context, uuid.UUID) ([]LaborEntry, e
 func (stubService) SumLaborCost(context.Context, uuid.UUID) (domain.Money, error) {
 	panic("unexpected call")
 }
+func (stubService) ListStatusesByPlan(context.Context, uuid.UUID) ([]domain.WorkOrderStatus, error) {
+	panic("unexpected call")
+}
+func (stubService) CancelPlannedByPlan(context.Context, uuid.UUID) (int64, error) {
+	panic("unexpected call")
+}
 
 var _ Service = stubService{}
 
