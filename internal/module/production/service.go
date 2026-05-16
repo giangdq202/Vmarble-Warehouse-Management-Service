@@ -640,3 +640,31 @@ func (svc *service) SumLaborCost(ctx context.Context, woID uuid.UUID) (domain.Mo
 	// minute * (dong / hour) / 60 = dong. Integer division floors fractional dong.
 	return domain.VND(dongMinutes / 60), nil
 }
+
+// ListStatusesByPlan returns the current status of every WO under the plan.
+// Used by planning.CancelPlan as a precondition check before cascade-cancel.
+func (svc *service) ListStatusesByPlan(ctx context.Context, planID uuid.UUID) ([]domain.WorkOrderStatus, error) {
+	if planID == uuid.Nil {
+		return nil, domain.NewBizError(domain.ErrInvalidInput, "plan_id is required")
+	}
+	raws, err := svc.s.listStatusesByPlan(ctx, planID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]domain.WorkOrderStatus, len(raws))
+	for i, r := range raws {
+		out[i] = domain.WorkOrderStatus(r)
+	}
+	return out, nil
+}
+
+// CancelPlannedByPlan flips every PLANNED WO under the plan to CANCELED in a
+// single SQL update. Bypasses the BR-P02 state machine deliberately — this is
+// only callable from planning.CancelPlan after upstream validation that no
+// work order has progressed past PLANNED.
+func (svc *service) CancelPlannedByPlan(ctx context.Context, planID uuid.UUID) (int64, error) {
+	if planID == uuid.Nil {
+		return 0, domain.NewBizError(domain.ErrInvalidInput, "plan_id is required")
+	}
+	return svc.s.cancelPlannedByPlan(ctx, planID)
+}

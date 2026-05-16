@@ -64,7 +64,8 @@ func (s *pgStore) selectPlansPaged(ctx context.Context, p httpkit.PageParams, st
 	}
 
 	query := fmt.Sprintf(
-		`SELECT pp.id, pp.code, pp.po_id, po.code AS po_code, pp.status, pp.deadline, pp.created_at
+		`SELECT pp.id, pp.code, pp.po_id, po.code AS po_code, pp.status, pp.deadline, pp.created_at,
+		        pp.canceled_reason, pp.canceled_at, pp.canceled_by
 		   FROM production_plans pp
 		   JOIN purchase_orders po ON po.id = pp.po_id
 		  WHERE ($1::text = '' OR pp.status = $1)
@@ -84,8 +85,15 @@ func (s *pgStore) selectPlansPaged(ctx context.Context, p httpkit.PageParams, st
 	var plans []Plan
 	for rows.Next() {
 		var plan Plan
-		if err := rows.Scan(&plan.ID, &plan.Code, &plan.POID, &plan.POCode, &plan.Status, &plan.Deadline, &plan.CreatedAt); err != nil {
+		var reason *string
+		if err := rows.Scan(
+			&plan.ID, &plan.Code, &plan.POID, &plan.POCode, &plan.Status, &plan.Deadline, &plan.CreatedAt,
+			&reason, &plan.CanceledAt, &plan.CanceledBy,
+		); err != nil {
 			return nil, 0, err
+		}
+		if reason != nil {
+			plan.CanceledReason = *reason
 		}
 		plans = append(plans, plan)
 	}
@@ -94,18 +102,24 @@ func (s *pgStore) selectPlansPaged(ctx context.Context, p httpkit.PageParams, st
 
 func (s *pgStore) selectPlanByID(ctx context.Context, id uuid.UUID) (Plan, error) {
 	var p Plan
+	var reason *string
 	err := s.pool.QueryRow(ctx,
-		`SELECT pp.id, pp.code, pp.po_id, po.code AS po_code, pp.status, pp.deadline, pp.created_at
+		`SELECT pp.id, pp.code, pp.po_id, po.code AS po_code, pp.status, pp.deadline, pp.created_at,
+		        pp.canceled_reason, pp.canceled_at, pp.canceled_by
 		   FROM production_plans pp
 		   JOIN purchase_orders po ON po.id = pp.po_id
 		  WHERE pp.id = $1`,
 		id,
-	).Scan(&p.ID, &p.Code, &p.POID, &p.POCode, &p.Status, &p.Deadline, &p.CreatedAt)
+	).Scan(&p.ID, &p.Code, &p.POID, &p.POCode, &p.Status, &p.Deadline, &p.CreatedAt,
+		&reason, &p.CanceledAt, &p.CanceledBy)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return Plan{}, domain.ErrNotFound
 		}
 		return Plan{}, err
+	}
+	if reason != nil {
+		p.CanceledReason = *reason
 	}
 	return p, nil
 }
@@ -114,6 +128,22 @@ func (s *pgStore) updatePlanStatus(ctx context.Context, id uuid.UUID, status str
 	_, err := s.pool.Exec(ctx,
 		`UPDATE production_plans SET status = $1 WHERE id = $2`,
 		status, id,
+	)
+	return err
+}
+
+// cancelPlanWithMetadata flips status to CANCELED while persisting reason,
+// actor and timestamp in a single UPDATE so the audit columns stay in sync
+// with the status flip.
+func (s *pgStore) cancelPlanWithMetadata(ctx context.Context, id uuid.UUID, reason string, actorID uuid.UUID, at time.Time) error {
+	_, err := s.pool.Exec(ctx,
+		`UPDATE production_plans
+		    SET status = $1,
+		        canceled_reason = $2,
+		        canceled_by = $3,
+		        canceled_at = $4
+		  WHERE id = $5`,
+		string(domain.PlanCanceled), reason, actorID, at, id,
 	)
 	return err
 }

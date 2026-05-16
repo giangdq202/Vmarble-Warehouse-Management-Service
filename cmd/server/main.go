@@ -87,7 +87,11 @@ func main() {
 	authnSvc := authn.NewService(authnStore, cfg.AuthSecret)
 	catalogSvc := catalog.NewService(catalogStore)
 	orderSvc := order.NewService(orderStore)
-	planningSvc := planning.NewService(planningStore)
+	// planningWOCanceller is wired after productionSvc is constructed (cycle
+	// avoidance, same pattern as woAdvance/costingChecker). It powers the
+	// APPROVED → CANCELED cascade introduced in #249.
+	planningWOCanceller := &planningWOCancellerAdapter{}
+	planningSvc := planning.NewServiceWithDeps(planningStore, planningWOCanceller)
 	// woAdvanceAdapter is wired after productionSvc is constructed to avoid a
 	// construction-time cycle (inventory → production → inventory).
 	// costingChecker is similarly wired after costingSvc is constructed to avoid
@@ -124,6 +128,7 @@ func main() {
 
 	// Wire production into the advance adapter now that it exists.
 	woAdvance.svc = productionSvc
+	planningWOCanceller.svc = productionSvc
 	barcodeGen.skuSvc = catalogSvc
 	barcodeGen.woSvc = productionSvc
 	barcodeGen.barcodeSvc = barcodeSvc
@@ -554,6 +559,22 @@ func (a *costingCheckerAdapter) IsCostingFinalized(ctx context.Context, workOrde
 		return false, nil
 	}
 	return a.svc.IsCostingFinalized(ctx, workOrderID)
+}
+
+// planningWOCancellerAdapter bridges planning → production for the APPROVED
+// → CANCELED cascade introduced in #249. The svc field is wired after
+// productionSvc is constructed (production also depends on planning via
+// planAdapter, so eager wiring would cycle).
+type planningWOCancellerAdapter struct {
+	svc production.Service
+}
+
+func (a *planningWOCancellerAdapter) ListStatusesByPlan(ctx context.Context, planID uuid.UUID) ([]domain.WorkOrderStatus, error) {
+	return a.svc.ListStatusesByPlan(ctx, planID)
+}
+
+func (a *planningWOCancellerAdapter) CancelPlannedByPlan(ctx context.Context, planID uuid.UUID) (int64, error) {
+	return a.svc.CancelPlannedByPlan(ctx, planID)
 }
 
 // laborDataAdapter implements costing.LaborDataReader by delegating to the

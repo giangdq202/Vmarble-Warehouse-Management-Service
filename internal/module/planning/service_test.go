@@ -50,6 +50,14 @@ type mockStore struct {
 	updatePlanStatusValue  string
 	updatePlanStatusErr    error
 
+	// cancelPlanWithMetadata — captures audit-trail UPDATE
+	cancelPlanWithMetadataCalled  bool
+	cancelPlanWithMetadataID      uuid.UUID
+	cancelPlanWithMetadataReason  string
+	cancelPlanWithMetadataActorID uuid.UUID
+	cancelPlanWithMetadataAt      time.Time
+	cancelPlanWithMetadataErr     error
+
 	// insertPlanItems
 	insertPlanItemsErr error
 
@@ -107,6 +115,40 @@ func (m *mockStore) insertPlanItems(_ context.Context, _ []PlanItem) error {
 
 func (m *mockStore) selectPlanItemsByPlanID(_ context.Context, _ uuid.UUID) ([]PlanItem, error) {
 	return m.selectPlanItemsByPlanIDResult, m.selectPlanItemsByPlanIDErr
+}
+
+func (m *mockStore) cancelPlanWithMetadata(_ context.Context, id uuid.UUID, reason string, actorID uuid.UUID, at time.Time) error {
+	m.cancelPlanWithMetadataCalled = true
+	m.cancelPlanWithMetadataID = id
+	m.cancelPlanWithMetadataReason = reason
+	m.cancelPlanWithMetadataActorID = actorID
+	m.cancelPlanWithMetadataAt = at
+	return m.cancelPlanWithMetadataErr
+}
+
+// ── mockWOCanceller ───────────────────────────────────────────────────────────
+
+type mockWOCanceller struct {
+	listResult         []domain.WorkOrderStatus
+	listErr            error
+	listCalled         bool
+	listCalledWithID   uuid.UUID
+	cancelResult       int64
+	cancelErr          error
+	cancelCalled       bool
+	cancelCalledWithID uuid.UUID
+}
+
+func (m *mockWOCanceller) ListStatusesByPlan(_ context.Context, planID uuid.UUID) ([]domain.WorkOrderStatus, error) {
+	m.listCalled = true
+	m.listCalledWithID = planID
+	return m.listResult, m.listErr
+}
+
+func (m *mockWOCanceller) CancelPlannedByPlan(_ context.Context, planID uuid.UUID) (int64, error) {
+	m.cancelCalled = true
+	m.cancelCalledWithID = planID
+	return m.cancelResult, m.cancelErr
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -537,33 +579,187 @@ func TestCancelPlan_FromDraft_Succeeds(t *testing.T) {
 	st := &mockStore{selectPlanByIDResult: draftPlan(planID)}
 
 	svc := NewService(st)
-	err := svc.CancelPlan(context.Background(), planID)
+	err := svc.CancelPlan(context.Background(), CancelPlanInput{PlanID: planID})
 
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if !st.updatePlanStatusCalled {
-		t.Error("updatePlanStatus must be called")
+		t.Error("updatePlanStatus must be called for DRAFT cancel")
 	}
 	if st.updatePlanStatusValue != string(domain.PlanCanceled) {
 		t.Errorf("status written = %q, want %q", st.updatePlanStatusValue, domain.PlanCanceled)
 	}
+	if st.cancelPlanWithMetadataCalled {
+		t.Error("cancelPlanWithMetadata must NOT be called for DRAFT cancel")
+	}
 }
 
-func TestCancelPlan_FromApproved_ReturnsErrInvalidTransition(t *testing.T) {
+func TestCancelPlan_FromApproved_NoWorkOrders_Succeeds(t *testing.T) {
 	planID := uuid.New()
-	st := &mockStore{
-		selectPlanByIDResult: Plan{ID: planID, Status: domain.PlanApproved},
+	actor := uuid.New()
+	st := &mockStore{selectPlanByIDResult: Plan{ID: planID, Status: domain.PlanApproved}}
+	wo := &mockWOCanceller{listResult: nil}
+
+	svc := NewServiceWithDeps(st, wo)
+	err := svc.CancelPlan(context.Background(), CancelPlanInput{
+		PlanID:  planID,
+		Reason:  "PO canceled by customer",
+		ActorID: actor,
+	})
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !wo.listCalled {
+		t.Error("ListStatusesByPlan must be called as precondition")
+	}
+	if !wo.cancelCalled {
+		t.Error("CancelPlannedByPlan must be called even when there are no WOs (idempotent)")
+	}
+	if !st.cancelPlanWithMetadataCalled {
+		t.Fatal("cancelPlanWithMetadata must be called for APPROVED cancel")
+	}
+	if st.cancelPlanWithMetadataReason != "PO canceled by customer" {
+		t.Errorf("reason = %q, want %q", st.cancelPlanWithMetadataReason, "PO canceled by customer")
+	}
+	if st.cancelPlanWithMetadataActorID != actor {
+		t.Errorf("actor = %v, want %v", st.cancelPlanWithMetadataActorID, actor)
+	}
+	if st.cancelPlanWithMetadataAt.IsZero() {
+		t.Error("cancelPlanWithMetadata timestamp must be set")
+	}
+}
+
+func TestCancelPlan_FromApproved_AllWorkOrdersPlanned_CascadesAndCancels(t *testing.T) {
+	planID := uuid.New()
+	actor := uuid.New()
+	st := &mockStore{selectPlanByIDResult: Plan{ID: planID, Status: domain.PlanApproved}}
+	wo := &mockWOCanceller{
+		listResult:   []domain.WorkOrderStatus{domain.WOPlanned, domain.WOPlanned, domain.WOCanceled},
+		cancelResult: 2,
 	}
 
-	svc := NewService(st)
-	err := svc.CancelPlan(context.Background(), planID)
+	svc := NewServiceWithDeps(st, wo)
+	err := svc.CancelPlan(context.Background(), CancelPlanInput{
+		PlanID:  planID,
+		Reason:  "production stopped",
+		ActorID: actor,
+	})
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !wo.cancelCalled || wo.cancelCalledWithID != planID {
+		t.Error("CancelPlannedByPlan must be called with the plan id")
+	}
+	if !st.cancelPlanWithMetadataCalled {
+		t.Error("cancelPlanWithMetadata must be called after WO cascade succeeds")
+	}
+}
+
+func TestCancelPlan_FromApproved_HasStartedWorkOrder_RefusedNoCascade(t *testing.T) {
+	planID := uuid.New()
+	st := &mockStore{selectPlanByIDResult: Plan{ID: planID, Status: domain.PlanApproved}}
+	wo := &mockWOCanceller{
+		listResult: []domain.WorkOrderStatus{domain.WOPlanned, domain.WOInCutting},
+	}
+
+	svc := NewServiceWithDeps(st, wo)
+	err := svc.CancelPlan(context.Background(), CancelPlanInput{
+		PlanID:  planID,
+		Reason:  "tried to cancel mid-cut",
+		ActorID: uuid.New(),
+	})
 
 	if !errors.Is(err, domain.ErrInvalidTransition) {
-		t.Errorf("expected ErrInvalidTransition from APPROVED, got %v", err)
+		t.Errorf("expected ErrInvalidTransition when a WO has started, got %v", err)
 	}
-	if st.updatePlanStatusCalled {
-		t.Error("updatePlanStatus must NOT be called on invalid transition")
+	if wo.cancelCalled {
+		t.Error("CancelPlannedByPlan must NOT be called when precondition fails")
+	}
+	if st.cancelPlanWithMetadataCalled {
+		t.Error("cancelPlanWithMetadata must NOT be called when precondition fails")
+	}
+}
+
+func TestCancelPlan_FromApproved_EmptyReason_RejectedAsInvalidInput(t *testing.T) {
+	planID := uuid.New()
+	st := &mockStore{selectPlanByIDResult: Plan{ID: planID, Status: domain.PlanApproved}}
+	wo := &mockWOCanceller{}
+
+	svc := NewServiceWithDeps(st, wo)
+	err := svc.CancelPlan(context.Background(), CancelPlanInput{PlanID: planID, ActorID: uuid.New()})
+
+	if !errors.Is(err, domain.ErrInvalidInput) {
+		t.Errorf("expected ErrInvalidInput for missing reason on APPROVED cancel, got %v", err)
+	}
+	if wo.listCalled || wo.cancelCalled {
+		t.Error("WOCanceller must NOT be called when reason is missing")
+	}
+	if st.cancelPlanWithMetadataCalled {
+		t.Error("cancelPlanWithMetadata must NOT be called when reason is missing")
+	}
+}
+
+func TestCancelPlan_FromApproved_NoCanceller_PreconditionFailed(t *testing.T) {
+	planID := uuid.New()
+	st := &mockStore{selectPlanByIDResult: Plan{ID: planID, Status: domain.PlanApproved}}
+
+	svc := NewService(st) // no WO canceller wired
+	err := svc.CancelPlan(context.Background(), CancelPlanInput{
+		PlanID:  planID,
+		Reason:  "no canceller",
+		ActorID: uuid.New(),
+	})
+
+	if !errors.Is(err, domain.ErrPreconditionFailed) {
+		t.Errorf("expected ErrPreconditionFailed when canceller is unwired, got %v", err)
+	}
+}
+
+func TestCancelPlan_FromApproved_ListStatusesError_Propagates(t *testing.T) {
+	planID := uuid.New()
+	dbErr := errors.New("statuses query failed")
+	st := &mockStore{selectPlanByIDResult: Plan{ID: planID, Status: domain.PlanApproved}}
+	wo := &mockWOCanceller{listErr: dbErr}
+
+	svc := NewServiceWithDeps(st, wo)
+	err := svc.CancelPlan(context.Background(), CancelPlanInput{
+		PlanID:  planID,
+		Reason:  "x",
+		ActorID: uuid.New(),
+	})
+
+	if !errors.Is(err, dbErr) {
+		t.Errorf("expected ListStatusesByPlan error to propagate, got %v", err)
+	}
+	if st.cancelPlanWithMetadataCalled {
+		t.Error("cancelPlanWithMetadata must NOT be called when precondition errored")
+	}
+}
+
+func TestCancelPlan_FromApproved_CancelWOsError_Propagates(t *testing.T) {
+	planID := uuid.New()
+	dbErr := errors.New("cascade failed")
+	st := &mockStore{selectPlanByIDResult: Plan{ID: planID, Status: domain.PlanApproved}}
+	wo := &mockWOCanceller{
+		listResult: []domain.WorkOrderStatus{domain.WOPlanned},
+		cancelErr:  dbErr,
+	}
+
+	svc := NewServiceWithDeps(st, wo)
+	err := svc.CancelPlan(context.Background(), CancelPlanInput{
+		PlanID:  planID,
+		Reason:  "x",
+		ActorID: uuid.New(),
+	})
+
+	if !errors.Is(err, dbErr) {
+		t.Errorf("expected CancelPlannedByPlan error to propagate, got %v", err)
+	}
+	if st.cancelPlanWithMetadataCalled {
+		t.Error("cancelPlanWithMetadata must NOT be called when cascade failed")
 	}
 }
 
@@ -574,13 +770,13 @@ func TestCancelPlan_FromCanceled_ReturnsErrInvalidTransition(t *testing.T) {
 	}
 
 	svc := NewService(st)
-	err := svc.CancelPlan(context.Background(), planID)
+	err := svc.CancelPlan(context.Background(), CancelPlanInput{PlanID: planID})
 
 	if !errors.Is(err, domain.ErrInvalidTransition) {
 		t.Errorf("expected ErrInvalidTransition from CANCELED, got %v", err)
 	}
-	if st.updatePlanStatusCalled {
-		t.Error("updatePlanStatus must NOT be called on invalid transition")
+	if st.updatePlanStatusCalled || st.cancelPlanWithMetadataCalled {
+		t.Error("no status updates may happen on CANCELED → CANCELED")
 	}
 }
 
@@ -590,14 +786,14 @@ func TestCancelPlan_NotFound_PropagatesError(t *testing.T) {
 	}
 
 	svc := NewService(st)
-	err := svc.CancelPlan(context.Background(), uuid.New())
+	err := svc.CancelPlan(context.Background(), CancelPlanInput{PlanID: uuid.New()})
 
 	if !errors.Is(err, domain.ErrNotFound) {
 		t.Errorf("expected ErrNotFound to propagate, got %v", err)
 	}
 }
 
-func TestCancelPlan_UpdateStatusError_Propagates(t *testing.T) {
+func TestCancelPlan_DraftUpdateStatusError_Propagates(t *testing.T) {
 	dbErr := errors.New("update status failed")
 	planID := uuid.New()
 	st := &mockStore{
@@ -606,7 +802,7 @@ func TestCancelPlan_UpdateStatusError_Propagates(t *testing.T) {
 	}
 
 	svc := NewService(st)
-	err := svc.CancelPlan(context.Background(), planID)
+	err := svc.CancelPlan(context.Background(), CancelPlanInput{PlanID: planID})
 
 	if !errors.Is(err, dbErr) {
 		t.Errorf("expected updatePlanStatus error to propagate, got %v", err)
@@ -638,8 +834,9 @@ func TestStatusLifecycle_AllTransitionsTable(t *testing.T) {
 		{domain.PlanApproved, approve, domain.ErrInvalidTransition, ""},
 		{domain.PlanCanceled, approve, domain.ErrInvalidTransition, ""},
 
-		// Invalid transitions — CancelPlan
-		{domain.PlanApproved, cancel, domain.ErrInvalidTransition, ""},
+		// Invalid transitions — CancelPlan. APPROVED is now a valid source
+		// state (#249) so it is no longer in this table; covered explicitly by
+		// the dedicated APPROVED-cancel tests above.
 		{domain.PlanCanceled, cancel, domain.ErrInvalidTransition, ""},
 	}
 
@@ -657,7 +854,7 @@ func TestStatusLifecycle_AllTransitionsTable(t *testing.T) {
 			case approve:
 				err = svc.ApprovePlan(context.Background(), planID)
 			case cancel:
-				err = svc.CancelPlan(context.Background(), planID)
+				err = svc.CancelPlan(context.Background(), CancelPlanInput{PlanID: planID})
 			}
 
 			if tc.wantErr != nil {

@@ -55,6 +55,7 @@ definitions:
     - IN_PROCESSING
     - COMPLETED
     - COSTED
+    - CANCELED
     type: string
     x-enum-varnames:
     - WOPlanned
@@ -62,6 +63,7 @@ definitions:
     - WOInProcessing
     - WOCompleted
     - WOCosted
+    - WOCanceled
   github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_authn_UserDetail:
     properties:
       current_page:
@@ -1264,6 +1266,12 @@ definitions:
     type: object
   internal_module_planning.Plan:
     properties:
+      canceled_at:
+        type: string
+      canceled_by:
+        type: string
+      canceled_reason:
+        type: string
       code:
         type: string
       created_at:
@@ -1313,6 +1321,11 @@ definitions:
         type: string
       status:
         $ref: '#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.PlanStatus'
+    type: object
+  internal_module_planning.cancelPlanRequest:
+    properties:
+      reason:
+        type: string
     type: object
   internal_module_production.AdvanceStatusInput:
     properties:
@@ -4082,12 +4095,22 @@ paths:
       - planning
   /api/v1/plans/{id}/cancel:
     post:
+      consumes:
+      - application/json
+      description: Cancels a DRAFT or APPROVED plan. APPROVED cancels require a non-empty
+        reason and cascade-cancel any PLANNED work orders. Refused if any work order
+        has progressed past PLANNED.
       parameters:
       - description: plan id (uuid)
         in: path
         name: id
         required: true
         type: string
+      - description: cancel reason (required when plan is APPROVED)
+        in: body
+        name: body
+        schema:
+          $ref: '#/definitions/internal_module_planning.cancelPlanRequest'
       produces:
       - application/json
       responses:

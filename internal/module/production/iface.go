@@ -247,4 +247,13 @@ type Service interface {
 	// SumLaborCost returns the total labor cost for a work order, computed as
 	// SUM(minutes * rate_per_hour / 60). Used by the costing module via deps.
 	SumLaborCost(ctx context.Context, woID uuid.UUID) (domain.Money, error)
+
+	// Plan cascade cancel (#249)
+	// ListStatusesByPlan returns every work order's status for the given plan.
+	// Used by planning.CancelPlan to verify no WO has progressed past PLANNED.
+	ListStatusesByPlan(ctx context.Context, planID uuid.UUID) ([]domain.WorkOrderStatus, error)
+	// CancelPlannedByPlan flips every PLANNED work order under the plan to
+	// CANCELED in a single SQL UPDATE and returns the affected row count.
+	// Intended only for the planning cascade-cancel flow.
+	CancelPlannedByPlan(ctx context.Context, planID uuid.UUID) (int64, error)
 }

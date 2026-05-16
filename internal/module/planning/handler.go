@@ -185,9 +185,12 @@ func (h *Handler) approve(c *gin.Context) {
 // cancelPlan godoc
 //
 // @Summary      Cancel production plan
+// @Description  Cancels a DRAFT or APPROVED plan. APPROVED cancels require a non-empty reason and cascade-cancel any PLANNED work orders. Refused if any work order has progressed past PLANNED.
 // @Tags         planning
+// @Accept       json
 // @Produce      json
-// @Param        id   path      string  true  "plan id (uuid)"
+// @Param        id    path      string                 true  "plan id (uuid)"
+// @Param        body  body      cancelPlanRequest      false "cancel reason (required when plan is APPROVED)"
 // @Success      200  {object}  map[string]string
 // @Failure      400  {object}  map[string]string
 // @Failure      409  {object}  map[string]string
@@ -200,9 +203,33 @@ func (h *Handler) cancel(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
 		return
 	}
-	if err := h.svc.CancelPlan(c.Request.Context(), id); err != nil {
+
+	// Body is optional: DRAFT cancels accept an empty reason. We only fail if
+	// the JSON itself is malformed; an empty body is treated as no reason.
+	var body cancelPlanRequest
+	if c.Request.ContentLength > 0 {
+		if err := c.ShouldBindJSON(&body); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid body"})
+			return
+		}
+	}
+
+	in := CancelPlanInput{PlanID: id, Reason: body.Reason}
+	if ident, ok := auth.FromContext(c); ok {
+		if uid, err := uuid.Parse(ident.UserID); err == nil {
+			in.ActorID = uid
+		}
+	}
+
+	if err := h.svc.CancelPlan(c.Request.Context(), in); err != nil {
 		httpkit.Error(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"status": "canceled"})
+}
+
+// cancelPlanRequest is the JSON body for POST /plans/{id}/cancel.
+// Reason is required when the plan is APPROVED; ignored for DRAFT cancels.
+type cancelPlanRequest struct {
+	Reason string `json:"reason"`
 }

@@ -679,3 +679,41 @@ func (s *pgStore) sumLaborMinuteRateByWO(ctx context.Context, woID uuid.UUID) (i
 	}
 	return sum, nil
 }
+
+// listStatusesByPlan returns the current status of every work order tied to
+// the plan. Used by the planning cascade-cancel precondition (#249).
+func (s *pgStore) listStatusesByPlan(ctx context.Context, planID uuid.UUID) ([]string, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT status FROM work_orders WHERE plan_id = $1`, planID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []string
+	for rows.Next() {
+		var st string
+		if err := rows.Scan(&st); err != nil {
+			return nil, err
+		}
+		out = append(out, st)
+	}
+	return out, rows.Err()
+}
+
+// cancelPlannedByPlan flips every PLANNED work order under the plan to
+// CANCELED in one statement. Returns the number of rows updated. Bypasses
+// the AdvanceStatus state machine deliberately — callers (planning cancel
+// cascade) validate upstream that no WO has progressed past PLANNED.
+func (s *pgStore) cancelPlannedByPlan(ctx context.Context, planID uuid.UUID) (int64, error) {
+	tag, err := s.pool.Exec(ctx,
+		`UPDATE work_orders SET status = 'CANCELED'
+		  WHERE plan_id = $1 AND status = 'PLANNED'`,
+		planID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return tag.RowsAffected(), nil
+}

@@ -96,6 +96,13 @@ type mockStore struct {
 	selectLaborEntriesByWOErr    error
 	sumLaborMinuteRateByWOResult int64
 	sumLaborMinuteRateByWOErr    error
+
+	// Plan cascade cancel (#249)
+	listStatusesByPlanResult  []string
+	listStatusesByPlanErr     error
+	cancelPlannedByPlanCalled bool
+	cancelPlannedByPlanResult int64
+	cancelPlannedByPlanErr    error
 }
 
 func (m *mockStore) insertWorkOrder(_ context.Context, _ WorkOrder) error {
@@ -185,6 +192,13 @@ func (m *mockStore) selectLaborEntriesByWO(_ context.Context, _ uuid.UUID) ([]La
 }
 func (m *mockStore) sumLaborMinuteRateByWO(_ context.Context, _ uuid.UUID) (int64, error) {
 	return m.sumLaborMinuteRateByWOResult, m.sumLaborMinuteRateByWOErr
+}
+func (m *mockStore) listStatusesByPlan(_ context.Context, _ uuid.UUID) ([]string, error) {
+	return m.listStatusesByPlanResult, m.listStatusesByPlanErr
+}
+func (m *mockStore) cancelPlannedByPlan(_ context.Context, _ uuid.UUID) (int64, error) {
+	m.cancelPlannedByPlanCalled = true
+	return m.cancelPlannedByPlanResult, m.cancelPlannedByPlanErr
 }
 
 // mockPlanChecker satisfies PlanChecker.

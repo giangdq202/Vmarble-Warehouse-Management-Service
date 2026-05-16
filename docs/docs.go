@@ -3987,6 +3987,10 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
+                "description": "Cancels a DRAFT or APPROVED plan. APPROVED cancels require a non-empty reason and cascade-cancel any PLANNED work orders. Refused if any work order has progressed past PLANNED.",
+                "consumes": [
+                    "application/json"
+                ],
                 "produces": [
                     "application/json"
                 ],
@@ -4001,6 +4005,14 @@ const docTemplate = `{
                         "name": "id",
                         "in": "path",
                         "required": true
+                    },
+                    {
+                        "description": "cancel reason (required when plan is APPROVED)",
+                        "name": "body",
+                        "in": "body",
+                        "schema": {
+                            "$ref": "#/definitions/internal_module_planning.cancelPlanRequest"
+                        }
                     }
                 ],
                 "responses": {
@@ -6537,14 +6549,16 @@ const docTemplate = `{
                 "IN_CUTTING",
                 "IN_PROCESSING",
                 "COMPLETED",
-                "COSTED"
+                "COSTED",
+                "CANCELED"
             ],
             "x-enum-varnames": [
                 "WOPlanned",
                 "WOInCutting",
                 "WOInProcessing",
                 "WOCompleted",
-                "WOCosted"
+                "WOCosted",
+                "WOCanceled"
             ]
         },
         "github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_authn_UserDetail": {
@@ -8362,6 +8376,15 @@ const docTemplate = `{
         "internal_module_planning.Plan": {
             "type": "object",
             "properties": {
+                "canceled_at": {
+                    "type": "string"
+                },
+                "canceled_by": {
+                    "type": "string"
+                },
+                "canceled_reason": {
+                    "type": "string"
+                },
                 "code": {
                     "type": "string"
                 },
@@ -8436,6 +8459,14 @@ const docTemplate = `{
                 },
                 "status": {
                     "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.PlanStatus"
+                }
+            }
+        },
+        "internal_module_planning.cancelPlanRequest": {
+            "type": "object",
+            "properties": {
+                "reason": {
+                    "type": "string"
                 }
             }
         },

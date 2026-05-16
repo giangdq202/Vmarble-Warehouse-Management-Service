@@ -12,6 +12,11 @@ const (
 	WOInProcessing WorkOrderStatus = "IN_PROCESSING"
 	WOCompleted    WorkOrderStatus = "COMPLETED"
 	WOCosted       WorkOrderStatus = "COSTED"
+	// WOCanceled marks a PLANNED work order that was cascade-cancelled when
+	// its parent plan was cancelled (#249). It is a terminal state with no
+	// forward transitions; AdvanceStatus refuses to leave or enter it. The
+	// only way in is via planning.CancelPlan → production cascade SQL update.
+	WOCanceled WorkOrderStatus = "CANCELED"
 )
 
 var woTransitions = map[WorkOrderStatus]WorkOrderStatus{
