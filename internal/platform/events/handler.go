@@ -34,6 +34,35 @@ func (h *Handler) Register(rg *gin.RouterGroup) {
 //	Content-Type:      text/event-stream
 //	Cache-Control:     no-cache
 //	X-Accel-Buffering: no   ← prevents Nginx from buffering the stream
+//
+// Event payload (`message` event, JSON):
+//
+//	{
+//	  "user_id": "<uuid>",        // present on personal events (e.g. NEW_ASSIGNMENT)
+//	  "roles":   ["planner",...], // present on role-broadcast events
+//	  "type":    "WO_STATUS_CHANGED",
+//	  "wo_id":   "<uuid>",        // anchors the event to a work order when applicable
+//	  "sku":     "SKU-001",       // included on NEW_ASSIGNMENT
+//	  "payload": { "status": "IN_CUTTING" }
+//	}
+//
+// Event types emitted today (issue #258):
+//   - NEW_ASSIGNMENT       — assignee + planner/cnc_manager/foreman/admin
+//   - WO_STATUS_CHANGED    — planner/cnc_manager/foreman/accountant/admin
+//   - CUTTING_RECORDED     — planner/accountant/cnc_manager/admin
+//   - SCAN_CHECKPOINT      — cnc_manager/foreman/accountant/admin
+//   - COSTING_COMPUTED     — accountant/admin
+//
+// @Summary      Subscribe to realtime notifications (SSE)
+// @Description  Server-Sent Events stream of events for the authenticated user
+// @Description  and their role audience. Emits NEW_ASSIGNMENT, WO_STATUS_CHANGED,
+// @Description  CUTTING_RECORDED, SCAN_CHECKPOINT, COSTING_COMPUTED.
+// @Tags         events
+// @Produce      text/event-stream
+// @Success      200 {string} string "event-stream"
+// @Failure      401 {object} map[string]string
+// @Router       /api/v1/notifications/stream [get]
+// @Security     BearerAuth
 func (h *Handler) stream(c *gin.Context) {
 	id, ok := auth.FromContext(c)
 	if !ok {
@@ -41,7 +70,7 @@ func (h *Handler) stream(c *gin.Context) {
 		return
 	}
 
-	ch, unsubscribe := h.broker.Subscribe(id.UserID)
+	ch, unsubscribe := h.broker.Subscribe(id.UserID, string(id.Role))
 	defer unsubscribe()
 
 	c.Header("Content-Type", "text/event-stream")

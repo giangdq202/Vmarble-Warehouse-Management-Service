@@ -95,11 +95,12 @@ func main() {
 	woAdvance := &woAdvanceAdapter{}
 	costingChecker := &costingCheckerAdapter{}
 	barcodeGen := &cutBarcodeAdapter{planSvc: planningSvc}
-	inventorySvc := inventory.NewServiceWithOverflowThreshold(
+	inventorySvc := inventory.NewServiceFull(
 		inventoryStore,
 		woAdvance,
-		cfg.RemnantOverflowThresholdPct,
 		barcodeGen,
+		eventPublisher,
+		cfg.RemnantOverflowThresholdPct,
 	)
 
 	productionSvc := production.NewServiceFull(
@@ -118,6 +119,7 @@ func main() {
 		barcodeStore,
 		&barcodeWOGatewayAdapter{svc: productionSvc},
 		&barcodeUserLookupAdapter{svc: authnSvc},
+		eventPublisher,
 	)
 
 	// Wire production into the advance adapter now that it exists.
@@ -126,12 +128,13 @@ func main() {
 	barcodeGen.woSvc = productionSvc
 	barcodeGen.barcodeSvc = barcodeSvc
 
-	costingSvc := costing.NewService(
+	costingSvc := costing.NewServiceWithNotifier(
 		costingStore,
 		&woAdapter{svc: productionSvc},
 		&cuttingAdapter{pool: pool},
 		&consumptionAdapter{pool: pool},
 		&laborDataAdapter{svc: productionSvc},
+		eventPublisher,
 	)
 	// Wire costing into the checker adapter now that it exists.
 	costingChecker.svc = costingSvc

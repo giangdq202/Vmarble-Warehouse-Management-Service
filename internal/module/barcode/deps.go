@@ -30,3 +30,12 @@ type UserRef struct {
 	ID       uuid.UUID
 	Username string
 }
+
+// ScanNotifier fires a SCAN_CHECKPOINT SSE event after RecordScan persists so
+// manager dashboards and the accountant panel react to checkpoint transitions
+// without polling. Implementation lives in internal/platform/events; wired in
+// main.go. The call is best-effort — a non-nil error is logged and the request
+// still succeeds.
+type ScanNotifier interface {
+	NotifyScanCheckpoint(ctx context.Context, woID, checkpoint string) error
+}

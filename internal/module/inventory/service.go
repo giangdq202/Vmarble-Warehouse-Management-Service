@@ -22,6 +22,7 @@ type service struct {
 	st                   store
 	woa                  WorkOrderAdvancer
 	bcg                  BarcodeGenerator
+	notifier             CutNotifier
 	overflowThresholdPct float64
 }
 
@@ -42,6 +43,16 @@ func NewServiceWithOverflowThreshold(st store, woa WorkOrderAdvancer, thresholdP
 		thresholdPct = defaultOverflowThresholdPct
 	}
 	return &service{st: st, woa: woa, bcg: generator, overflowThresholdPct: thresholdPct}
+}
+
+// NewServiceFull wires the optional cut notifier in addition to the existing
+// dependencies. Kept as a separate constructor so existing callers (and tests)
+// that don't need notifications continue to compile unchanged.
+func NewServiceFull(st store, woa WorkOrderAdvancer, bcg BarcodeGenerator, notifier CutNotifier, thresholdPct float64) Service {
+	if thresholdPct <= 0 || thresholdPct > 100 {
+		thresholdPct = defaultOverflowThresholdPct
+	}
+	return &service{st: st, woa: woa, bcg: bcg, notifier: notifier, overflowThresholdPct: thresholdPct}
 }
 
 func (s *service) ReceiveStock(ctx context.Context, in ReceiveStockInput) (InventoryLot, error) {
@@ -381,6 +392,15 @@ func (s *service) RecordCut(ctx context.Context, in RecordCutInput) (CutResult, 
 				slog.Warn("inventory: RecordCut auto-advance failed",
 					"work_order_id", in.WorkOrderID, "err", err)
 			}
+		}
+	}
+
+	// Best-effort SSE notification — log + continue if the broker is down so a
+	// transient failure never rolls back the persisted cut.
+	if s.notifier != nil {
+		if err := s.notifier.NotifyCuttingRecorded(ctx, in.WorkOrderID.String(), cr.ID.String()); err != nil {
+			slog.Warn("inventory: notify cutting recorded failed",
+				"work_order_id", in.WorkOrderID, "cutting_record_id", cr.ID, "err", err)
 		}
 	}
 

@@ -1289,3 +1289,85 @@ func TestListWasteReport_StoreError_Propagates(t *testing.T) {
 		t.Errorf("expected store error to propagate, got %v", err)
 	}
 }
+
+// ── COSTING_COMPUTED notifier (#258) ─────────────────────────────────────────
+
+type mockCostingNotifier struct {
+	calls []struct {
+		WO   string
+		Type string
+	}
+	err error
+}
+
+func (m *mockCostingNotifier) NotifyCostingComputed(_ context.Context, woID, costingType string) error {
+	m.calls = append(m.calls, struct {
+		WO   string
+		Type string
+	}{woID, costingType})
+	return m.err
+}
+
+func TestComputeCost_HappyPath_PublishesCostingComputed(t *testing.T) {
+	woID := uuid.New()
+	skuID := uuid.New()
+	st := notFoundStore()
+	wor := &mockWOR{result: completedWO(woID, skuID)}
+	cdr := &mockCDR{result: []CuttingData{{
+		SheetCost:    domain.Money{Amount: 50_000, Currency: "VND"},
+		SheetAreaMM2: 2_000_000,
+		UsedAreaMM2:  2_000_000,
+	}}}
+	notifier := &mockCostingNotifier{}
+	svc := NewServiceWithNotifier(st, wor, cdr, zeroCONR(), nil, notifier)
+
+	if _, err := svc.ComputeCost(context.Background(), woID); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(notifier.calls) != 1 {
+		t.Fatalf("notifier calls = %d, want 1", len(notifier.calls))
+	}
+	if notifier.calls[0].WO != woID.String() {
+		t.Errorf("WO = %q, want %q", notifier.calls[0].WO, woID.String())
+	}
+	if notifier.calls[0].Type != string(CostingTypeActual) {
+		t.Errorf("Type = %q, want %q", notifier.calls[0].Type, CostingTypeActual)
+	}
+}
+
+func TestComputeCost_NotifierError_DoesNotFailRequest(t *testing.T) {
+	woID := uuid.New()
+	skuID := uuid.New()
+	st := notFoundStore()
+	wor := &mockWOR{result: completedWO(woID, skuID)}
+	cdr := &mockCDR{result: []CuttingData{{
+		SheetCost:    domain.Money{Amount: 50_000, Currency: "VND"},
+		SheetAreaMM2: 2_000_000,
+		UsedAreaMM2:  2_000_000,
+	}}}
+	notifier := &mockCostingNotifier{err: errors.New("broker down")}
+	svc := NewServiceWithNotifier(st, wor, cdr, zeroCONR(), nil, notifier)
+
+	if _, err := svc.ComputeCost(context.Background(), woID); err != nil {
+		t.Errorf("notifier failure must not fail ComputeCost, got: %v", err)
+	}
+	if !st.insertCalled {
+		t.Error("record must still commit when notifier fails")
+	}
+}
+
+func TestComputeCost_GuardRejects_NotifierNotCalled(t *testing.T) {
+	woID := uuid.New()
+	skuID := uuid.New()
+	st := notFoundStore()
+	wor := &mockWOR{result: completedWO(woID, skuID)}
+	notifier := &mockCostingNotifier{}
+	svc := NewServiceWithNotifier(st, wor, &mockCDR{result: []CuttingData{}}, zeroCONR(), nil, notifier)
+
+	if _, err := svc.ComputeCost(context.Background(), woID); !errors.Is(err, domain.ErrPreconditionFailed) {
+		t.Fatalf("expected ErrPreconditionFailed, got %v", err)
+	}
+	if len(notifier.calls) != 0 {
+		t.Errorf("notifier must not fire when guard rejects, got %v", notifier.calls)
+	}
+}

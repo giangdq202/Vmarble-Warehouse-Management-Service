@@ -247,7 +247,18 @@ func (svc *service) AdvanceStatus(ctx context.Context, woID uuid.UUID, in Advanc
 		}
 	}
 
-	return svc.s.updateWorkOrderStatus(ctx, woID, string(in.To))
+	if err := svc.s.updateWorkOrderStatus(ctx, woID, string(in.To)); err != nil {
+		return err
+	}
+
+	// Best-effort SSE notification — log + continue if the broker is down so a
+	// transient failure never rolls back the persisted transition.
+	if svc.notifier != nil {
+		if err := svc.notifier.NotifyWOStatusChanged(ctx, woID.String(), string(in.To)); err != nil {
+			slog.Warn("production: notify wo status changed failed", "wo_id", woID, "status", in.To, "err", err)
+		}
+	}
+	return nil
 }
 
 func (svc *service) RecordConsumption(ctx context.Context, in RecordConsumptionInput) (ConsumptionRecord, error) {

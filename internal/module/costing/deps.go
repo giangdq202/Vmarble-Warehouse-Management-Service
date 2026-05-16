@@ -37,3 +37,11 @@ type ConsumptionDataReader interface {
 type LaborDataReader interface {
 	GetLaborCostForWO(ctx context.Context, woID uuid.UUID) (domain.Money, error)
 }
+
+// CostingNotifier fires a COSTING_COMPUTED SSE event after ComputeCost
+// persists a record so the accountant panel + admin dashboard refresh without
+// polling. Implementation lives in internal/platform/events; wired in main.go.
+// Best-effort: a non-nil error is logged and the request still succeeds.
+type CostingNotifier interface {
+	NotifyCostingComputed(ctx context.Context, woID, costingType string) error
+}
