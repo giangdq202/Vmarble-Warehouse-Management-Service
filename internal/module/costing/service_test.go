@@ -138,6 +138,20 @@ func (m *mockLBR) GetLaborCostForWO(_ context.Context, _ uuid.UUID) (domain.Mone
 	return m.result, m.err
 }
 
+// ── mockAudit (AuditLogger) ──────────────────────────────────────────────────
+
+type mockAudit struct {
+	called bool
+	got    AuditCostingAdjustmentInput
+	err    error
+}
+
+func (m *mockAudit) LogCostingAdjustment(_ context.Context, in AuditCostingAdjustmentInput) error {
+	m.called = true
+	m.got = in
+	return m.err
+}
+
 // ── helpers ───────────────────────────────────────────────────────────────────
 
 func completedWO(woID, skuID uuid.UUID) WOInfo {
@@ -883,6 +897,155 @@ func TestCreateAdjustment_RecordNotFound_Propagates(t *testing.T) {
 
 	if !errors.Is(err, domain.ErrNotFound) {
 		t.Errorf("expected ErrNotFound, got %v", err)
+	}
+}
+
+func TestCreateAdjustment_HappyPath_WritesAuditRow(t *testing.T) {
+	woID := uuid.New()
+	recordID := uuid.New()
+	actorID := uuid.New()
+	st := &mockStore{
+		selectByWOResult: CostingRecord{ID: recordID, WorkOrderID: woID, Finalized: true},
+	}
+	audit := &mockAudit{}
+	svc := NewServiceFull(st, &mockWOR{}, &mockCDR{}, zeroCONR(), &mockLBR{}, nil, audit)
+
+	got, err := svc.CreateAdjustment(context.Background(), CreateAdjustmentInput{
+		WorkOrderID:   woID,
+		Reason:        "vendor credit applied",
+		DeltaMaterial: domain.Money{Amount: -5000, Currency: "VND"},
+		DeltaLabor:    domain.Money{Amount: 1000, Currency: "VND"},
+		CreatedBy:     actorID,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !audit.called {
+		t.Fatal("LogCostingAdjustment must be called on happy path")
+	}
+	if audit.got.AdjustmentID != got.ID {
+		t.Errorf("audit.AdjustmentID = %v, want %v", audit.got.AdjustmentID, got.ID)
+	}
+	if audit.got.CostingRecordID != recordID {
+		t.Errorf("audit.CostingRecordID = %v, want %v", audit.got.CostingRecordID, recordID)
+	}
+	if audit.got.WorkOrderID != woID {
+		t.Errorf("audit.WorkOrderID = %v, want %v", audit.got.WorkOrderID, woID)
+	}
+	if audit.got.ActorID != actorID {
+		t.Errorf("audit.ActorID = %v, want %v", audit.got.ActorID, actorID)
+	}
+	if audit.got.Reason != "vendor credit applied" {
+		t.Errorf("audit.Reason = %q, want %q", audit.got.Reason, "vendor credit applied")
+	}
+	if audit.got.DeltaMaterial.Amount != -5000 {
+		t.Errorf("audit.DeltaMaterial = %d, want -5000", audit.got.DeltaMaterial.Amount)
+	}
+	if audit.got.DeltaLabor.Amount != 1000 {
+		t.Errorf("audit.DeltaLabor = %d, want 1000", audit.got.DeltaLabor.Amount)
+	}
+	if audit.got.DeltaTotal.Amount != -4000 {
+		t.Errorf("audit.DeltaTotal = %d, want -4000", audit.got.DeltaTotal.Amount)
+	}
+}
+
+func TestCreateAdjustment_AuditError_DoesNotFailRequest(t *testing.T) {
+	woID := uuid.New()
+	recordID := uuid.New()
+	st := &mockStore{
+		selectByWOResult: CostingRecord{ID: recordID, WorkOrderID: woID, Finalized: true},
+	}
+	audit := &mockAudit{err: errors.New("audit table down")}
+	svc := NewServiceFull(st, &mockWOR{}, &mockCDR{}, zeroCONR(), &mockLBR{}, nil, audit)
+
+	got, err := svc.CreateAdjustment(context.Background(), CreateAdjustmentInput{
+		WorkOrderID:   woID,
+		Reason:        "still recorded even when audit log down",
+		DeltaMaterial: domain.Money{Amount: 100, Currency: "VND"},
+		CreatedBy:     uuid.New(),
+	})
+	if err != nil {
+		t.Fatalf("audit failure must not fail the parent request, got: %v", err)
+	}
+	if got.ID == uuid.Nil {
+		t.Error("adjustment must still be returned when audit fails")
+	}
+	if !st.insertAdjCalled {
+		t.Error("insertCostingAdjustment must still be called when audit fails")
+	}
+	if !audit.called {
+		t.Error("LogCostingAdjustment must have been attempted")
+	}
+}
+
+func TestCreateAdjustment_ValidationFailure_SkipsAuditWrite(t *testing.T) {
+	woID := uuid.New()
+	st := &mockStore{
+		selectByWOResult: CostingRecord{ID: uuid.New(), WorkOrderID: woID, Finalized: true},
+	}
+	audit := &mockAudit{}
+	svc := NewServiceFull(st, &mockWOR{}, &mockCDR{}, zeroCONR(), &mockLBR{}, nil, audit)
+
+	// Empty reason → ErrInvalidInput before any insert / audit.
+	_, err := svc.CreateAdjustment(context.Background(), CreateAdjustmentInput{
+		WorkOrderID:   woID,
+		Reason:        "",
+		DeltaMaterial: domain.Money{Amount: 100, Currency: "VND"},
+		CreatedBy:     uuid.New(),
+	})
+	if !errors.Is(err, domain.ErrInvalidInput) {
+		t.Fatalf("expected ErrInvalidInput, got %v", err)
+	}
+	if audit.called {
+		t.Error("LogCostingAdjustment must NOT be called when validation fails")
+	}
+}
+
+func TestCreateAdjustment_NoAuditLogger_StillSucceeds(t *testing.T) {
+	woID := uuid.New()
+	recordID := uuid.New()
+	st := &mockStore{
+		selectByWOResult: CostingRecord{ID: recordID, WorkOrderID: woID, Finalized: true},
+	}
+	// newSvc uses NewService which leaves audit nil — exercises the nil guard.
+	svc := newSvc(st, &mockWOR{}, &mockCDR{}, zeroCONR())
+
+	_, err := svc.CreateAdjustment(context.Background(), CreateAdjustmentInput{
+		WorkOrderID:   woID,
+		Reason:        "no audit wired",
+		DeltaMaterial: domain.Money{Amount: 100, Currency: "VND"},
+		CreatedBy:     uuid.New(),
+	})
+	if err != nil {
+		t.Fatalf("nil audit logger must not break CreateAdjustment, got: %v", err)
+	}
+	if !st.insertAdjCalled {
+		t.Error("insertCostingAdjustment must still be called without audit logger")
+	}
+}
+
+func TestCreateAdjustment_StoreInsertFails_NoAuditWrite(t *testing.T) {
+	woID := uuid.New()
+	dbErr := errors.New("insert failed")
+	st := &mockStore{
+		selectByWOResult: CostingRecord{ID: uuid.New(), WorkOrderID: woID, Finalized: true},
+		insertAdjErr:     dbErr,
+	}
+	audit := &mockAudit{}
+	svc := NewServiceFull(st, &mockWOR{}, &mockCDR{}, zeroCONR(), &mockLBR{}, nil, audit)
+
+	_, err := svc.CreateAdjustment(context.Background(), CreateAdjustmentInput{
+		WorkOrderID:   woID,
+		Reason:        "store insert dies first",
+		DeltaMaterial: domain.Money{Amount: 100, Currency: "VND"},
+		CreatedBy:     uuid.New(),
+	})
+	if !errors.Is(err, dbErr) {
+		t.Fatalf("expected store error to propagate, got %v", err)
+	}
+	if audit.called {
+		t.Error("LogCostingAdjustment must NOT run if the canonical insert fails")
 	}
 }
 

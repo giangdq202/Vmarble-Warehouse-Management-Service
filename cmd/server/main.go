@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
 	"net/http"
 	"os"
@@ -134,13 +135,14 @@ func main() {
 	barcodeGen.woSvc = productionSvc
 	barcodeGen.barcodeSvc = barcodeSvc
 
-	costingSvc := costing.NewServiceWithNotifier(
+	costingSvc := costing.NewServiceFull(
 		costingStore,
 		&woAdapter{svc: productionSvc},
 		&cuttingAdapter{pool: pool},
 		&consumptionAdapter{pool: pool},
 		&laborDataAdapter{svc: productionSvc},
 		eventPublisher,
+		&costingAuditAdapter{pool: pool},
 	)
 	// Wire costing into the checker adapter now that it exists.
 	costingChecker.svc = costingSvc
@@ -755,4 +757,37 @@ func (a *reportsWasteAdapter) ListWasteInPeriod(ctx context.Context, p reports.P
 		})
 	}
 	return out, nil
+}
+
+// costingAuditAdapter implements costing.AuditLogger by writing directly to
+// inventory_audit_log via pgxpool. Inlined here (instead of going through
+// inventory.Service) so costing does not depend on the inventory module —
+// the audit table is a shared cross-module ledger keyed by entity_type.
+//
+// COSTING_ADJUSTED rows carry entity_type="COSTING_ADJUSTMENT", entity_id =
+// adjustment.id; the metadata JSON column holds per-axis deltas + the parent
+// costing_record_id and work_order_id so accountants can reconstruct the
+// change without joining.
+type costingAuditAdapter struct{ pool *pgxpool.Pool }
+
+func (a *costingAuditAdapter) LogCostingAdjustment(ctx context.Context, in costing.AuditCostingAdjustmentInput) error {
+	meta, err := json.Marshal(map[string]any{
+		"costing_record_id": in.CostingRecordID,
+		"work_order_id":     in.WorkOrderID,
+		"delta_material":    in.DeltaMaterial.Amount,
+		"delta_auxiliary":   in.DeltaAuxiliary.Amount,
+		"delta_labor":       in.DeltaLabor.Amount,
+		"delta_total":       in.DeltaTotal.Amount,
+		"currency":          in.DeltaTotal.Currency,
+	})
+	if err != nil {
+		return err
+	}
+	_, err = a.pool.Exec(ctx,
+		`INSERT INTO inventory_audit_log
+		    (id, entity_type, entity_id, action, actor_id, reason, metadata, created_at)
+		 VALUES (gen_random_uuid(), 'COSTING_ADJUSTMENT', $1, 'COSTING_ADJUSTED', $2, $3, $4, NOW())`,
+		in.AdjustmentID, in.ActorID, in.Reason, meta,
+	)
+	return err
 }
