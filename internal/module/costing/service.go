@@ -18,6 +18,7 @@ type service struct {
 	conr     ConsumptionDataReader
 	lbr      LaborDataReader
 	notifier CostingNotifier
+	audit    AuditLogger
 }
 
 func NewService(st store, wor WorkOrderReader, cdr CuttingDataReader, conr ConsumptionDataReader, lbr LaborDataReader) Service {
@@ -30,6 +31,15 @@ func NewService(st store, wor WorkOrderReader, cdr CuttingDataReader, conr Consu
 // back by a transient broker outage.
 func NewServiceWithNotifier(st store, wor WorkOrderReader, cdr CuttingDataReader, conr ConsumptionDataReader, lbr LaborDataReader, notifier CostingNotifier) Service {
 	return &service{st: st, wor: wor, cdr: cdr, conr: conr, lbr: lbr, notifier: notifier}
+}
+
+// NewServiceFull wires the full set of optional cross-module dependencies
+// (notifier + audit). Tests construct without these via NewService; production
+// uses this constructor in cmd/server/main.go. Each optional dep is guarded
+// individually inside the service so a missing audit logger never breaks
+// notify, and vice-versa.
+func NewServiceFull(st store, wor WorkOrderReader, cdr CuttingDataReader, conr ConsumptionDataReader, lbr LaborDataReader, notifier CostingNotifier, audit AuditLogger) Service {
+	return &service{st: st, wor: wor, cdr: cdr, conr: conr, lbr: lbr, notifier: notifier, audit: audit}
 }
 
 func (s *service) ComputeCost(ctx context.Context, workOrderID uuid.UUID) (CostingRecord, error) {
@@ -174,6 +184,30 @@ func (s *service) CreateAdjustment(ctx context.Context, in CreateAdjustmentInput
 	if err := s.st.insertCostingAdjustment(ctx, adj); err != nil {
 		return CostingAdjustment{}, err
 	}
+
+	// Best-effort audit row (BR-C04 audit trail, #250). Logged on failure but
+	// never propagated — the adjustment row is the canonical record; the audit
+	// row is supplementary review data for accountants.
+	if s.audit != nil {
+		if err := s.audit.LogCostingAdjustment(ctx, AuditCostingAdjustmentInput{
+			AdjustmentID:    adj.ID,
+			CostingRecordID: record.ID,
+			WorkOrderID:     record.WorkOrderID,
+			ActorID:         in.CreatedBy,
+			Reason:          in.Reason,
+			DeltaMaterial:   in.DeltaMaterial,
+			DeltaAuxiliary:  in.DeltaAuxiliary,
+			DeltaLabor:      in.DeltaLabor,
+			DeltaTotal:      deltaTotal,
+		}); err != nil {
+			slog.Warn("audit log for costing adjustment failed",
+				"adjustment_id", adj.ID,
+				"costing_record_id", record.ID,
+				"work_order_id", record.WorkOrderID,
+				"err", err)
+		}
+	}
+
 	return adj, nil
 }
 
