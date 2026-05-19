@@ -71,8 +71,11 @@ func (svc *service) GetPO(ctx context.Context, poID uuid.UUID) (PO, error) {
 	return po, nil
 }
 
-func (svc *service) ListPOs(ctx context.Context, p httpkit.PageParams) (httpkit.PagedResult[PO], error) {
-	pos, total, err := svc.s.selectPOsPaged(ctx, p)
+func (svc *service) ListPOs(ctx context.Context, p httpkit.PageParams, f POListFilter) (httpkit.PagedResult[PO], error) {
+	if f.From != nil && f.To != nil && !f.From.Before(*f.To) {
+		return httpkit.PagedResult[PO]{}, domain.NewBizError(domain.ErrInvalidInput, "from must be before to")
+	}
+	pos, total, err := svc.s.selectPOsPaged(ctx, p, f)
 	if err != nil {
 		return httpkit.PagedResult[PO]{}, err
 	}

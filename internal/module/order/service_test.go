@@ -42,7 +42,7 @@ func (m *mockStore) insertPOWithItems(_ context.Context, _ PO, _ []LineItem) err
 	return m.insertPOWithItemsErr
 }
 
-func (m *mockStore) selectPOsPaged(_ context.Context, _ httpkit.PageParams) ([]PO, int, error) {
+func (m *mockStore) selectPOsPaged(_ context.Context, _ httpkit.PageParams, _ POListFilter) ([]PO, int, error) {
 	return m.selectPOsResult, len(m.selectPOsResult), m.selectPOsErr
 }
 
@@ -328,7 +328,7 @@ func TestListPOs_Empty_ReturnsNil(t *testing.T) {
 	st := &mockStore{selectPOsResult: nil}
 
 	svc := NewService(st)
-	pos, err := svc.ListPOs(context.Background(), httpkit.PageParams{Page: 1, Limit: 10})
+	pos, err := svc.ListPOs(context.Background(), httpkit.PageParams{Page: 1, Limit: 10}, POListFilter{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -345,7 +345,7 @@ func TestListPOs_ReturnAll(t *testing.T) {
 	st := &mockStore{selectPOsResult: stored}
 
 	svc := NewService(st)
-	pos, err := svc.ListPOs(context.Background(), httpkit.PageParams{Page: 1, Limit: 10})
+	pos, err := svc.ListPOs(context.Background(), httpkit.PageParams{Page: 1, Limit: 10}, POListFilter{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -359,10 +359,33 @@ func TestListPOs_StoreError_Propagates(t *testing.T) {
 	st := &mockStore{selectPOsErr: dbErr}
 
 	svc := NewService(st)
-	_, err := svc.ListPOs(context.Background(), httpkit.PageParams{Page: 1, Limit: 10})
+	_, err := svc.ListPOs(context.Background(), httpkit.PageParams{Page: 1, Limit: 10}, POListFilter{})
 
 	if !errors.Is(err, dbErr) {
 		t.Errorf("expected selectPOs error to propagate, got %v", err)
+	}
+}
+
+// FromAfterTo is rejected at the service entry so the SQL never sees an
+// inverted range. Empty bounds (both nil) are exempt — callers may list
+// without any time filter.
+func TestListPOs_FromAfterTo_ReturnsErrInvalidInput(t *testing.T) {
+	from := time.Now()
+	to := from.Add(-24 * time.Hour)
+	svc := NewService(&mockStore{})
+	_, err := svc.ListPOs(context.Background(), httpkit.PageParams{Page: 1, Limit: 10},
+		POListFilter{From: &from, To: &to})
+	if !errors.Is(err, domain.ErrInvalidInput) {
+		t.Errorf("expected ErrInvalidInput for from > to, got %v", err)
+	}
+}
+
+func TestListPOs_FromOnly_DoesNotError(t *testing.T) {
+	from := time.Now().Add(-30 * 24 * time.Hour)
+	svc := NewService(&mockStore{})
+	if _, err := svc.ListPOs(context.Background(), httpkit.PageParams{Page: 1, Limit: 10},
+		POListFilter{From: &from}); err != nil {
+		t.Errorf("from-only must not error, got %v", err)
 	}
 }
 
@@ -440,7 +463,7 @@ func TestListPOs_ReturnsSummaryMetadata(t *testing.T) {
 	st := &mockStore{selectPOsResult: stored}
 
 	svc := NewService(st)
-	pos, err := svc.ListPOs(context.Background(), httpkit.PageParams{Page: 1, Limit: 10})
+	pos, err := svc.ListPOs(context.Background(), httpkit.PageParams{Page: 1, Limit: 10}, POListFilter{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

@@ -212,3 +212,62 @@ func ParseDateRange(c *gin.Context) (from, to time.Time, ok bool) {
 	}
 	return from, to, true
 }
+
+// dateRangeLoc is the local timezone applied when a YYYY-MM-DD bound is
+// supplied without a time component. The accountant typing "01/05" in Hanoi
+// means 00:00 Asia/Ho_Chi_Minh, not 00:00 UTC — without the local
+// interpretation a "Tháng 5" filter clips off the first 7 hours of the
+// month.
+var dateRangeLoc = func() *time.Location {
+	loc, err := time.LoadLocation("Asia/Ho_Chi_Minh")
+	if err != nil {
+		return time.FixedZone("Asia/Ho_Chi_Minh", 7*60*60)
+	}
+	return loc
+}()
+
+// ParseDateRangeFilter reads optional "from"/"to" date-range filter
+// parameters. Each may be YYYY-MM-DD (interpreted in Asia/Ho_Chi_Minh) or
+// RFC3339 (interpreted as-is). The "to" bound is treated as inclusive
+// end-of-day for YYYY-MM-DD inputs — equal from/to returns records that
+// fall on that day rather than zero rows (INSTINCTS: To-exclusive
+// end-of-day).
+//
+// Either or both bounds may be omitted; the corresponding return is nil so
+// the consuming SQL can branch on `($1::timestamptz IS NULL OR ...)`.
+//
+// On a malformed value the helper writes 400 and returns ok=false; the
+// handler must early-return without touching the service.
+func ParseDateRangeFilter(c *gin.Context) (from, to *time.Time, ok bool) {
+	if raw := c.Query("from"); raw != "" {
+		t, err := parseDateRangeBoundary(raw, false)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid from date, use YYYY-MM-DD or RFC3339"})
+			return nil, nil, false
+		}
+		from = &t
+	}
+	if raw := c.Query("to"); raw != "" {
+		t, err := parseDateRangeBoundary(raw, true)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid to date, use YYYY-MM-DD or RFC3339"})
+			return nil, nil, false
+		}
+		to = &t
+	}
+	if from != nil && to != nil && !from.Before(*to) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "from must be before to"})
+		return nil, nil, false
+	}
+	return from, to, true
+}
+
+func parseDateRangeBoundary(s string, inclusiveDayEnd bool) (time.Time, error) {
+	if day, err := time.ParseInLocation(time.DateOnly, s, dateRangeLoc); err == nil {
+		if inclusiveDayEnd {
+			return day.AddDate(0, 0, 1), nil
+		}
+		return day, nil
+	}
+	return time.Parse(time.RFC3339, s)
+}

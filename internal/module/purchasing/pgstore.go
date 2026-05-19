@@ -68,12 +68,22 @@ func (s *pgStore) selectPOsPaged(ctx context.Context, p httpkit.PageParams, f PO
 		orderDir = "ASC"
 	}
 
+	var fromAny, toAny any
+	if f.From != nil {
+		fromAny = *f.From
+	}
+	if f.To != nil {
+		toAny = *f.To
+	}
+
 	var total int
 	if err := s.pool.QueryRow(ctx,
 		`SELECT COUNT(*) FROM material_purchase_orders
 		 WHERE ($1::text = '' OR status = $1)
-		   AND ($2::uuid IS NULL OR material_id = $2)`,
-		f.Status, f.MaterialID,
+		   AND ($2::uuid IS NULL OR material_id = $2)
+		   AND ($3::timestamptz IS NULL OR created_at >= $3)
+		   AND ($4::timestamptz IS NULL OR created_at <  $4)`,
+		f.Status, f.MaterialID, fromAny, toAny,
 	).Scan(&total); err != nil {
 		return nil, 0, err
 	}
@@ -83,11 +93,13 @@ func (s *pgStore) selectPOsPaged(ctx context.Context, p httpkit.PageParams, f PO
 		 FROM material_purchase_orders
 		 WHERE ($1::text = '' OR status = $1)
 		   AND ($2::uuid IS NULL OR material_id = $2)
+		   AND ($3::timestamptz IS NULL OR created_at >= $3)
+		   AND ($4::timestamptz IS NULL OR created_at <  $4)
 		 ORDER BY created_at %s
-		 LIMIT $3 OFFSET $4`,
+		 LIMIT $5 OFFSET $6`,
 		orderDir,
 	)
-	rows, err := s.pool.Query(ctx, query, f.Status, f.MaterialID, p.Limit, p.Offset())
+	rows, err := s.pool.Query(ctx, query, f.Status, f.MaterialID, fromAny, toAny, p.Limit, p.Offset())
 	if err != nil {
 		return nil, 0, err
 	}

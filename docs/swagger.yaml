@@ -4219,6 +4219,16 @@ paths:
         in: query
         name: order
         type: string
+      - description: filter created_at >= from (YYYY-MM-DD or RFC3339, Asia/Ho_Chi_Minh
+          local)
+        in: query
+        name: from
+        type: string
+      - description: filter created_at < to + 1 day (YYYY-MM-DD or RFC3339, Asia/Ho_Chi_Minh
+          local; inclusive)
+        in: query
+        name: to
+        type: string
       produces:
       - application/json
       responses:
@@ -4226,6 +4236,12 @@ paths:
           description: OK
           schema:
             $ref: '#/definitions/github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_order_PO'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
         "401":
           description: Unauthorized
           schema:
@@ -4409,6 +4425,16 @@ paths:
         in: query
         name: limit
         type: integer
+      - description: filter created_at >= from (YYYY-MM-DD or RFC3339, Asia/Ho_Chi_Minh
+          local)
+        in: query
+        name: from
+        type: string
+      - description: filter created_at < to + 1 day (YYYY-MM-DD or RFC3339, Asia/Ho_Chi_Minh
+          local; inclusive)
+        in: query
+        name: to
+        type: string
       produces:
       - application/json
       responses:
@@ -4416,6 +4442,12 @@ paths:
           description: OK
           schema:
             $ref: '#/definitions/github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_purchasing_PurchaseOrder'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
       security:
       - BearerAuth: []
       summary: List purchase orders

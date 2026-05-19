@@ -69,7 +69,10 @@ func (h *Handler) create(c *gin.Context) {
 // @Param        material_id query   string  false  "filter by material UUID"
 // @Param        page        query   int     false  "page number"
 // @Param        limit       query   int     false  "items per page"
+// @Param        from        query   string  false  "filter created_at >= from (YYYY-MM-DD or RFC3339, Asia/Ho_Chi_Minh local)"
+// @Param        to          query   string  false  "filter created_at < to + 1 day (YYYY-MM-DD or RFC3339, Asia/Ho_Chi_Minh local; inclusive)"
 // @Success      200  {object}  httpkit.PagedResult[PurchaseOrder]
+// @Failure      400  {object}  map[string]string
 // @Router       /api/v1/purchase-orders [get]
 func (h *Handler) list(c *gin.Context) {
 	p := httpkit.BindPageParams(c)
@@ -81,6 +84,12 @@ func (h *Handler) list(c *gin.Context) {
 			f.MaterialID = &id
 		}
 	}
+	from, to, ok := httpkit.ParseDateRangeFilter(c)
+	if !ok {
+		return
+	}
+	f.From = from
+	f.To = to
 	result, err := h.svc.ListPOs(c.Request.Context(), p, f)
 	if err != nil {
 		httpkit.Error(c, err)

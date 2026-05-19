@@ -4099,6 +4099,18 @@ const docTemplate = `{
                         "description": "sort direction: asc, desc (default desc)",
                         "name": "order",
                         "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "filter created_at \u003e= from (YYYY-MM-DD or RFC3339, Asia/Ho_Chi_Minh local)",
+                        "name": "from",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "filter created_at \u003c to + 1 day (YYYY-MM-DD or RFC3339, Asia/Ho_Chi_Minh local; inclusive)",
+                        "name": "to",
+                        "in": "query"
                     }
                 ],
                 "responses": {
@@ -4106,6 +4118,15 @@ const docTemplate = `{
                         "description": "OK",
                         "schema": {
                             "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_order_PO"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
                         }
                     },
                     "401": {
@@ -4399,6 +4420,18 @@ const docTemplate = `{
                         "description": "items per page",
                         "name": "limit",
                         "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "filter created_at \u003e= from (YYYY-MM-DD or RFC3339, Asia/Ho_Chi_Minh local)",
+                        "name": "from",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "filter created_at \u003c to + 1 day (YYYY-MM-DD or RFC3339, Asia/Ho_Chi_Minh local; inclusive)",
+                        "name": "to",
+                        "in": "query"
                     }
                 ],
                 "responses": {
@@ -4406,6 +4439,15 @@ const docTemplate = `{
                         "description": "OK",
                         "schema": {
                             "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_purchasing_PurchaseOrder"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
                         }
                     }
                 }
