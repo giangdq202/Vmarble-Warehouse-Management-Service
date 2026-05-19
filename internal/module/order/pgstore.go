@@ -48,7 +48,7 @@ func (s *pgStore) insertPOWithItems(ctx context.Context, p PO, items []LineItem)
 	return tx.Commit(ctx)
 }
 
-func (s *pgStore) selectPOsPaged(ctx context.Context, p httpkit.PageParams) ([]PO, int, error) {
+func (s *pgStore) selectPOsPaged(ctx context.Context, p httpkit.PageParams, f POListFilter) ([]PO, int, error) {
 	search := "%" + p.Search + "%"
 
 	sortCol := "created_at"
@@ -61,10 +61,25 @@ func (s *pgStore) selectPOsPaged(ctx context.Context, p httpkit.PageParams) ([]P
 		orderDir = "ASC"
 	}
 
+	// Typed-nil binding so the IS NULL branch fires when From/To are unset
+	// (INSTINCTS: typed-nil params for optional SQL filters). Without this,
+	// passing (*time.Time)(nil) directly works in pgx but reads less clearly
+	// than letting any-typed nils flow through.
+	var fromAny, toAny any
+	if f.From != nil {
+		fromAny = *f.From
+	}
+	if f.To != nil {
+		toAny = *f.To
+	}
+
 	var total int
 	if err := s.pool.QueryRow(ctx,
-		`SELECT COUNT(*) FROM purchase_orders WHERE is_active = true AND code ILIKE $1`,
-		search,
+		`SELECT COUNT(*) FROM purchase_orders
+		 WHERE is_active = true AND code ILIKE $1
+		   AND ($2::timestamptz IS NULL OR created_at >= $2)
+		   AND ($3::timestamptz IS NULL OR created_at <  $3)`,
+		search, fromAny, toAny,
 	).Scan(&total); err != nil {
 		return nil, 0, err
 	}
@@ -77,12 +92,14 @@ func (s *pgStore) selectPOsPaged(ctx context.Context, p httpkit.PageParams) ([]P
 		 FROM purchase_orders po
 		 LEFT JOIN po_line_items li ON li.po_id = po.id
 		 WHERE po.is_active = true AND po.code ILIKE $1
+		   AND ($2::timestamptz IS NULL OR po.created_at >= $2)
+		   AND ($3::timestamptz IS NULL OR po.created_at <  $3)
 		 GROUP BY po.id, po.code, po.expected_delivery, po.is_active, po.created_at
 		 ORDER BY po.%s %s
-		 LIMIT $2 OFFSET $3`,
+		 LIMIT $4 OFFSET $5`,
 		sortCol, orderDir,
 	)
-	rows, err := s.pool.Query(ctx, query, search, p.Limit, p.Offset())
+	rows, err := s.pool.Query(ctx, query, search, fromAny, toAny, p.Limit, p.Offset())
 	if err != nil {
 		return nil, 0, err
 	}

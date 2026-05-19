@@ -61,14 +61,21 @@ func (h *Handler) create(c *gin.Context) {
 // @Param        search   query     string  false  "search by PO code (ILIKE)"
 // @Param        sort_by  query     string  false  "sort column: code, expected_delivery (default created_at)"
 // @Param        order    query     string  false  "sort direction: asc, desc (default desc)"
+// @Param        from     query     string  false  "filter created_at >= from (YYYY-MM-DD or RFC3339, Asia/Ho_Chi_Minh local)"
+// @Param        to       query     string  false  "filter created_at < to + 1 day (YYYY-MM-DD or RFC3339, Asia/Ho_Chi_Minh local; inclusive)"
 // @Success      200  {object}  httpkit.PagedResult[PO]
+// @Failure      400  {object}  map[string]string
 // @Failure      500  {object}  map[string]string
 // @Security     BearerAuth
 // @Failure      401  {object}  map[string]string
 // @Router       /api/v1/pos [get]
 func (h *Handler) list(c *gin.Context) {
 	p := httpkit.BindPageParams(c)
-	result, err := h.svc.ListPOs(c.Request.Context(), p)
+	from, to, ok := httpkit.ParseDateRangeFilter(c)
+	if !ok {
+		return
+	}
+	result, err := h.svc.ListPOs(c.Request.Context(), p, POListFilter{From: from, To: to})
 	if err != nil {
 		httpkit.Error(c, err)
 		return

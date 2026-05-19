@@ -41,10 +41,18 @@ type PO struct {
 	LineItems        []LineItem `json:"line_items,omitempty"`
 }
 
+// POListFilter narrows ListPOs results. From/To are optional [from, to)
+// bounds applied to created_at; nil leaves the bound unset. The handler
+// converts ?to=YYYY-MM-DD to end-of-day before passing it down.
+type POListFilter struct {
+	From *time.Time
+	To   *time.Time
+}
+
 type Service interface {
 	CreatePO(ctx context.Context, in CreatePOInput) (PO, error)
 	GetPO(ctx context.Context, poID uuid.UUID) (PO, error)
-	ListPOs(ctx context.Context, p httpkit.PageParams) (httpkit.PagedResult[PO], error)
+	ListPOs(ctx context.Context, p httpkit.PageParams, f POListFilter) (httpkit.PagedResult[PO], error)
 	DeactivatePO(ctx context.Context, poID uuid.UUID) error
 	GetLineItemsByPO(ctx context.Context, poID uuid.UUID) ([]LineItem, error)
 	GetLineItemsBySKU(ctx context.Context, skuID uuid.UUID) ([]LineItem, error)

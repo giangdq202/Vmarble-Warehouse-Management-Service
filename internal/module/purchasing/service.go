@@ -52,6 +52,9 @@ func (s *service) GetPO(ctx context.Context, id uuid.UUID) (PurchaseOrder, error
 }
 
 func (s *service) ListPOs(ctx context.Context, p httpkit.PageParams, f POListFilter) (httpkit.PagedResult[PurchaseOrder], error) {
+	if f.From != nil && f.To != nil && !f.From.Before(*f.To) {
+		return httpkit.PagedResult[PurchaseOrder]{}, domain.NewBizError(domain.ErrInvalidInput, "from must be before to")
+	}
 	pos, total, err := s.st.selectPOsPaged(ctx, p, f)
 	if err != nil {
 		return httpkit.PagedResult[PurchaseOrder]{}, err

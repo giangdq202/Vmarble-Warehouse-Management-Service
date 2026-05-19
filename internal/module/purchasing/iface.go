@@ -62,6 +62,11 @@ type AddPOItemInput struct {
 type POListFilter struct {
 	Status     string
 	MaterialID *uuid.UUID
+	// From/To are optional [from, to) bounds applied to created_at; nil
+	// leaves the bound unset. The handler converts ?to=YYYY-MM-DD to
+	// end-of-day before passing it down.
+	From *time.Time
+	To   *time.Time
 }
 
 type Service interface {

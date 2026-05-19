@@ -381,3 +381,27 @@ func TestRemoveItem_NonDraft_IsPreconditionFailed(t *testing.T) {
 		t.Errorf("expected ErrPreconditionFailed, got %v", err)
 	}
 }
+
+// ── ListPOs date filter ──────────────────────────────────────────────────────
+
+func TestListPOs_FromAfterTo_ReturnsErrInvalidInput(t *testing.T) {
+	from := time.Now()
+	to := from.Add(-24 * time.Hour)
+	svc := newSvc(&mockStore{}, &mockMaterialChecker{}, &mockStockReceiver{})
+	_, err := svc.ListPOs(context.Background(),
+		httpkit.PageParams{Page: 1, Limit: 10},
+		POListFilter{From: &from, To: &to})
+	if !errors.Is(err, domain.ErrInvalidInput) {
+		t.Errorf("expected ErrInvalidInput for from > to, got %v", err)
+	}
+}
+
+func TestListPOs_OpenEndedFrom_DoesNotError(t *testing.T) {
+	from := time.Now().Add(-30 * 24 * time.Hour)
+	svc := newSvc(&mockStore{}, &mockMaterialChecker{}, &mockStockReceiver{})
+	if _, err := svc.ListPOs(context.Background(),
+		httpkit.PageParams{Page: 1, Limit: 10},
+		POListFilter{From: &from}); err != nil {
+		t.Errorf("from-only must not error, got %v", err)
+	}
+}
