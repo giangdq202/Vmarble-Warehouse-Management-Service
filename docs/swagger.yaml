@@ -4647,7 +4647,7 @@ paths:
         in: query
         name: from
         type: string
-      - description: To date (YYYY-MM-DD, inclusive)
+      - description: To date (YYYY-MM-DD, inclusive; max 90-day span)
         in: query
         name: to
         type: string
@@ -4676,7 +4676,7 @@ paths:
         in: query
         name: from
         type: string
-      - description: To date (YYYY-MM-DD, inclusive)
+      - description: To date (YYYY-MM-DD, inclusive; max 90-day span)
         in: query
         name: to
         type: string
@@ -4725,7 +4725,7 @@ paths:
         in: query
         name: from
         type: string
-      - description: To date (YYYY-MM-DD, inclusive)
+      - description: To date (YYYY-MM-DD, inclusive; max 90-day span)
         in: query
         name: to
         type: string
@@ -4754,7 +4754,7 @@ paths:
         in: query
         name: from
         type: string
-      - description: To date (YYYY-MM-DD, inclusive)
+      - description: To date (YYYY-MM-DD, inclusive; max 90-day span)
         in: query
         name: to
         type: string

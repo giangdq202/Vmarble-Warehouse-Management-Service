@@ -4783,7 +4783,7 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "To date (YYYY-MM-DD, inclusive)",
+                        "description": "To date (YYYY-MM-DD, inclusive; max 90-day span)",
                         "name": "to",
                         "in": "query"
                     }
@@ -4830,7 +4830,7 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "To date (YYYY-MM-DD, inclusive)",
+                        "description": "To date (YYYY-MM-DD, inclusive; max 90-day span)",
                         "name": "to",
                         "in": "query"
                     }
@@ -4910,7 +4910,7 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "To date (YYYY-MM-DD, inclusive)",
+                        "description": "To date (YYYY-MM-DD, inclusive; max 90-day span)",
                         "name": "to",
                         "in": "query"
                     }
@@ -4957,7 +4957,7 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "To date (YYYY-MM-DD, inclusive)",
+                        "description": "To date (YYYY-MM-DD, inclusive; max 90-day span)",
                         "name": "to",
                         "in": "query"
                     }
