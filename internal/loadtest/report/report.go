@@ -101,7 +101,7 @@ func writeJSON(path string, b Bundle) error {
 	if err != nil {
 		return fmt.Errorf("loadtest report: create json: %w", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	enc := json.NewEncoder(f)
 	enc.SetIndent("", "  ")
 	if err := enc.Encode(b); err != nil {

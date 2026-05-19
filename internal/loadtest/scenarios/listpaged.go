@@ -56,7 +56,7 @@ func (s *ListPaged) Step(ctx context.Context, _ int) loadtest.Result {
 	if err != nil {
 		return loadtest.Result{Endpoint: endpoint, Err: err, Latency: time.Since(start)}
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	// Drain body so the connection returns to the pool. We don't parse the
 	// payload — load tests should reflect server work, not client-side

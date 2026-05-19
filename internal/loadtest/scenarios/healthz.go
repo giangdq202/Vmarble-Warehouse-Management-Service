@@ -33,7 +33,7 @@ func (s *Healthz) Step(ctx context.Context, _ int) loadtest.Result {
 	if err != nil {
 		return loadtest.Result{Endpoint: endpoint, Err: err, Latency: time.Since(start)}
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	n, _ := io.Copy(io.Discard, resp.Body)
 	return loadtest.Result{
 		Endpoint:   endpoint,
