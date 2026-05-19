@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Load Test — {{.Scenario}} — {{.Snapshot.StartedAt.Format "2006-01-02 15:04:05"}}</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; margin: 24px; max-width: 1200px; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  h2 { font-size: 16px; margin: 24px 0 8px; border-bottom: 1px solid #ddd; padding-bottom: 4px; }
+  .sub { color: #666; font-size: 12px; margin-bottom: 12px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 8px; margin: 12px 0; }
+  .card { background: #f6f7f9; padding: 10px 12px; border-radius: 6px; }
+  .card .k { font-size: 11px; color: #666; text-transform: uppercase; letter-spacing: 0.5px; }
+  .card .v { font-size: 18px; font-weight: 600; margin-top: 2px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { padding: 6px 8px; text-align: right; border-bottom: 1px solid #eee; }
+  th:first-child, td:first-child { text-align: left; }
+  .pass { color: #1a7f37; font-weight: 600; }
+  .fail { color: #c92a2a; font-weight: 600; }
+  canvas { max-width: 100%; }
+  .meta { font-size: 12px; color: #666; }
+  code { background: #f0f0f0; padding: 1px 4px; border-radius: 3px; }
+  @media (prefers-color-scheme: dark) {
+    body { background: #1a1b1e; color: #e9ecef; }
+    .card { background: #25262b; }
+    th, td { border-bottom-color: #2d2f36; }
+    code { background: #25262b; }
+  }
+</style>
+</head>
+<body>
+
+<h1>Load Test — {{.Scenario}}</h1>
+<div class="sub">
+  Mode <code>{{.Mode}}</code>
+  · VUs <code>{{.VUs}}</code>
+  {{if gt .RPSTarget 0.0}}· Target <code>{{.RPSTarget}} rps</code>{{end}}
+  · Duration <code>{{printf "%.0fs" .DurationS}}</code>
+  · Host <code>{{.Host.Hostname}}</code> ({{.Host.OS}}/{{.Host.Arch}}, {{.Host.NumCPU}} CPU)
+  · Backend <code>{{.Host.BackendURL}}</code>
+  · Generated {{.GeneratedAt.Format "2006-01-02 15:04:05"}}
+</div>
+
+{{if .Thresholds}}
+<h2>Thresholds</h2>
+<table>
+  <thead><tr><th>Check</th><th>Target</th><th>Observed</th><th>Result</th></tr></thead>
+  <tbody>
+  {{range .Thresholds}}
+    <tr>
+      <td>{{.Name}}</td>
+      <td>{{.Want}}</td>
+      <td>{{.Got}}</td>
+      <td class="{{if .Passed}}pass{{else}}fail{{end}}">{{if .Passed}}PASS{{else}}FAIL{{end}}</td>
+    </tr>
+  {{end}}
+  </tbody>
+</table>
+{{end}}
+
+<h2>Summary</h2>
+<div class="grid">
+  <div class="card"><div class="k">Total requests</div><div class="v">{{int .Snapshot.TotalReqs}}</div></div>
+  <div class="card"><div class="k">2xx</div><div class="v">{{int .Snapshot.Total2xx}}</div></div>
+  <div class="card"><div class="k">4xx</div><div class="v">{{int .Snapshot.Total4xx}}</div></div>
+  <div class="card"><div class="k">5xx</div><div class="v">{{int .Snapshot.Total5xx}}</div></div>
+  <div class="card"><div class="k">Transport errors</div><div class="v">{{int .Snapshot.TotalErrs}}</div></div>
+  <div class="card"><div class="k">P50</div><div class="v">{{ms .Snapshot.Global.P50}}</div></div>
+  <div class="card"><div class="k">P90</div><div class="v">{{ms .Snapshot.Global.P90}}</div></div>
+  <div class="card"><div class="k">P95</div><div class="v">{{ms .Snapshot.Global.P95}}</div></div>
+  <div class="card"><div class="k">P99</div><div class="v">{{ms .Snapshot.Global.P99}}</div></div>
+  <div class="card"><div class="k">P99.9</div><div class="v">{{ms .Snapshot.Global.P999}}</div></div>
+  <div class="card"><div class="k">Max</div><div class="v">{{ms .Snapshot.Global.Max}}</div></div>
+  <div class="card"><div class="k">Mean</div><div class="v">{{ms .Snapshot.Global.Mean}}</div></div>
+</div>
+
+<h2>Throughput &amp; latency over time</h2>
+<canvas id="rps" height="80"></canvas>
+<canvas id="lat" height="80"></canvas>
+
+<h2>Latency CDF (global)</h2>
+<canvas id="cdf" height="80"></canvas>
+
+<h2>Per-endpoint</h2>
+<table>
+  <thead>
+    <tr><th>Endpoint</th><th>Count</th><th>2xx</th><th>4xx</th><th>5xx</th><th>Errs</th><th>P50</th><th>P95</th><th>P99</th><th>Max</th><th>Bytes</th></tr>
+  </thead>
+  <tbody>
+  {{range .Snapshot.PerEndpoint}}
+    <tr>
+      <td>{{.Endpoint}}</td>
+      <td>{{int .Count}}</td>
+      <td>{{int .C2xx}}</td>
+      <td>{{int .C4xx}}</td>
+      <td>{{int .C5xx}}</td>
+      <td>{{int .Errs}}</td>
+      <td>{{ms .Latency.P50}}</td>
+      <td>{{ms .Latency.P95}}</td>
+      <td>{{ms .Latency.P99}}</td>
+      <td>{{ms .Latency.Max}}</td>
+      <td>{{int .BytesTotal}}</td>
+    </tr>
+  {{end}}
+  </tbody>
+</table>
+
+<p class="meta">Raw data is in <code>summary.json</code> next to this file. The HDR histograms are bounded to 1µs..60s with 3 significant figures.</p>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+<script>
+const data = {{json .Snapshot.Timeline}};
+const cdf  = {{json .Snapshot.HistogramCDF}};
+
+const labels = data.map(p => p.SecondOffset);
+new Chart(document.getElementById('rps'), {
+  type: 'line',
+  data: { labels, datasets: [
+    { label: 'requests / s', data: data.map(p => p.RPS), borderColor: '#1971c2', tension: 0.2 },
+    { label: 'errors / s',   data: data.map(p => p.Errors), borderColor: '#c92a2a', tension: 0.2 },
+  ]},
+  options: { animation: false, responsive: true, scales: { x: { title: { display: true, text: 'seconds since start' }}, y: { beginAtZero: true }}}
+});
+
+new Chart(document.getElementById('lat'), {
+  type: 'line',
+  data: { labels, datasets: [
+    { label: 'p50 (ms)', data: data.map(p => p.P50ms), borderColor: '#1971c2' },
+    { label: 'p95 (ms)', data: data.map(p => p.P95ms), borderColor: '#f08c00' },
+    { label: 'p99 (ms)', data: data.map(p => p.P99ms), borderColor: '#c92a2a' },
+  ]},
+  options: { animation: false, responsive: true, scales: { x: { title: { display: true, text: 'seconds since start' }}, y: { beginAtZero: true, title: { display: true, text: 'ms' }}}}
+});
+
+new Chart(document.getElementById('cdf'), {
+  type: 'line',
+  data: { labels: cdf.map(p => p.LatencyMs), datasets: [
+    { label: 'cumulative count', data: cdf.map(p => p.Cumul), borderColor: '#1971c2', stepped: true },
+  ]},
+  options: { animation: false, responsive: true, scales: { x: { type: 'logarithmic', title: { display: true, text: 'latency (ms, log)' }}, y: { beginAtZero: true }}}
+});
+</script>
+</body>
+</html>

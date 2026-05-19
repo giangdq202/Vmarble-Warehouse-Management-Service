@@ -1,4 +1,4 @@
-.PHONY: dev run build test test-integration lint swagger migrate-up migrate-down migrate-create docker-build docker-up docker-down docker-rebuild seed
+.PHONY: dev run build test test-integration lint swagger migrate-up migrate-down migrate-create docker-build docker-up docker-down docker-rebuild seed loadtest loadtest-build loadtest-soak
 
 # Load .env if it exists
 ifneq (,$(wildcard ./.env))
@@ -74,3 +74,46 @@ docker-rebuild:
 seed:
 	@echo "Seeding demo data (server must be running at http://localhost:8080)..."
 	@bash scripts/seed.sh
+
+# ── Load testing ─────────────────────────────────────────────
+# Drives the warehouse-server through cmd/loadtest. The server must already
+# be running (use `make dev` in another terminal). Reports land in
+# loadtest-results/<timestamp>-<scenario>/{report.html,summary.json}.
+#
+#   make loadtest                   # 60s closed-loop mixed scenario, 16 VUs
+#   make loadtest SCENARIO=list-pos VUS=64 DURATION=2m
+#   make loadtest MODE=open RPS=300 DURATION=5m
+#
+# JWT_SECRET is read from .env so the tool can mint a short-lived admin
+# token automatically; pass TOKEN=… to override.
+
+LOADTEST_BASE_URL ?= http://localhost:8080
+LOADTEST_OUT_DIR  ?= loadtest-results
+SCENARIO          ?= mixed
+MODE              ?= closed
+VUS               ?= 16
+RPS               ?= 0
+DURATION          ?= 60s
+P95_MS            ?= 0
+P99_MS            ?= 0
+ERR_RATE_PCT      ?= 0
+TOKEN             ?=
+
+loadtest-build:
+	go build -o bin/loadtest ./cmd/loadtest
+
+loadtest: loadtest-build
+	@mkdir -p $(LOADTEST_OUT_DIR)
+	./bin/loadtest \
+		-scenario=$(SCENARIO) -mode=$(MODE) -vus=$(VUS) -rps=$(RPS) \
+		-duration=$(DURATION) -base-url=$(LOADTEST_BASE_URL) \
+		-out-dir=$(LOADTEST_OUT_DIR) \
+		-jwt-secret=$(AUTH_SECRET) -token=$(TOKEN) \
+		-p95-ms=$(P95_MS) -p99-ms=$(P99_MS) -err-rate-pct=$(ERR_RATE_PCT)
+
+# Long-running soak preset: catches connection-pool leaks and memory growth
+# that a 60s smoke run cannot. Tune VUS/RPS to your box.
+loadtest-soak: SCENARIO=mixed
+loadtest-soak: DURATION=15m
+loadtest-soak: VUS=32
+loadtest-soak: loadtest
