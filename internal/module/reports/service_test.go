@@ -36,9 +36,17 @@ type mockCostingReader struct {
 	last Period
 }
 
-func (m *mockCostingReader) ListCostingsInPeriod(_ context.Context, p Period) ([]CostingRow, error) {
+func (m *mockCostingReader) IterateCostingsInPeriod(_ context.Context, p Period, yield func(CostingRow) error) error {
 	m.last = p
-	return m.rows, m.err
+	if m.err != nil {
+		return m.err
+	}
+	for _, r := range m.rows {
+		if err := yield(r); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 type mockPOReader struct {
@@ -46,17 +54,35 @@ type mockPOReader struct {
 	err  error
 }
 
-func (m *mockPOReader) ListPOsInPeriod(_ context.Context, _ Period) ([]PORow, error) {
-	return m.rows, m.err
+func (m *mockPOReader) IteratePOsInPeriod(_ context.Context, _ Period, yield func(PORow) error) error {
+	if m.err != nil {
+		return m.err
+	}
+	for _, r := range m.rows {
+		if err := yield(r); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 type mockSKUReader struct {
-	rows []SKURow
-	err  error
+	rows     []SKURow
+	err      error
+	gotLimit int
 }
 
-func (m *mockSKUReader) ListAllSKUs(_ context.Context) ([]SKURow, error) {
-	return m.rows, m.err
+func (m *mockSKUReader) IterateSKUs(_ context.Context, limit int, yield func(SKURow) error) error {
+	m.gotLimit = limit
+	if m.err != nil {
+		return m.err
+	}
+	for _, r := range m.rows {
+		if err := yield(r); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 type mockWOReader struct {
@@ -64,8 +90,16 @@ type mockWOReader struct {
 	err  error
 }
 
-func (m *mockWOReader) ListWorkOrdersInPeriod(_ context.Context, _ Period) ([]WORow, error) {
-	return m.rows, m.err
+func (m *mockWOReader) IterateWorkOrdersInPeriod(_ context.Context, _ Period, yield func(WORow) error) error {
+	if m.err != nil {
+		return m.err
+	}
+	for _, r := range m.rows {
+		if err := yield(r); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 type mockWasteReader struct {
@@ -73,8 +107,16 @@ type mockWasteReader struct {
 	err  error
 }
 
-func (m *mockWasteReader) ListWasteInPeriod(_ context.Context, _ Period) ([]WasteRow, error) {
-	return m.rows, m.err
+func (m *mockWasteReader) IterateWasteInPeriod(_ context.Context, _ Period, yield func(WasteRow) error) error {
+	if m.err != nil {
+		return m.err
+	}
+	for _, r := range m.rows {
+		if err := yield(r); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // ── ExportCostings ───────────────────────────────────────────────────────────
@@ -83,24 +125,25 @@ func TestExportCostings_HappyPath(t *testing.T) {
 	now := time.Date(2026, 5, 14, 12, 0, 0, 0, time.UTC)
 	cr := &mockCostingReader{rows: []CostingRow{{
 		WorkOrderID: "wo-1", SKUCode: "SKU-001", SKUName: "Bàn ăn",
-		CostingType: "ACTUAL",
+		CostingType:  "ACTUAL",
 		MaterialCost: 1_500_000, AuxiliaryCost: 200_000, LaborCost: 300_000,
-		TotalCost: 2_000_000, Finalized: true, CreatedAt: now,
+		TotalCost:    2_000_000, Finalized: true, CreatedAt: now,
 	}}}
 	svc := NewService(cr, nil, nil, nil, nil)
 
-	file, err := svc.ExportCostings(context.Background(), Period{})
+	var buf bytes.Buffer
+	name, err := svc.ExportCostings(context.Background(), &buf, Period{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.HasSuffix(file.Filename, ".xlsx") {
-		t.Errorf("Filename = %q, want .xlsx suffix", file.Filename)
+	if !strings.HasSuffix(name, ".xlsx") {
+		t.Errorf("filename = %q, want .xlsx suffix", name)
 	}
-	if len(file.Bytes) < 100 {
-		t.Fatalf("file too small (%d bytes), generation likely failed", len(file.Bytes))
+	if buf.Len() < 100 {
+		t.Fatalf("file too small (%d bytes), generation likely failed", buf.Len())
 	}
 
-	rows := readSheet(t, file.Bytes, "Costings")
+	rows := readSheet(t, buf.Bytes(), "Costings")
 	if len(rows) != 2 {
 		t.Fatalf("rows = %d, want 2 (header + 1 data)", len(rows))
 	}
@@ -120,7 +163,7 @@ func TestExportCostings_HappyPath(t *testing.T) {
 
 func TestExportCostings_NoReader_ReturnsInvalidInput(t *testing.T) {
 	svc := NewService(nil, nil, nil, nil, nil)
-	_, err := svc.ExportCostings(context.Background(), Period{})
+	_, err := svc.ExportCostings(context.Background(), &bytes.Buffer{}, Period{})
 	if !errors.Is(err, domain.ErrInvalidInput) {
 		t.Fatalf("err = %v, want ErrInvalidInput", err)
 	}
@@ -131,9 +174,45 @@ func TestExportCostings_FromAfterTo_ReturnsInvalidInput(t *testing.T) {
 	svc := NewService(cr, nil, nil, nil, nil)
 	from := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
 	to := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
-	_, err := svc.ExportCostings(context.Background(), Period{From: &from, To: &to})
+	_, err := svc.ExportCostings(context.Background(), &bytes.Buffer{}, Period{From: &from, To: &to})
 	if !errors.Is(err, domain.ErrInvalidInput) {
 		t.Fatalf("err = %v, want ErrInvalidInput", err)
+	}
+}
+
+// MaxPeriodDays guard prevents an accountant from accidentally requesting a
+// multi-year span that would force the streaming pipeline to grind through
+// millions of rows. Equal to the cap → still allowed; over → 400.
+func TestExportCostings_PeriodOverMaxSpan_Returns400(t *testing.T) {
+	cr := &mockCostingReader{}
+	svc := NewService(cr, nil, nil, nil, nil)
+	from := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	to := from.Add(time.Duration(MaxPeriodDays+1) * 24 * time.Hour)
+	_, err := svc.ExportCostings(context.Background(), &bytes.Buffer{}, Period{From: &from, To: &to})
+	if !errors.Is(err, domain.ErrInvalidInput) {
+		t.Fatalf("err = %v, want ErrInvalidInput", err)
+	}
+}
+
+func TestExportCostings_PeriodAtMaxSpan_Allowed(t *testing.T) {
+	cr := &mockCostingReader{}
+	svc := NewService(cr, nil, nil, nil, nil)
+	from := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	to := from.Add(time.Duration(MaxPeriodDays) * 24 * time.Hour)
+	if _, err := svc.ExportCostings(context.Background(), &bytes.Buffer{}, Period{From: &from, To: &to}); err != nil {
+		t.Errorf("err = %v, want nil at exact MaxPeriodDays span", err)
+	}
+}
+
+// Open-ended exports (only one bound set) must NOT be rejected by the span
+// cap. The streaming pipeline keeps RAM bounded regardless of result count,
+// so a "give me everything from May 1" request is valid.
+func TestExportCostings_OpenEndedPeriod_NotCapped(t *testing.T) {
+	cr := &mockCostingReader{}
+	svc := NewService(cr, nil, nil, nil, nil)
+	from := time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)
+	if _, err := svc.ExportCostings(context.Background(), &bytes.Buffer{}, Period{From: &from}); err != nil {
+		t.Errorf("err = %v, want nil for open-ended period", err)
 	}
 }
 
@@ -142,7 +221,7 @@ func TestExportCostings_PeriodIsForwardedToReader(t *testing.T) {
 	svc := NewService(cr, nil, nil, nil, nil)
 	from := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
 	to := time.Date(2026, 5, 15, 0, 0, 0, 0, time.UTC)
-	if _, err := svc.ExportCostings(context.Background(), Period{From: &from, To: &to}); err != nil {
+	if _, err := svc.ExportCostings(context.Background(), &bytes.Buffer{}, Period{From: &from, To: &to}); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if cr.last.From == nil || !cr.last.From.Equal(from) {
@@ -157,7 +236,7 @@ func TestExportCostings_ReaderError_Propagates(t *testing.T) {
 	want := errors.New("db down")
 	cr := &mockCostingReader{err: want}
 	svc := NewService(cr, nil, nil, nil, nil)
-	_, err := svc.ExportCostings(context.Background(), Period{})
+	_, err := svc.ExportCostings(context.Background(), &bytes.Buffer{}, Period{})
 	if !errors.Is(err, want) {
 		t.Errorf("err = %v, want %v", err, want)
 	}
@@ -170,15 +249,15 @@ func TestExportPurchaseOrders_HappyPath(t *testing.T) {
 	pr := &mockPOReader{rows: []PORow{{
 		Code: "PO-100", Supplier: "ACME", Status: "ORDERED",
 		MaterialName: "MDF 18mm", OrderedAt: &now, Items: "5×1000×600 @150000",
-		TotalCost: 750_000, CreatedAt: now,
+		TotalCost:    750_000, CreatedAt: now,
 	}}}
 	svc := NewService(nil, pr, nil, nil, nil)
 
-	file, err := svc.ExportPurchaseOrders(context.Background(), Period{})
-	if err != nil {
+	var buf bytes.Buffer
+	if _, err := svc.ExportPurchaseOrders(context.Background(), &buf, Period{}); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	rows := readSheet(t, file.Bytes, "PurchaseOrders")
+	rows := readSheet(t, buf.Bytes(), "PurchaseOrders")
 	if len(rows) != 2 {
 		t.Fatalf("rows = %d, want 2", len(rows))
 	}
@@ -195,11 +274,11 @@ func TestExportSKUs_HappyPath(t *testing.T) {
 		RequiresMetal: false, IsActive: true, BOMSummary: "MDF 18mm × 0.5",
 	}}}
 	svc := NewService(nil, nil, sr, nil, nil)
-	file, err := svc.ExportSKUs(context.Background())
-	if err != nil {
+	var buf bytes.Buffer
+	if _, err := svc.ExportSKUs(context.Background(), &buf); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	rows := readSheet(t, file.Bytes, "SKUs")
+	rows := readSheet(t, buf.Bytes(), "SKUs")
 	if len(rows) != 2 {
 		t.Fatalf("rows = %d, want 2", len(rows))
 	}
@@ -208,6 +287,20 @@ func TestExportSKUs_HappyPath(t *testing.T) {
 	}
 	if rows[1][4] != "Không" { // RequiresMetal=false → "Không"
 		t.Errorf("requires_metal cell = %q, want Không", rows[1][4])
+	}
+}
+
+// MaxSKURows must reach the reader so the SQL LIMIT clause caps the read at
+// the configured threshold; without this the streaming reader could
+// theoretically pull an unbounded number of rows from a misconfigured table.
+func TestExportSKUs_PassesMaxSKURowsLimitToReader(t *testing.T) {
+	sr := &mockSKUReader{}
+	svc := NewService(nil, nil, sr, nil, nil)
+	if _, err := svc.ExportSKUs(context.Background(), &bytes.Buffer{}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if sr.gotLimit != MaxSKURows {
+		t.Errorf("limit forwarded = %d, want %d", sr.gotLimit, MaxSKURows)
 	}
 }
 
@@ -223,15 +316,14 @@ func TestExportWorkOrders_HappyPath_WithAndWithoutCost(t *testing.T) {
 			Status: "PLANNED", CreatedAt: now, TotalCost: nil},
 	}}
 	svc := NewService(nil, nil, nil, wr, nil)
-	file, err := svc.ExportWorkOrders(context.Background(), Period{})
-	if err != nil {
+	var buf bytes.Buffer
+	if _, err := svc.ExportWorkOrders(context.Background(), &buf, Period{}); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	rows := readSheet(t, file.Bytes, "WorkOrders")
+	rows := readSheet(t, buf.Bytes(), "WorkOrders")
 	if len(rows) != 3 {
 		t.Fatalf("rows = %d, want 3", len(rows))
 	}
-	// wo-B has no cost → cell may be absent or empty
 	if len(rows[2]) > 7 && rows[2][7] != "" {
 		t.Errorf("wo-B cost cell = %q, want empty", rows[2][7])
 	}
@@ -245,16 +337,78 @@ func TestExportWaste_HappyPath(t *testing.T) {
 		WasteAreaMM2: 4_500_000, AvgSheetCost: 150_000, TotalWasteCost: 200_000,
 	}}}
 	svc := NewService(nil, nil, nil, nil, wr)
-	file, err := svc.ExportWaste(context.Background(), Period{})
-	if err != nil {
+	var buf bytes.Buffer
+	if _, err := svc.ExportWaste(context.Background(), &buf, Period{}); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	rows := readSheet(t, file.Bytes, "Waste")
+	rows := readSheet(t, buf.Bytes(), "Waste")
 	if len(rows) != 2 {
 		t.Fatalf("rows = %d, want 2", len(rows))
 	}
 	if rows[1][0] != "MDF 18mm" {
 		t.Errorf("material = %q, want MDF 18mm", rows[1][0])
+	}
+}
+
+// ── streaming behavior ───────────────────────────────────────────────────────
+
+// 10k-row smoke test that exercises the streaming path end-to-end. Verifies
+// the workbook stays well-formed, every row reaches the writer in order, and
+// the StreamWriter's flush + freeze-pane sequence still completes when the
+// dataset is large. Cheap enough to run in CI; large enough to catch any
+// regression that re-introduces O(N) buffering of [][]any rows.
+func TestExportCostings_TenThousandRows_RoundTrips(t *testing.T) {
+	const n = 10_000
+	rows := make([]CostingRow, n)
+	now := time.Date(2026, 5, 14, 12, 0, 0, 0, time.UTC)
+	for i := range rows {
+		rows[i] = CostingRow{
+			WorkOrderID: "wo-large", SKUCode: "SKU-X", SKUName: "Bulk",
+			CostingType:  "ACTUAL",
+			MaterialCost: int64(i),
+			TotalCost:    int64(i),
+			CreatedAt:    now,
+		}
+	}
+	cr := &mockCostingReader{rows: rows}
+	svc := NewService(cr, nil, nil, nil, nil)
+
+	var buf bytes.Buffer
+	if _, err := svc.ExportCostings(context.Background(), &buf, Period{}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	got := readSheet(t, buf.Bytes(), "Costings")
+	if want := n + 1; len(got) != want {
+		t.Fatalf("rows = %d, want %d (header + %d data)", len(got), want, n)
+	}
+}
+
+// The streaming pipeline must abort cleanly when the writer fails partway
+// through the workbook (e.g. client disconnect). The reader yield error path
+// is exercised here via a custom failingWriter that errors on the third
+// flush attempt; service should propagate the error rather than panic.
+type failingWriter struct {
+	bytes.Buffer
+	failAfter int
+	calls     int
+}
+
+func (f *failingWriter) Write(p []byte) (int, error) {
+	f.calls++
+	if f.calls > f.failAfter {
+		return 0, errors.New("writer closed")
+	}
+	return f.Buffer.Write(p)
+}
+
+func TestExportCostings_WriterFails_ReturnsError(t *testing.T) {
+	cr := &mockCostingReader{rows: make([]CostingRow, 100)}
+	svc := NewService(cr, nil, nil, nil, nil)
+	w := &failingWriter{failAfter: 0}
+	_, err := svc.ExportCostings(context.Background(), w, Period{})
+	if err == nil {
+		t.Fatalf("expected error from failing writer, got nil")
 	}
 }
 

@@ -59,16 +59,36 @@ func parsePeriod(c *gin.Context) (Period, bool) {
 	return p, true
 }
 
-func writeXLSX(c *gin.Context, file ExportFile) {
-	c.Header("Content-Disposition", `attachment; filename="`+file.Filename+`"`)
-	c.Data(http.StatusOK, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", file.Bytes)
+// exportStream pre-validates the period, sets the .xlsx headers, then drives
+// the streaming Export call. The service runs validate() + reader-nil checks
+// before opening the StreamWriter, so 4xx responses always land before any
+// byte is sent. If the export fails AFTER the writer has flushed (rare —
+// only if the underlying reader errors mid-iteration), we cannot rewrite the
+// response, so we log via gin and let the client see a truncated download.
+func exportStream(c *gin.Context, p Period, run func(*gin.Context) (string, error), prefix string) {
+	if err := p.validate(); err != nil {
+		httpkit.Error(c, err)
+		return
+	}
+	name := filename(prefix, p)
+	c.Header("Content-Disposition", `attachment; filename="`+name+`"`)
+	c.Header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+	if _, err := run(c); err != nil {
+		if !c.Writer.Written() {
+			c.Writer.Header().Del("Content-Disposition")
+			c.Writer.Header().Del("Content-Type")
+			httpkit.Error(c, err)
+			return
+		}
+		_ = c.Error(err)
+	}
 }
 
 // @Summary      Export costing records to Excel
 // @Tags         reports
 // @Produce      application/vnd.openxmlformats-officedocument.spreadsheetml.sheet
 // @Param        from  query  string  false  "From date (YYYY-MM-DD)"
-// @Param        to    query  string  false  "To date (YYYY-MM-DD, inclusive)"
+// @Param        to    query  string  false  "To date (YYYY-MM-DD, inclusive; max 90-day span)"
 // @Success      200 {file} binary
 // @Failure      400 {object} map[string]string
 // @Router       /api/v1/reports/export/costings.xlsx [get]
@@ -78,19 +98,16 @@ func (h *Handler) exportCostings(c *gin.Context) {
 	if !ok {
 		return
 	}
-	file, err := h.svc.ExportCostings(c.Request.Context(), p)
-	if err != nil {
-		httpkit.Error(c, err)
-		return
-	}
-	writeXLSX(c, file)
+	exportStream(c, p, func(ctx *gin.Context) (string, error) {
+		return h.svc.ExportCostings(ctx.Request.Context(), ctx.Writer, p)
+	}, "costings")
 }
 
 // @Summary      Export purchase orders to Excel
 // @Tags         reports
 // @Produce      application/vnd.openxmlformats-officedocument.spreadsheetml.sheet
 // @Param        from  query  string  false  "From date (YYYY-MM-DD)"
-// @Param        to    query  string  false  "To date (YYYY-MM-DD, inclusive)"
+// @Param        to    query  string  false  "To date (YYYY-MM-DD, inclusive; max 90-day span)"
 // @Success      200 {file} binary
 // @Failure      400 {object} map[string]string
 // @Router       /api/v1/reports/export/purchase-orders.xlsx [get]
@@ -100,12 +117,9 @@ func (h *Handler) exportPurchaseOrders(c *gin.Context) {
 	if !ok {
 		return
 	}
-	file, err := h.svc.ExportPurchaseOrders(c.Request.Context(), p)
-	if err != nil {
-		httpkit.Error(c, err)
-		return
-	}
-	writeXLSX(c, file)
+	exportStream(c, p, func(ctx *gin.Context) (string, error) {
+		return h.svc.ExportPurchaseOrders(ctx.Request.Context(), ctx.Writer, p)
+	}, "purchase-orders")
 }
 
 // @Summary      Export SKU catalog to Excel
@@ -116,19 +130,16 @@ func (h *Handler) exportPurchaseOrders(c *gin.Context) {
 // @Router       /api/v1/reports/export/skus.xlsx [get]
 // @Security     BearerAuth
 func (h *Handler) exportSKUs(c *gin.Context) {
-	file, err := h.svc.ExportSKUs(c.Request.Context())
-	if err != nil {
-		httpkit.Error(c, err)
-		return
-	}
-	writeXLSX(c, file)
+	exportStream(c, Period{}, func(ctx *gin.Context) (string, error) {
+		return h.svc.ExportSKUs(ctx.Request.Context(), ctx.Writer)
+	}, "skus")
 }
 
 // @Summary      Export work orders to Excel
 // @Tags         reports
 // @Produce      application/vnd.openxmlformats-officedocument.spreadsheetml.sheet
 // @Param        from  query  string  false  "From date (YYYY-MM-DD)"
-// @Param        to    query  string  false  "To date (YYYY-MM-DD, inclusive)"
+// @Param        to    query  string  false  "To date (YYYY-MM-DD, inclusive; max 90-day span)"
 // @Success      200 {file} binary
 // @Failure      400 {object} map[string]string
 // @Router       /api/v1/reports/export/work-orders.xlsx [get]
@@ -138,19 +149,16 @@ func (h *Handler) exportWorkOrders(c *gin.Context) {
 	if !ok {
 		return
 	}
-	file, err := h.svc.ExportWorkOrders(c.Request.Context(), p)
-	if err != nil {
-		httpkit.Error(c, err)
-		return
-	}
-	writeXLSX(c, file)
+	exportStream(c, p, func(ctx *gin.Context) (string, error) {
+		return h.svc.ExportWorkOrders(ctx.Request.Context(), ctx.Writer, p)
+	}, "work-orders")
 }
 
 // @Summary      Export waste report to Excel
 // @Tags         reports
 // @Produce      application/vnd.openxmlformats-officedocument.spreadsheetml.sheet
 // @Param        from  query  string  false  "From date (YYYY-MM-DD)"
-// @Param        to    query  string  false  "To date (YYYY-MM-DD, inclusive)"
+// @Param        to    query  string  false  "To date (YYYY-MM-DD, inclusive; max 90-day span)"
 // @Success      200 {file} binary
 // @Failure      400 {object} map[string]string
 // @Router       /api/v1/reports/export/waste.xlsx [get]
@@ -160,10 +168,7 @@ func (h *Handler) exportWaste(c *gin.Context) {
 	if !ok {
 		return
 	}
-	file, err := h.svc.ExportWaste(c.Request.Context(), p)
-	if err != nil {
-		httpkit.Error(c, err)
-		return
-	}
-	writeXLSX(c, file)
+	exportStream(c, p, func(ctx *gin.Context) (string, error) {
+		return h.svc.ExportWaste(ctx.Request.Context(), ctx.Writer, p)
+	}, "waste")
 }

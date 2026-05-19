@@ -600,15 +600,17 @@ func (a *laborDataAdapter) GetLaborCostForWO(ctx context.Context, woID uuid.UUID
 	return a.svc.SumLaborCost(ctx, woID)
 }
 
-// ── Reports adapters (#257) ─────────────────────────────────────────────────
+// ── Reports adapters (#257, refactored #273) ───────────────────────────────
 //
-// Each adapter projects pgxpool rows directly to reports.<Row>. Reads happen
-// through SQL with optional [from, to) bounds so the export endpoints can
-// filter by period without touching the source-module list APIs.
+// Each adapter projects pgxpool rows directly to reports.<Row> and yields
+// them through a callback so the streaming export pipeline holds at most one
+// row in memory regardless of dataset size. Reads happen through SQL with
+// optional [from, to) bounds so the export endpoints filter by period
+// without touching the source-module list APIs.
 
 type reportsCostingAdapter struct{ pool *pgxpool.Pool }
 
-func (a *reportsCostingAdapter) ListCostingsInPeriod(ctx context.Context, p reports.Period) ([]reports.CostingRow, error) {
+func (a *reportsCostingAdapter) IterateCostingsInPeriod(ctx context.Context, p reports.Period, yield func(reports.CostingRow) error) error {
 	q := `
 		SELECT cr.work_order_id, s.code, s.name, cr.costing_type,
 		       cr.material_cost_amount, cr.auxiliary_cost_amount, cr.labor_cost_amount, cr.total_cost_amount,
@@ -620,25 +622,26 @@ func (a *reportsCostingAdapter) ListCostingsInPeriod(ctx context.Context, p repo
 		ORDER BY cr.created_at DESC`
 	rows, err := a.pool.Query(ctx, q, p.From, p.To)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	defer rows.Close()
-	var out []reports.CostingRow
 	for rows.Next() {
 		var r reports.CostingRow
 		if err := rows.Scan(&r.WorkOrderID, &r.SKUCode, &r.SKUName, &r.CostingType,
 			&r.MaterialCost, &r.AuxiliaryCost, &r.LaborCost, &r.TotalCost,
 			&r.Finalized, &r.CreatedAt); err != nil {
-			return nil, err
+			return err
 		}
-		out = append(out, r)
+		if err := yield(r); err != nil {
+			return err
+		}
 	}
-	return out, rows.Err()
+	return rows.Err()
 }
 
 type reportsPOAdapter struct{ pool *pgxpool.Pool }
 
-func (a *reportsPOAdapter) ListPOsInPeriod(ctx context.Context, p reports.Period) ([]reports.PORow, error) {
+func (a *reportsPOAdapter) IteratePOsInPeriod(ctx context.Context, p reports.Period, yield func(reports.PORow) error) error {
 	q := `
 		SELECT po.code, COALESCE(po.supplier, ''), po.status, COALESCE(m.name, ''),
 		       po.ordered_at, po.received_at,
@@ -661,24 +664,28 @@ func (a *reportsPOAdapter) ListPOsInPeriod(ctx context.Context, p reports.Period
 		ORDER BY po.created_at DESC`
 	rows, err := a.pool.Query(ctx, q, p.From, p.To)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	defer rows.Close()
-	var out []reports.PORow
 	for rows.Next() {
 		var r reports.PORow
 		if err := rows.Scan(&r.Code, &r.Supplier, &r.Status, &r.MaterialName,
 			&r.OrderedAt, &r.ReceivedAt, &r.Items, &r.TotalCost, &r.CreatedAt); err != nil {
-			return nil, err
+			return err
 		}
-		out = append(out, r)
+		if err := yield(r); err != nil {
+			return err
+		}
 	}
-	return out, rows.Err()
+	return rows.Err()
 }
 
 type reportsSKUAdapter struct{ pool *pgxpool.Pool }
 
-func (a *reportsSKUAdapter) ListAllSKUs(ctx context.Context) ([]reports.SKURow, error) {
+// IterateSKUs binds the streaming-cap as a SQL LIMIT so the catalog cannot
+// silently grow past the bound — even if the source table briefly inflates,
+// the DB-side cap keeps RAM bounded for both pgx and excelize.
+func (a *reportsSKUAdapter) IterateSKUs(ctx context.Context, limit int, yield func(reports.SKURow) error) error {
 	q := `
 		SELECT s.code, s.name, s.length_mm, s.width_mm, s.requires_metal,
 		       COALESCE(s.is_active, true),
@@ -688,27 +695,29 @@ func (a *reportsSKUAdapter) ListAllSKUs(ctx context.Context) ([]reports.SKURow, 
 		           WHERE bc.sku_id = s.id
 		       ), '')
 		FROM skus s
-		ORDER BY s.code`
-	rows, err := a.pool.Query(ctx, q)
+		ORDER BY s.code
+		LIMIT $1`
+	rows, err := a.pool.Query(ctx, q, limit)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	defer rows.Close()
-	var out []reports.SKURow
 	for rows.Next() {
 		var r reports.SKURow
 		if err := rows.Scan(&r.Code, &r.Name, &r.LengthMM, &r.WidthMM,
 			&r.RequiresMetal, &r.IsActive, &r.BOMSummary); err != nil {
-			return nil, err
+			return err
 		}
-		out = append(out, r)
+		if err := yield(r); err != nil {
+			return err
+		}
 	}
-	return out, rows.Err()
+	return rows.Err()
 }
 
 type reportsWOAdapter struct{ pool *pgxpool.Pool }
 
-func (a *reportsWOAdapter) ListWorkOrdersInPeriod(ctx context.Context, p reports.Period) ([]reports.WORow, error) {
+func (a *reportsWOAdapter) IterateWorkOrdersInPeriod(ctx context.Context, p reports.Period, yield func(reports.WORow) error) error {
 	q := `
 		SELECT wo.id::text, s.code, s.name, wo.quantity, wo.status,
 		       wo.assigned_at, wo.created_at,
@@ -720,43 +729,48 @@ func (a *reportsWOAdapter) ListWorkOrdersInPeriod(ctx context.Context, p reports
 		ORDER BY wo.created_at DESC`
 	rows, err := a.pool.Query(ctx, q, p.From, p.To)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	defer rows.Close()
-	var out []reports.WORow
 	for rows.Next() {
 		var r reports.WORow
 		var totalCost *int64
 		if err := rows.Scan(&r.ID, &r.SKUCode, &r.SKUName, &r.Quantity, &r.Status,
 			&r.AssignedAt, &r.CreatedAt, &totalCost); err != nil {
-			return nil, err
+			return err
 		}
 		r.TotalCost = totalCost
-		out = append(out, r)
+		if err := yield(r); err != nil {
+			return err
+		}
 	}
-	return out, rows.Err()
+	return rows.Err()
 }
 
 // reportsWasteAdapter delegates to costing.Service.ListWasteReport so the
-// per-material aggregation logic stays single-sourced.
+// per-material aggregation logic stays single-sourced. The waste report is
+// an aggregate (one row per material), so the result set is naturally
+// bounded by the number of distinct materials — streaming is still useful
+// to keep the call shape consistent with the other readers.
 type reportsWasteAdapter struct{ svc costing.Service }
 
-func (a *reportsWasteAdapter) ListWasteInPeriod(ctx context.Context, p reports.Period) ([]reports.WasteRow, error) {
+func (a *reportsWasteAdapter) IterateWasteInPeriod(ctx context.Context, p reports.Period, yield func(reports.WasteRow) error) error {
 	rows, err := a.svc.ListWasteReport(ctx, costing.WasteReportFilter{From: p.From, To: p.To})
 	if err != nil {
-		return nil, err
+		return err
 	}
-	out := make([]reports.WasteRow, 0, len(rows))
 	for _, r := range rows {
-		out = append(out, reports.WasteRow{
+		if err := yield(reports.WasteRow{
 			MaterialName:   r.MaterialName,
 			SheetsConsumed: r.SheetsConsumed,
 			WasteAreaMM2:   r.WasteAreaMM2,
 			AvgSheetCost:   r.AvgSheetCost.Amount,
 			TotalWasteCost: r.TotalWasteCost.Amount,
-		})
+		}); err != nil {
+			return err
+		}
 	}
-	return out, nil
+	return nil
 }
 
 // costingAuditAdapter implements costing.AuditLogger by writing directly to
