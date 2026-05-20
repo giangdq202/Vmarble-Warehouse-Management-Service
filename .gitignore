@@ -22,3 +22,6 @@ server
 
 # Local load-test reports (each run is a fresh subfolder)
 loadtest-results/
+
+# Local DB backups (pg_dump output, never share)
+.local-backups/

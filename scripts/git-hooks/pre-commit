@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+# scripts/git-hooks/pre-commit
+# Auto-regenerate the OpenAPI spec when Go sources change so docs/swagger.{json,yaml}
+# stays in lock-step with the code on every commit. The spec is the contract the
+# frontend regenerates from — drift here breaks FE typegen.
+#
+# Behaviour:
+#   - Triggers only when staged files include any *.go OR cmd/server/main.go.
+#   - Runs `make swagger` (which calls swag init).
+#   - If the spec changed, re-stages docs/swagger.{json,yaml,docs.go} so the
+#     commit includes the updated artifacts.
+#   - Skipped entirely if SKIP_SWAGGER=1 is set in the env (escape hatch).
+#
+# Install via: `make install-hooks` (one-time per clone).
+
+set -euo pipefail
+
+if [[ "${SKIP_SWAGGER:-0}" == "1" ]]; then
+  exit 0
+fi
+
+# Only run when Go sources are staged. Pure-doc / migration-only / config commits
+# don't need to regenerate the spec.
+staged_go=$(git diff --cached --name-only --diff-filter=ACM | grep -E '\.go$' || true)
+if [[ -z "$staged_go" ]]; then
+  exit 0
+fi
+
+# `swag` is invoked through `go run` by the Makefile target — no host install needed.
+echo "pre-commit: regenerating OpenAPI spec (make swagger)…"
+if ! make swagger >/tmp/swagger-precommit.log 2>&1; then
+  echo "pre-commit: 'make swagger' failed. See /tmp/swagger-precommit.log" >&2
+  tail -20 /tmp/swagger-precommit.log >&2
+  exit 1
+fi
+
+# Stage the regenerated artefacts. `git add -A` on the docs path picks up
+# whatever the swag tool wrote (json + yaml + docs.go).
+generated=(docs/swagger.json docs/swagger.yaml docs/docs.go)
+changed=()
+for f in "${generated[@]}"; do
+  if [[ -f "$f" ]] && ! git diff --quiet -- "$f"; then
+    git add -- "$f"
+    changed+=("$f")
+  fi
+done
+
+if (( ${#changed[@]} > 0 )); then
+  echo "pre-commit: re-staged updated spec: ${changed[*]}"
+fi
+
+exit 0
