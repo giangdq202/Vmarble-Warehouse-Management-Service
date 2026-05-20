@@ -97,5 +97,9 @@ Final Step: Update Instincts
 - Analyze the completed task for any new Go patterns, concurrency pitfalls, or monolith instincts discovered.
 - Append these lessons to Vmarble-Warehouse-Management-Service/INSTINCTS.md.
 
-Commit message format: [module] verb: brief description.
-- Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+Commit message format: `<type>(scope): brief description` (conventional-commit, ASCII subject ≤72 chars).
+
+Authorship policy (strict):
+- Do NOT add `Co-Authored-By: Claude …` to commit messages.
+- Do NOT add `🤖 Generated with [Claude Code]` (or any equivalent attribution) to commit messages or PR descriptions.
+- Commits and PRs are authored by the human running the session — keep them clean.
