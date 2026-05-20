@@ -2325,6 +2325,7 @@ func TestNestedRemnantCutting_ThreeLevels(t *testing.T) {
 	remnantL1 := stL1.recordCutAtomicallyOp.NewRemnant
 	if remnantL1 == nil {
 		t.Fatal("L1: NewRemnant must be non-nil")
+		return // unreachable; satisfies staticcheck SA5011 nil-deref analysis
 	}
 	if remnantL1.ParentBoardID != sheetID {
 		t.Errorf("L1 ParentBoardID = %v, want sheetID %v", remnantL1.ParentBoardID, sheetID)
@@ -2335,6 +2336,7 @@ func TestNestedRemnantCutting_ThreeLevels(t *testing.T) {
 	remnantL1ID := resL1.RemnantID
 	if remnantL1ID == nil {
 		t.Fatal("L1 result RemnantID must be set")
+		return // unreachable; satisfies staticcheck SA5011 nil-deref analysis
 	}
 
 	// ── Level 2: cut Remnant L1 → Remnant L2 ────────────────────────────────
@@ -2365,6 +2367,7 @@ func TestNestedRemnantCutting_ThreeLevels(t *testing.T) {
 	remnantL2 := stL2.recordCutAtomicallyOp.NewRemnant
 	if remnantL2 == nil {
 		t.Fatal("L2: NewRemnant must be non-nil")
+		return // unreachable; satisfies staticcheck SA5011 nil-deref analysis
 	}
 	// ParentBoardID must stay anchored to the original board, not L1.
 	if remnantL2.ParentBoardID != sheetID {
