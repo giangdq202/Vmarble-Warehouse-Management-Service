@@ -1,265 +1,6 @@
 basePath: /
 definitions:
-  github_com_vmarble_warehouse-management-service_internal_domain.Dimension:
-    properties:
-      length_mm:
-        type: integer
-      width_mm:
-        type: integer
-    type: object
-  github_com_vmarble_warehouse-management-service_internal_domain.LaborStage:
-    enum:
-    - CNC
-    - GRINDING
-    - ASSEMBLY
-    - POLISHING
-    type: string
-    x-enum-varnames:
-    - LaborStageCNC
-    - LaborStageGrinding
-    - LaborStageAssembly
-    - LaborStagePolishing
-  github_com_vmarble_warehouse-management-service_internal_domain.Money:
-    properties:
-      amount:
-        type: integer
-      currency:
-        type: string
-    type: object
-  github_com_vmarble_warehouse-management-service_internal_domain.PlanStatus:
-    enum:
-    - DRAFT
-    - APPROVED
-    - CANCELED
-    type: string
-    x-enum-varnames:
-    - PlanDraft
-    - PlanApproved
-    - PlanCanceled
-  github_com_vmarble_warehouse-management-service_internal_domain.RemnantStatus:
-    enum:
-    - AVAILABLE
-    - ALLOCATED
-    - CONSUMED
-    - WASTE
-    type: string
-    x-enum-varnames:
-    - RemnantAvailable
-    - RemnantAllocated
-    - RemnantConsumed
-    - RemnantWaste
-  github_com_vmarble_warehouse-management-service_internal_domain.WorkOrderStatus:
-    enum:
-    - PLANNED
-    - IN_CUTTING
-    - IN_PROCESSING
-    - COMPLETED
-    - COSTED
-    - CANCELED
-    type: string
-    x-enum-varnames:
-    - WOPlanned
-    - WOInCutting
-    - WOInProcessing
-    - WOCompleted
-    - WOCosted
-    - WOCanceled
-  github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_authn_UserDetail:
-    properties:
-      current_page:
-        type: integer
-      items:
-        items:
-          $ref: '#/definitions/internal_module_authn.UserDetail'
-        type: array
-      limit:
-        type: integer
-      total_items:
-        type: integer
-      total_pages:
-        type: integer
-    type: object
-  github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_catalog_Material:
-    properties:
-      current_page:
-        type: integer
-      items:
-        items:
-          $ref: '#/definitions/internal_module_catalog.Material'
-        type: array
-      limit:
-        type: integer
-      total_items:
-        type: integer
-      total_pages:
-        type: integer
-    type: object
-  github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_catalog_SKU:
-    properties:
-      current_page:
-        type: integer
-      items:
-        items:
-          $ref: '#/definitions/internal_module_catalog.SKU'
-        type: array
-      limit:
-        type: integer
-      total_items:
-        type: integer
-      total_pages:
-        type: integer
-    type: object
-  github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_costing_CostingRecord:
-    properties:
-      current_page:
-        type: integer
-      items:
-        items:
-          $ref: '#/definitions/internal_module_costing.CostingRecord'
-        type: array
-      limit:
-        type: integer
-      total_items:
-        type: integer
-      total_pages:
-        type: integer
-    type: object
-  github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_inventory_BoardSheet:
-    properties:
-      current_page:
-        type: integer
-      items:
-        items:
-          $ref: '#/definitions/internal_module_inventory.BoardSheet'
-        type: array
-      limit:
-        type: integer
-      total_items:
-        type: integer
-      total_pages:
-        type: integer
-    type: object
-  ? github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_inventory_CuttingRecordReport
-  : properties:
-      current_page:
-        type: integer
-      items:
-        items:
-          $ref: '#/definitions/internal_module_inventory.CuttingRecordReport'
-        type: array
-      limit:
-        type: integer
-      total_items:
-        type: integer
-      total_pages:
-        type: integer
-    type: object
-  github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_inventory_InventoryLot:
-    properties:
-      current_page:
-        type: integer
-      items:
-        items:
-          $ref: '#/definitions/internal_module_inventory.InventoryLot'
-        type: array
-      limit:
-        type: integer
-      total_items:
-        type: integer
-      total_pages:
-        type: integer
-    type: object
-  github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_inventory_Remnant:
-    properties:
-      current_page:
-        type: integer
-      items:
-        items:
-          $ref: '#/definitions/internal_module_inventory.Remnant'
-        type: array
-      limit:
-        type: integer
-      total_items:
-        type: integer
-      total_pages:
-        type: integer
-    type: object
-  github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_order_PO:
-    properties:
-      current_page:
-        type: integer
-      items:
-        items:
-          $ref: '#/definitions/internal_module_order.PO'
-        type: array
-      limit:
-        type: integer
-      total_items:
-        type: integer
-      total_pages:
-        type: integer
-    type: object
-  github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_planning_Plan:
-    properties:
-      current_page:
-        type: integer
-      items:
-        items:
-          $ref: '#/definitions/internal_module_planning.Plan'
-        type: array
-      limit:
-        type: integer
-      total_items:
-        type: integer
-      total_pages:
-        type: integer
-    type: object
-  github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_planning_PlanLookupItem:
-    properties:
-      current_page:
-        type: integer
-      items:
-        items:
-          $ref: '#/definitions/internal_module_planning.PlanLookupItem'
-        type: array
-      limit:
-        type: integer
-      total_items:
-        type: integer
-      total_pages:
-        type: integer
-    type: object
-  github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_production_WorkOrder:
-    properties:
-      current_page:
-        type: integer
-      items:
-        items:
-          $ref: '#/definitions/internal_module_production.WorkOrder'
-        type: array
-      limit:
-        type: integer
-      total_items:
-        type: integer
-      total_pages:
-        type: integer
-    type: object
-  github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_purchasing_PurchaseOrder:
-    properties:
-      current_page:
-        type: integer
-      items:
-        items:
-          $ref: '#/definitions/internal_module_purchasing.PurchaseOrder'
-        type: array
-      limit:
-        type: integer
-      total_items:
-        type: integer
-      total_pages:
-        type: integer
-    type: object
-  internal_module_authn.CreateUserInput:
+  authn.CreateUserInput:
     properties:
       email:
         type: string
@@ -278,7 +19,7 @@ definitions:
     - role
     - username
     type: object
-  internal_module_authn.LoginInput:
+  authn.LoginInput:
     properties:
       password:
         type: string
@@ -288,7 +29,7 @@ definitions:
     - password
     - username
     type: object
-  internal_module_authn.LoginResult:
+  authn.LoginResult:
     properties:
       expires_at:
         type: string
@@ -297,7 +38,7 @@ definitions:
       token:
         type: string
     type: object
-  internal_module_authn.UpdatePasswordInput:
+  authn.UpdatePasswordInput:
     properties:
       new_password:
         minLength: 6
@@ -305,7 +46,7 @@ definitions:
     required:
     - new_password
     type: object
-  internal_module_authn.UpdateUserInput:
+  authn.UpdateUserInput:
     properties:
       email:
         type: string
@@ -316,7 +57,7 @@ definitions:
     required:
     - role
     type: object
-  internal_module_authn.UserDetail:
+  authn.UserDetail:
     properties:
       created_at:
         type: string
@@ -335,7 +76,7 @@ definitions:
       username:
         type: string
     type: object
-  internal_module_authn.WorkerSummary:
+  authn.WorkerSummary:
     properties:
       full_name:
         type: string
@@ -348,7 +89,7 @@ definitions:
       username:
         type: string
     type: object
-  internal_module_barcode.Barcode:
+  barcode.Barcode:
     properties:
       created_at:
         type: string
@@ -371,16 +112,16 @@ definitions:
       work_order_id:
         type: string
     type: object
-  internal_module_barcode.BatchPrintInput:
+  barcode.BatchPrintInput:
     properties:
       barcode_ids:
         items:
           type: string
         type: array
       size:
-        $ref: '#/definitions/internal_module_barcode.LabelSize'
+        $ref: '#/definitions/barcode.LabelSize'
     type: object
-  internal_module_barcode.GenerateBarcodeInput:
+  barcode.GenerateBarcodeInput:
     properties:
       dimensions:
         type: string
@@ -399,7 +140,7 @@ definitions:
       work_order_id:
         type: string
     type: object
-  internal_module_barcode.LabelSize:
+  barcode.LabelSize:
     enum:
     - 50x30
     - 100x70
@@ -407,10 +148,10 @@ definitions:
     x-enum-varnames:
     - LabelSize50x30
     - LabelSize100x70
-  internal_module_barcode.RecordScanInput:
+  barcode.RecordScanInput:
     properties:
       checkpoint:
-        $ref: '#/definitions/internal_module_barcode.ScanCheckpoint'
+        $ref: '#/definitions/barcode.ScanCheckpoint'
       device_id:
         type: string
       device_name:
@@ -422,7 +163,7 @@ definitions:
       shift:
         type: string
     type: object
-  internal_module_barcode.ScanCheckpoint:
+  barcode.ScanCheckpoint:
     enum:
     - CNC_COMPLETE
     - FINISHED_GOODS
@@ -432,12 +173,12 @@ definitions:
     - CheckpointCNCComplete
     - CheckpointFinishedGoods
     - CheckpointShipped
-  internal_module_barcode.ScanEvent:
+  barcode.ScanEvent:
     properties:
       barcode_id:
         type: string
       checkpoint:
-        $ref: '#/definitions/internal_module_barcode.ScanCheckpoint'
+        $ref: '#/definitions/barcode.ScanCheckpoint'
       device_id:
         type: string
       device_name:
@@ -455,18 +196,18 @@ definitions:
       shift:
         type: string
     type: object
-  internal_module_barcode.ScanResult:
+  barcode.ScanResult:
     properties:
       barcode_id:
         type: string
       checkpoint:
-        $ref: '#/definitions/internal_module_barcode.ScanCheckpoint'
+        $ref: '#/definitions/barcode.ScanCheckpoint'
       device_id:
         type: string
       device_name:
         type: string
       next_checkpoint:
-        $ref: '#/definitions/internal_module_barcode.ScanCheckpoint'
+        $ref: '#/definitions/barcode.ScanCheckpoint'
       scan_id:
         type: string
       scanned_at:
@@ -478,40 +219,40 @@ definitions:
       shift:
         type: string
       work_order:
-        $ref: '#/definitions/internal_module_barcode.WorkOrderScan'
+        $ref: '#/definitions/barcode.WorkOrderScan'
     type: object
-  internal_module_barcode.WorkOrderScan:
+  barcode.WorkOrderScan:
     properties:
       id:
         type: string
       new_status:
-        $ref: '#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.WorkOrderStatus'
+        $ref: '#/definitions/domain.WorkOrderStatus'
       sku_code:
         type: string
       sku_name:
         type: string
     type: object
-  internal_module_catalog.BOM:
+  catalog.BOM:
     properties:
       components:
         items:
-          $ref: '#/definitions/internal_module_catalog.BOMComponent'
+          $ref: '#/definitions/catalog.BOMComponent'
         type: array
       sku_id:
         type: string
     type: object
-  internal_module_catalog.BOMComponent:
+  catalog.BOMComponent:
     properties:
       material_id:
         type: string
       material_type:
-        $ref: '#/definitions/internal_module_catalog.MaterialType'
+        $ref: '#/definitions/catalog.MaterialType'
       quantity_per_unit:
         type: number
       unit:
         type: string
     type: object
-  internal_module_catalog.BOMVariant:
+  catalog.BOMVariant:
     properties:
       created_at:
         type: string
@@ -526,11 +267,11 @@ definitions:
       variant_code:
         type: string
     type: object
-  internal_module_catalog.CreateBOMVariantInput:
+  catalog.CreateBOMVariantInput:
     properties:
       components:
         items:
-          $ref: '#/definitions/internal_module_catalog.BOMComponent'
+          $ref: '#/definitions/catalog.BOMComponent'
         type: array
       name:
         type: string
@@ -539,27 +280,27 @@ definitions:
       variant_code:
         type: string
     type: object
-  internal_module_catalog.CreateMaterialInput:
+  catalog.CreateMaterialInput:
     properties:
       name:
         type: string
       type:
-        $ref: '#/definitions/internal_module_catalog.MaterialType'
+        $ref: '#/definitions/catalog.MaterialType'
       unit:
         type: string
     type: object
-  internal_module_catalog.CreateSKUInput:
+  catalog.CreateSKUInput:
     properties:
       code:
         type: string
       dimensions:
-        $ref: '#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.Dimension'
+        $ref: '#/definitions/domain.Dimension'
       name:
         type: string
       requires_metal:
         type: boolean
     type: object
-  internal_module_catalog.Material:
+  catalog.Material:
     properties:
       created_at:
         type: string
@@ -570,11 +311,11 @@ definitions:
       name:
         type: string
       type:
-        $ref: '#/definitions/internal_module_catalog.MaterialType'
+        $ref: '#/definitions/catalog.MaterialType'
       unit:
         type: string
     type: object
-  internal_module_catalog.MaterialType:
+  catalog.MaterialType:
     enum:
     - PLYWOOD
     - GLUE
@@ -586,14 +327,14 @@ definitions:
     - MaterialTypeGlue
     - MaterialTypeMetal
     - MaterialTypeOther
-  internal_module_catalog.SKU:
+  catalog.SKU:
     properties:
       code:
         type: string
       created_at:
         type: string
       dimensions:
-        $ref: '#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.Dimension'
+        $ref: '#/definitions/domain.Dimension'
       id:
         type: string
       is_active:
@@ -603,16 +344,16 @@ definitions:
       requires_metal:
         type: boolean
     type: object
-  internal_module_catalog.SetBOMInput:
+  catalog.SetBOMInput:
     properties:
       components:
         items:
-          $ref: '#/definitions/internal_module_catalog.BOMComponent'
+          $ref: '#/definitions/catalog.BOMComponent'
         type: array
       sku_id:
         type: string
     type: object
-  internal_module_costing.CostingAdjustment:
+  costing.CostingAdjustment:
     properties:
       costing_record_id:
         type: string
@@ -621,24 +362,24 @@ definitions:
       created_by:
         type: string
       delta_auxiliary:
-        $ref: '#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.Money'
+        $ref: '#/definitions/domain.Money'
       delta_labor:
-        $ref: '#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.Money'
+        $ref: '#/definitions/domain.Money'
       delta_material:
-        $ref: '#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.Money'
+        $ref: '#/definitions/domain.Money'
       delta_total:
-        $ref: '#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.Money'
+        $ref: '#/definitions/domain.Money'
       id:
         type: string
       reason:
         type: string
     type: object
-  internal_module_costing.CostingRecord:
+  costing.CostingRecord:
     properties:
       auxiliary_cost:
-        $ref: '#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.Money'
+        $ref: '#/definitions/domain.Money'
       costing_type:
-        $ref: '#/definitions/internal_module_costing.CostingType'
+        $ref: '#/definitions/costing.CostingType'
       created_at:
         type: string
       finalized:
@@ -650,34 +391,34 @@ definitions:
       id:
         type: string
       labor_cost:
-        $ref: '#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.Money'
+        $ref: '#/definitions/domain.Money'
       material_cost:
-        $ref: '#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.Money'
+        $ref: '#/definitions/domain.Money'
       sku_id:
         type: string
       total_cost:
-        $ref: '#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.Money'
+        $ref: '#/definitions/domain.Money'
       work_order_id:
         type: string
     type: object
-  internal_module_costing.CostingRecordDetail:
+  costing.CostingRecordDetail:
     properties:
       adjustments:
         items:
-          $ref: '#/definitions/internal_module_costing.CostingAdjustment'
+          $ref: '#/definitions/costing.CostingAdjustment'
         type: array
       effective_auxiliary:
-        $ref: '#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.Money'
+        $ref: '#/definitions/domain.Money'
       effective_labor:
-        $ref: '#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.Money'
+        $ref: '#/definitions/domain.Money'
       effective_material:
-        $ref: '#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.Money'
+        $ref: '#/definitions/domain.Money'
       effective_total:
-        $ref: '#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.Money'
+        $ref: '#/definitions/domain.Money'
       record:
-        $ref: '#/definitions/internal_module_costing.CostingRecord'
+        $ref: '#/definitions/costing.CostingRecord'
     type: object
-  internal_module_costing.CostingType:
+  costing.CostingType:
     enum:
     - ESTIMATED
     - ACTUAL
@@ -685,21 +426,21 @@ definitions:
     x-enum-varnames:
     - CostingTypeEstimated
     - CostingTypeActual
-  internal_module_costing.CreateAdjustmentInput:
+  costing.CreateAdjustmentInput:
     properties:
       delta_auxiliary:
-        $ref: '#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.Money'
+        $ref: '#/definitions/domain.Money'
       delta_labor:
-        $ref: '#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.Money'
+        $ref: '#/definitions/domain.Money'
       delta_material:
-        $ref: '#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.Money'
+        $ref: '#/definitions/domain.Money'
       reason:
         type: string
     type: object
-  internal_module_costing.WasteReportRow:
+  costing.WasteReportRow:
     properties:
       avg_sheet_cost:
-        $ref: '#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.Money'
+        $ref: '#/definitions/domain.Money'
       material_id:
         type: string
       material_name:
@@ -707,11 +448,11 @@ definitions:
       sheets_consumed:
         type: integer
       total_waste_cost:
-        $ref: '#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.Money'
+        $ref: '#/definitions/domain.Money'
       waste_area_mm2:
         type: integer
     type: object
-  internal_module_dashboard.BoardStockSummaryItem:
+  dashboard.BoardStockSummaryItem:
     properties:
       allocated:
         type: integer
@@ -724,40 +465,40 @@ definitions:
       material_name:
         type: string
     type: object
-  internal_module_dashboard.ChartsOutput:
+  dashboard.ChartsOutput:
     properties:
       cost_allocation:
         items:
-          $ref: '#/definitions/internal_module_dashboard.CostAllocationItem'
+          $ref: '#/definitions/dashboard.CostAllocationItem'
         type: array
       material_usage:
         items:
-          $ref: '#/definitions/internal_module_dashboard.MaterialUsagePoint'
+          $ref: '#/definitions/dashboard.MaterialUsagePoint'
         type: array
       remnant_trend_7d:
         items:
-          $ref: '#/definitions/internal_module_dashboard.RemnantTrendPoint'
+          $ref: '#/definitions/dashboard.RemnantTrendPoint'
         type: array
     type: object
-  internal_module_dashboard.CostAllocationItem:
+  dashboard.CostAllocationItem:
     properties:
       cost:
         type: integer
       sku_code:
         type: string
     type: object
-  internal_module_dashboard.KPIOutput:
+  dashboard.KPIOutput:
     properties:
       active_work_orders:
         type: integer
       pending_costing:
         type: integer
       remnants:
-        $ref: '#/definitions/internal_module_dashboard.RemnantKPIOutput'
+        $ref: '#/definitions/dashboard.RemnantKPIOutput'
       utilization_pct:
         type: number
     type: object
-  internal_module_dashboard.MaterialUsagePoint:
+  dashboard.MaterialUsagePoint:
     properties:
       ACCESSORY:
         type: number
@@ -768,31 +509,31 @@ definitions:
       date:
         type: string
     type: object
-  internal_module_dashboard.OverviewOutput:
+  dashboard.OverviewOutput:
     properties:
       charts:
-        $ref: '#/definitions/internal_module_dashboard.ChartsOutput'
+        $ref: '#/definitions/dashboard.ChartsOutput'
       kpi:
-        $ref: '#/definitions/internal_module_dashboard.KPIOutput'
+        $ref: '#/definitions/dashboard.KPIOutput'
       recent_activity:
-        $ref: '#/definitions/internal_module_dashboard.RecentActivityOutput'
+        $ref: '#/definitions/dashboard.RecentActivityOutput'
     type: object
-  internal_module_dashboard.RecentActivityOutput:
+  dashboard.RecentActivityOutput:
     properties:
       completed_work_orders:
         items:
-          $ref: '#/definitions/internal_module_dashboard.RecentWorkOrderItem'
+          $ref: '#/definitions/dashboard.RecentWorkOrderItem'
         type: array
       costing_finalizations:
         items:
-          $ref: '#/definitions/internal_module_dashboard.RecentCostingFinalizationItem'
+          $ref: '#/definitions/dashboard.RecentCostingFinalizationItem'
         type: array
       recent_cuts:
         items:
-          $ref: '#/definitions/internal_module_dashboard.RecentCutItem'
+          $ref: '#/definitions/dashboard.RecentCutItem'
         type: array
     type: object
-  internal_module_dashboard.RecentCostingFinalizationItem:
+  dashboard.RecentCostingFinalizationItem:
     properties:
       created_at:
         type: string
@@ -803,7 +544,7 @@ definitions:
       work_order_id:
         type: string
     type: object
-  internal_module_dashboard.RecentCutItem:
+  dashboard.RecentCutItem:
     properties:
       created_at:
         type: string
@@ -816,7 +557,7 @@ definitions:
       work_order_id:
         type: string
     type: object
-  internal_module_dashboard.RecentWorkOrderItem:
+  dashboard.RecentWorkOrderItem:
     properties:
       created_at:
         type: string
@@ -827,7 +568,7 @@ definitions:
       status:
         type: string
     type: object
-  internal_module_dashboard.RemnantKPIOutput:
+  dashboard.RemnantKPIOutput:
     properties:
       allocated:
         type: integer
@@ -840,7 +581,7 @@ definitions:
       waste:
         type: integer
     type: object
-  internal_module_dashboard.RemnantTrendPoint:
+  dashboard.RemnantTrendPoint:
     properties:
       allocated:
         type: integer
@@ -851,14 +592,14 @@ definitions:
       waste:
         type: integer
     type: object
-  internal_module_dashboard.WIPPipelineOutput:
+  dashboard.WIPPipelineOutput:
     properties:
       stages:
         items:
-          $ref: '#/definitions/internal_module_dashboard.WIPStageRow'
+          $ref: '#/definitions/dashboard.WIPStageRow'
         type: array
     type: object
-  internal_module_dashboard.WIPStageRow:
+  dashboard.WIPStageRow:
     properties:
       at_risk_count:
         type: integer
@@ -869,7 +610,266 @@ definitions:
       status:
         type: string
     type: object
-  internal_module_inventory.AddCountLineInput:
+  domain.Dimension:
+    properties:
+      length_mm:
+        type: integer
+      width_mm:
+        type: integer
+    type: object
+  domain.LaborStage:
+    enum:
+    - CNC
+    - GRINDING
+    - ASSEMBLY
+    - POLISHING
+    type: string
+    x-enum-varnames:
+    - LaborStageCNC
+    - LaborStageGrinding
+    - LaborStageAssembly
+    - LaborStagePolishing
+  domain.Money:
+    properties:
+      amount:
+        type: integer
+      currency:
+        type: string
+    type: object
+  domain.PlanStatus:
+    enum:
+    - DRAFT
+    - APPROVED
+    - CANCELED
+    type: string
+    x-enum-varnames:
+    - PlanDraft
+    - PlanApproved
+    - PlanCanceled
+  domain.RemnantStatus:
+    enum:
+    - AVAILABLE
+    - ALLOCATED
+    - CONSUMED
+    - WASTE
+    type: string
+    x-enum-varnames:
+    - RemnantAvailable
+    - RemnantAllocated
+    - RemnantConsumed
+    - RemnantWaste
+  domain.WorkOrderStatus:
+    enum:
+    - PLANNED
+    - IN_CUTTING
+    - IN_PROCESSING
+    - COMPLETED
+    - COSTED
+    - CANCELED
+    type: string
+    x-enum-varnames:
+    - WOPlanned
+    - WOInCutting
+    - WOInProcessing
+    - WOCompleted
+    - WOCosted
+    - WOCanceled
+  httpkit.PagedResult-authn_UserDetail:
+    properties:
+      current_page:
+        type: integer
+      items:
+        items:
+          $ref: '#/definitions/authn.UserDetail'
+        type: array
+      limit:
+        type: integer
+      total_items:
+        type: integer
+      total_pages:
+        type: integer
+    type: object
+  httpkit.PagedResult-catalog_Material:
+    properties:
+      current_page:
+        type: integer
+      items:
+        items:
+          $ref: '#/definitions/catalog.Material'
+        type: array
+      limit:
+        type: integer
+      total_items:
+        type: integer
+      total_pages:
+        type: integer
+    type: object
+  httpkit.PagedResult-catalog_SKU:
+    properties:
+      current_page:
+        type: integer
+      items:
+        items:
+          $ref: '#/definitions/catalog.SKU'
+        type: array
+      limit:
+        type: integer
+      total_items:
+        type: integer
+      total_pages:
+        type: integer
+    type: object
+  httpkit.PagedResult-costing_CostingRecord:
+    properties:
+      current_page:
+        type: integer
+      items:
+        items:
+          $ref: '#/definitions/costing.CostingRecord'
+        type: array
+      limit:
+        type: integer
+      total_items:
+        type: integer
+      total_pages:
+        type: integer
+    type: object
+  httpkit.PagedResult-inventory_BoardSheet:
+    properties:
+      current_page:
+        type: integer
+      items:
+        items:
+          $ref: '#/definitions/inventory.BoardSheet'
+        type: array
+      limit:
+        type: integer
+      total_items:
+        type: integer
+      total_pages:
+        type: integer
+    type: object
+  httpkit.PagedResult-inventory_CuttingRecordReport:
+    properties:
+      current_page:
+        type: integer
+      items:
+        items:
+          $ref: '#/definitions/inventory.CuttingRecordReport'
+        type: array
+      limit:
+        type: integer
+      total_items:
+        type: integer
+      total_pages:
+        type: integer
+    type: object
+  httpkit.PagedResult-inventory_InventoryLot:
+    properties:
+      current_page:
+        type: integer
+      items:
+        items:
+          $ref: '#/definitions/inventory.InventoryLot'
+        type: array
+      limit:
+        type: integer
+      total_items:
+        type: integer
+      total_pages:
+        type: integer
+    type: object
+  httpkit.PagedResult-inventory_Remnant:
+    properties:
+      current_page:
+        type: integer
+      items:
+        items:
+          $ref: '#/definitions/inventory.Remnant'
+        type: array
+      limit:
+        type: integer
+      total_items:
+        type: integer
+      total_pages:
+        type: integer
+    type: object
+  httpkit.PagedResult-order_PO:
+    properties:
+      current_page:
+        type: integer
+      items:
+        items:
+          $ref: '#/definitions/order.PO'
+        type: array
+      limit:
+        type: integer
+      total_items:
+        type: integer
+      total_pages:
+        type: integer
+    type: object
+  httpkit.PagedResult-planning_Plan:
+    properties:
+      current_page:
+        type: integer
+      items:
+        items:
+          $ref: '#/definitions/planning.Plan'
+        type: array
+      limit:
+        type: integer
+      total_items:
+        type: integer
+      total_pages:
+        type: integer
+    type: object
+  httpkit.PagedResult-planning_PlanLookupItem:
+    properties:
+      current_page:
+        type: integer
+      items:
+        items:
+          $ref: '#/definitions/planning.PlanLookupItem'
+        type: array
+      limit:
+        type: integer
+      total_items:
+        type: integer
+      total_pages:
+        type: integer
+    type: object
+  httpkit.PagedResult-production_WorkOrder:
+    properties:
+      current_page:
+        type: integer
+      items:
+        items:
+          $ref: '#/definitions/production.WorkOrder'
+        type: array
+      limit:
+        type: integer
+      total_items:
+        type: integer
+      total_pages:
+        type: integer
+    type: object
+  httpkit.PagedResult-purchasing_PurchaseOrder:
+    properties:
+      current_page:
+        type: integer
+      items:
+        items:
+          $ref: '#/definitions/purchasing.PurchaseOrder'
+        type: array
+      limit:
+        type: integer
+      total_items:
+        type: integer
+      total_pages:
+        type: integer
+    type: object
+  inventory.AddCountLineInput:
     properties:
       counted_location_id:
         type: string
@@ -882,7 +882,7 @@ definitions:
       reason:
         type: string
     type: object
-  internal_module_inventory.AuditLogEntry:
+  inventory.AuditLogEntry:
     properties:
       action:
         type: string
@@ -913,14 +913,14 @@ definitions:
       to_status:
         type: string
     type: object
-  internal_module_inventory.BoardSheet:
+  inventory.BoardSheet:
     properties:
       bin_location_id:
         type: string
       cost_per_sheet:
-        $ref: '#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.Money'
+        $ref: '#/definitions/domain.Money'
       dimensions:
-        $ref: '#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.Dimension'
+        $ref: '#/definitions/domain.Dimension'
       grain_pattern:
         type: string
       id:
@@ -942,12 +942,12 @@ definitions:
       supplier_code:
         type: string
     type: object
-  internal_module_inventory.CreateCycleCountInput:
+  inventory.CreateCycleCountInput:
     properties:
       zone:
         type: string
     type: object
-  internal_module_inventory.CutResult:
+  inventory.CutResult:
     properties:
       barcode_ids:
         items:
@@ -958,7 +958,7 @@ definitions:
       remnant_id:
         type: string
     type: object
-  internal_module_inventory.CuttingRecordReport:
+  inventory.CuttingRecordReport:
     properties:
       assigned_full_name:
         type: string
@@ -984,11 +984,11 @@ definitions:
         description: '"SHEET" | "REMNANT"'
         type: string
       used_dimension:
-        $ref: '#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.Dimension'
+        $ref: '#/definitions/domain.Dimension'
       work_order_id:
         type: string
     type: object
-  internal_module_inventory.CycleCountLine:
+  inventory.CycleCountLine:
     properties:
       counted_location_id:
         type: string
@@ -1007,7 +1007,7 @@ definitions:
       session_id:
         type: string
     type: object
-  internal_module_inventory.CycleCountSession:
+  inventory.CycleCountSession:
     properties:
       created_at:
         type: string
@@ -1024,10 +1024,10 @@ definitions:
       zone:
         type: string
     type: object
-  internal_module_inventory.InventoryLot:
+  inventory.InventoryLot:
     properties:
       cost_per_sheet:
-        $ref: '#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.Money'
+        $ref: '#/definitions/domain.Money'
       id:
         type: string
       is_active:
@@ -1041,7 +1041,7 @@ definitions:
       supplier_ref:
         type: string
     type: object
-  internal_module_inventory.OverflowLevel:
+  inventory.OverflowLevel:
     enum:
     - GREEN
     - RED
@@ -1049,14 +1049,14 @@ definitions:
     x-enum-varnames:
     - OverflowGreen
     - OverflowRed
-  internal_module_inventory.OverflowStatus:
+  inventory.OverflowStatus:
     properties:
       block_new_sheet_issue:
         type: boolean
       overflow_pct:
         type: number
       status:
-        $ref: '#/definitions/internal_module_inventory.OverflowLevel'
+        $ref: '#/definitions/inventory.OverflowLevel'
       threshold_pct:
         type: number
       total_remnant_area_mm2:
@@ -1064,12 +1064,12 @@ definitions:
       total_sheet_area_mm2:
         type: integer
     type: object
-  internal_module_inventory.ReceiveStockInput:
+  inventory.ReceiveStockInput:
     properties:
       cost_per_sheet:
-        $ref: '#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.Money'
+        $ref: '#/definitions/domain.Money'
       dimensions:
-        $ref: '#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.Dimension'
+        $ref: '#/definitions/domain.Dimension'
       material_id:
         type: string
       quantity:
@@ -1077,7 +1077,7 @@ definitions:
       supplier_ref:
         type: string
     type: object
-  internal_module_inventory.RecordCutInput:
+  inventory.RecordCutInput:
     properties:
       bounding_box_length_mm:
         description: |-
@@ -1097,7 +1097,7 @@ definitions:
           implicit waste cannot slip through.
         type: boolean
       remnant_dimension:
-        $ref: '#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.Dimension'
+        $ref: '#/definitions/domain.Dimension'
       remnant_id:
         type: string
       shape_type:
@@ -1108,11 +1108,11 @@ definitions:
       sku_id:
         type: string
       used_dimension:
-        $ref: '#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.Dimension'
+        $ref: '#/definitions/domain.Dimension'
       work_order_id:
         type: string
     type: object
-  internal_module_inventory.Remnant:
+  inventory.Remnant:
     properties:
       allocated_at:
         type: string
@@ -1127,7 +1127,7 @@ definitions:
       created_at:
         type: string
       dimensions:
-        $ref: '#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.Dimension'
+        $ref: '#/definitions/domain.Dimension'
       grain_pattern:
         type: string
       id:
@@ -1143,20 +1143,20 @@ definitions:
       shape_type:
         type: string
       status:
-        $ref: '#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.RemnantStatus'
+        $ref: '#/definitions/domain.RemnantStatus'
       supplier_code:
         type: string
     type: object
-  internal_module_inventory.RemnantSuggestion:
+  inventory.RemnantSuggestion:
     properties:
       location:
-        $ref: '#/definitions/internal_module_inventory.StorageLocation'
+        $ref: '#/definitions/inventory.StorageLocation'
       rank:
         type: integer
       remnant:
-        $ref: '#/definitions/internal_module_inventory.Remnant'
+        $ref: '#/definitions/inventory.Remnant'
     type: object
-  internal_module_inventory.StorageLocation:
+  inventory.StorageLocation:
     properties:
       barcode:
         type: string
@@ -1175,7 +1175,7 @@ definitions:
       zone:
         type: string
     type: object
-  internal_module_inventory.TransferInput:
+  inventory.TransferInput:
     properties:
       entity_id:
         type: string
@@ -1184,7 +1184,7 @@ definitions:
       target_location_barcode:
         type: string
     type: object
-  internal_module_inventory.TransferResult:
+  inventory.TransferResult:
     properties:
       audit_log_id:
         type: string
@@ -1197,16 +1197,16 @@ definitions:
       to_location:
         type: string
     type: object
-  internal_module_order.CreateLineItemInput:
+  order.CreateLineItemInput:
     properties:
       quantity:
         type: integer
       selling_price:
-        $ref: '#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.Money'
+        $ref: '#/definitions/domain.Money'
       sku_id:
         type: string
     type: object
-  internal_module_order.CreatePOInput:
+  order.CreatePOInput:
     properties:
       code:
         type: string
@@ -1214,10 +1214,10 @@ definitions:
         type: string
       line_items:
         items:
-          $ref: '#/definitions/internal_module_order.CreateLineItemInput'
+          $ref: '#/definitions/order.CreateLineItemInput'
         type: array
     type: object
-  internal_module_order.LineItem:
+  order.LineItem:
     properties:
       id:
         type: string
@@ -1226,11 +1226,11 @@ definitions:
       quantity:
         type: integer
       selling_price:
-        $ref: '#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.Money'
+        $ref: '#/definitions/domain.Money'
       sku_id:
         type: string
     type: object
-  internal_module_order.PO:
+  order.PO:
     properties:
       code:
         type: string
@@ -1246,25 +1246,25 @@ definitions:
         type: integer
       line_items:
         items:
-          $ref: '#/definitions/internal_module_order.LineItem'
+          $ref: '#/definitions/order.LineItem'
         type: array
       total_quantity:
         type: integer
       total_skus:
         type: integer
     type: object
-  internal_module_planning.CreatePlanInput:
+  planning.CreatePlanInput:
     properties:
       deadline:
         type: string
       items:
         items:
-          $ref: '#/definitions/internal_module_planning.PlanItemInput'
+          $ref: '#/definitions/planning.PlanItemInput'
         type: array
       po_id:
         type: string
     type: object
-  internal_module_planning.Plan:
+  planning.Plan:
     properties:
       canceled_at:
         type: string
@@ -1282,16 +1282,16 @@ definitions:
         type: string
       items:
         items:
-          $ref: '#/definitions/internal_module_planning.PlanItem'
+          $ref: '#/definitions/planning.PlanItem'
         type: array
       po_code:
         type: string
       po_id:
         type: string
       status:
-        $ref: '#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.PlanStatus'
+        $ref: '#/definitions/domain.PlanStatus'
     type: object
-  internal_module_planning.PlanItem:
+  planning.PlanItem:
     properties:
       id:
         type: string
@@ -1302,14 +1302,14 @@ definitions:
       sku_id:
         type: string
     type: object
-  internal_module_planning.PlanItemInput:
+  planning.PlanItemInput:
     properties:
       quantity:
         type: integer
       sku_id:
         type: string
     type: object
-  internal_module_planning.PlanLookupItem:
+  planning.PlanLookupItem:
     properties:
       code:
         type: string
@@ -1320,14 +1320,14 @@ definitions:
       po_code:
         type: string
       status:
-        $ref: '#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.PlanStatus'
+        $ref: '#/definitions/domain.PlanStatus'
     type: object
-  internal_module_planning.cancelPlanRequest:
+  planning.cancelPlanRequest:
     properties:
       reason:
         type: string
     type: object
-  internal_module_production.AdvanceStatusInput:
+  production.AdvanceStatusInput:
     properties:
       bypass_overflow:
         type: boolean
@@ -1336,14 +1336,14 @@ definitions:
       sheet_id:
         type: string
       status:
-        $ref: '#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.WorkOrderStatus'
+        $ref: '#/definitions/domain.WorkOrderStatus'
     type: object
-  internal_module_production.AssignSlotInput:
+  production.AssignSlotInput:
     properties:
       slot_id:
         type: string
     type: object
-  internal_module_production.ConsumptionRecord:
+  production.ConsumptionRecord:
     properties:
       created_at:
         type: string
@@ -1360,7 +1360,7 @@ definitions:
       work_order_id:
         type: string
     type: object
-  internal_module_production.CreateMachineInput:
+  production.CreateMachineInput:
     properties:
       capacity_hours_per_shift:
         type: number
@@ -1369,7 +1369,7 @@ definitions:
       name:
         type: string
     type: object
-  internal_module_production.CreateSlotInput:
+  production.CreateSlotInput:
     properties:
       capacity_hours:
         type: number
@@ -1378,7 +1378,7 @@ definitions:
       shift_name:
         type: string
     type: object
-  internal_module_production.CreateWOInput:
+  production.CreateWOInput:
     properties:
       bypass_reason:
         description: |-
@@ -1393,7 +1393,7 @@ definitions:
       sku_id:
         type: string
     type: object
-  internal_module_production.LaborEntry:
+  production.LaborEntry:
     properties:
       actor_id:
         type: string
@@ -1406,13 +1406,13 @@ definitions:
       rate_per_hour:
         type: integer
       stage:
-        $ref: '#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.LaborStage'
+        $ref: '#/definitions/domain.LaborStage'
       work_order_id:
         type: string
       worker_id:
         type: string
     type: object
-  internal_module_production.Machine:
+  production.Machine:
     properties:
       capacity_hours_per_shift:
         type: number
@@ -1427,7 +1427,7 @@ definitions:
       name:
         type: string
     type: object
-  internal_module_production.MachineShiftSlot:
+  production.MachineShiftSlot:
     properties:
       assigned_hours:
         type: number
@@ -1448,7 +1448,7 @@ definitions:
       shift_name:
         type: string
     type: object
-  internal_module_production.RecordConsumptionInput:
+  production.RecordConsumptionInput:
     properties:
       material_id:
         type: string
@@ -1461,39 +1461,39 @@ definitions:
       work_order_id:
         type: string
     type: object
-  internal_module_production.RecordLaborEntryInput:
+  production.RecordLaborEntryInput:
     properties:
       minutes:
         type: integer
       rate_per_hour:
         type: integer
       stage:
-        $ref: '#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.LaborStage'
+        $ref: '#/definitions/domain.LaborStage'
       worker_id:
         type: string
     type: object
-  internal_module_production.ScheduleSuggestion:
+  production.ScheduleSuggestion:
     properties:
       available_hours:
         type: number
       rank:
         type: integer
       slot:
-        $ref: '#/definitions/internal_module_production.MachineShiftSlot'
+        $ref: '#/definitions/production.MachineShiftSlot'
     type: object
-  internal_module_production.SetEstimatedHoursInput:
+  production.SetEstimatedHoursInput:
     properties:
       estimated_hours:
         type: number
     type: object
-  internal_module_production.SuggestAssignmentResult:
+  production.SuggestAssignmentResult:
     properties:
       in_cutting_count:
         type: integer
       user_id:
         type: string
     type: object
-  internal_module_production.WorkOrder:
+  production.WorkOrder:
     properties:
       assigned_at:
         type: string
@@ -1514,26 +1514,26 @@ definitions:
       sku_code:
         type: string
       sku_dimensions:
-        $ref: '#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.Dimension'
+        $ref: '#/definitions/domain.Dimension'
       sku_id:
         type: string
       sku_name:
         type: string
       status:
-        $ref: '#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.WorkOrderStatus'
+        $ref: '#/definitions/domain.WorkOrderStatus'
     type: object
-  internal_module_purchasing.AddPOItemInput:
+  purchasing.AddPOItemInput:
     properties:
       length_mm:
         type: integer
       quantity:
         type: integer
       unit_cost:
-        $ref: '#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.Money'
+        $ref: '#/definitions/domain.Money'
       width_mm:
         type: integer
     type: object
-  internal_module_purchasing.CreatePOInput:
+  purchasing.CreatePOInput:
     properties:
       code:
         type: string
@@ -1544,7 +1544,7 @@ definitions:
       supplier:
         type: string
     type: object
-  internal_module_purchasing.POItem:
+  purchasing.POItem:
     properties:
       created_at:
         type: string
@@ -1559,11 +1559,11 @@ definitions:
       quantity:
         type: integer
       unit_cost:
-        $ref: '#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.Money'
+        $ref: '#/definitions/domain.Money'
       width_mm:
         type: integer
     type: object
-  internal_module_purchasing.POStatus:
+  purchasing.POStatus:
     enum:
     - DRAFT
     - ORDERED
@@ -1575,7 +1575,7 @@ definitions:
     - StatusOrdered
     - StatusReceived
     - StatusCancelled
-  internal_module_purchasing.PurchaseOrder:
+  purchasing.PurchaseOrder:
     properties:
       code:
         type: string
@@ -1587,7 +1587,7 @@ definitions:
         type: string
       items:
         items:
-          $ref: '#/definitions/internal_module_purchasing.POItem'
+          $ref: '#/definitions/purchasing.POItem'
         type: array
       material_id:
         type: string
@@ -1598,7 +1598,7 @@ definitions:
       received_at:
         type: string
       status:
-        $ref: '#/definitions/internal_module_purchasing.POStatus'
+        $ref: '#/definitions/purchasing.POStatus'
       supplier:
         type: string
     type: object
@@ -1619,14 +1619,14 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/internal_module_authn.LoginInput'
+          $ref: '#/definitions/authn.LoginInput'
       produces:
       - application/json
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/internal_module_authn.LoginResult'
+            $ref: '#/definitions/authn.LoginResult'
         "400":
           description: Bad Request
           schema:
@@ -1679,7 +1679,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_authn_UserDetail'
+            $ref: '#/definitions/httpkit.PagedResult-authn_UserDetail'
       security:
       - BearerAuth: []
       summary: List all users (paginated & filtered)
@@ -1694,14 +1694,14 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/internal_module_authn.CreateUserInput'
+          $ref: '#/definitions/authn.CreateUserInput'
       produces:
       - application/json
       responses:
         "201":
           description: Created
           schema:
-            $ref: '#/definitions/internal_module_authn.UserDetail'
+            $ref: '#/definitions/authn.UserDetail'
       security:
       - BearerAuth: []
       summary: Create new user
@@ -1738,7 +1738,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/internal_module_authn.UserDetail'
+            $ref: '#/definitions/authn.UserDetail'
       security:
       - BearerAuth: []
       summary: Get user detail
@@ -1758,14 +1758,14 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/internal_module_authn.UpdateUserInput'
+          $ref: '#/definitions/authn.UpdateUserInput'
       produces:
       - application/json
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/internal_module_authn.UserDetail'
+            $ref: '#/definitions/authn.UserDetail'
       security:
       - BearerAuth: []
       summary: Update user info
@@ -1786,7 +1786,7 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/internal_module_authn.UpdatePasswordInput'
+          $ref: '#/definitions/authn.UpdatePasswordInput'
       produces:
       - application/json
       responses:
@@ -1812,7 +1812,7 @@ paths:
           description: OK
           schema:
             items:
-              $ref: '#/definitions/internal_module_barcode.Barcode'
+              $ref: '#/definitions/barcode.Barcode'
             type: array
         "400":
           description: Bad Request
@@ -1840,14 +1840,14 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/internal_module_barcode.GenerateBarcodeInput'
+          $ref: '#/definitions/barcode.GenerateBarcodeInput'
       produces:
       - application/json
       responses:
         "201":
           description: Created
           schema:
-            $ref: '#/definitions/internal_module_barcode.Barcode'
+            $ref: '#/definitions/barcode.Barcode'
         "400":
           description: Bad Request
           schema:
@@ -1879,7 +1879,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/internal_module_barcode.Barcode'
+            $ref: '#/definitions/barcode.Barcode'
         "400":
           description: Bad Request
           schema:
@@ -1998,7 +1998,7 @@ paths:
           description: OK
           schema:
             items:
-              $ref: '#/definitions/internal_module_barcode.ScanEvent'
+              $ref: '#/definitions/barcode.ScanEvent'
             type: array
         "400":
           description: Bad Request
@@ -2037,14 +2037,14 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/internal_module_barcode.RecordScanInput'
+          $ref: '#/definitions/barcode.RecordScanInput'
       produces:
       - application/json
       responses:
         "201":
           description: Created
           schema:
-            $ref: '#/definitions/internal_module_barcode.ScanResult'
+            $ref: '#/definitions/barcode.ScanResult'
         "400":
           description: Bad Request
           schema:
@@ -2084,7 +2084,7 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/internal_module_barcode.BatchPrintInput'
+          $ref: '#/definitions/barcode.BatchPrintInput'
       produces:
       - application/pdf
       responses:
@@ -2140,7 +2140,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_costing_CostingRecord'
+            $ref: '#/definitions/httpkit.PagedResult-costing_CostingRecord'
         "401":
           description: Unauthorized
           schema:
@@ -2172,7 +2172,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/internal_module_costing.CostingRecord'
+            $ref: '#/definitions/costing.CostingRecord'
         "400":
           description: Bad Request
           schema:
@@ -2211,7 +2211,7 @@ paths:
           description: OK
           schema:
             items:
-              $ref: '#/definitions/internal_module_costing.CostingAdjustment'
+              $ref: '#/definitions/costing.CostingAdjustment'
             type: array
         "400":
           description: Bad Request
@@ -2250,14 +2250,14 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/internal_module_costing.CreateAdjustmentInput'
+          $ref: '#/definitions/costing.CreateAdjustmentInput'
       produces:
       - application/json
       responses:
         "201":
           description: Created
           schema:
-            $ref: '#/definitions/internal_module_costing.CostingAdjustment'
+            $ref: '#/definitions/costing.CostingAdjustment'
         "400":
           description: Bad Request
           schema:
@@ -2306,7 +2306,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/internal_module_costing.CostingRecord'
+            $ref: '#/definitions/costing.CostingRecord'
         "400":
           description: Bad Request
           schema:
@@ -2359,7 +2359,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/internal_module_costing.CostingRecordDetail'
+            $ref: '#/definitions/costing.CostingRecordDetail'
         "400":
           description: Bad Request
           schema:
@@ -2453,7 +2453,7 @@ paths:
           description: OK
           schema:
             items:
-              $ref: '#/definitions/internal_module_costing.WasteReportRow'
+              $ref: '#/definitions/costing.WasteReportRow'
             type: array
         "400":
           description: Bad Request
@@ -2483,7 +2483,7 @@ paths:
           description: OK
           schema:
             items:
-              $ref: '#/definitions/internal_module_dashboard.BoardStockSummaryItem'
+              $ref: '#/definitions/dashboard.BoardStockSummaryItem'
             type: array
         "401":
           description: Unauthorized
@@ -2517,7 +2517,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/internal_module_dashboard.OverviewOutput'
+            $ref: '#/definitions/dashboard.OverviewOutput'
         "401":
           description: Unauthorized
           schema:
@@ -2552,7 +2552,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/internal_module_dashboard.WIPPipelineOutput'
+            $ref: '#/definitions/dashboard.WIPPipelineOutput'
         "401":
           description: Unauthorized
           schema:
@@ -2595,7 +2595,7 @@ paths:
           description: OK
           schema:
             items:
-              $ref: '#/definitions/internal_module_inventory.AuditLogEntry'
+              $ref: '#/definitions/inventory.AuditLogEntry'
             type: array
         "400":
           description: Bad Request
@@ -2628,7 +2628,7 @@ paths:
           description: OK
           schema:
             items:
-              $ref: '#/definitions/internal_module_inventory.AuditLogEntry'
+              $ref: '#/definitions/inventory.AuditLogEntry'
             type: array
         "400":
           description: Bad Request
@@ -2651,14 +2651,14 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/internal_module_inventory.RecordCutInput'
+          $ref: '#/definitions/inventory.RecordCutInput'
       produces:
       - application/json
       responses:
         "201":
           description: Created
           schema:
-            $ref: '#/definitions/internal_module_inventory.CutResult'
+            $ref: '#/definitions/inventory.CutResult'
         "400":
           description: Bad Request
           schema:
@@ -2712,7 +2712,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_inventory_CuttingRecordReport'
+            $ref: '#/definitions/httpkit.PagedResult-inventory_CuttingRecordReport'
         "400":
           description: Bad Request
           schema:
@@ -2786,14 +2786,14 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/internal_module_inventory.CreateCycleCountInput'
+          $ref: '#/definitions/inventory.CreateCycleCountInput'
       produces:
       - application/json
       responses:
         "201":
           description: Created
           schema:
-            $ref: '#/definitions/internal_module_inventory.CycleCountSession'
+            $ref: '#/definitions/inventory.CycleCountSession'
         "400":
           description: Bad Request
           schema:
@@ -2819,7 +2819,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/internal_module_inventory.CycleCountSession'
+            $ref: '#/definitions/inventory.CycleCountSession'
         "404":
           description: Not Found
           schema:
@@ -2880,7 +2880,7 @@ paths:
           description: OK
           schema:
             items:
-              $ref: '#/definitions/internal_module_inventory.CycleCountLine'
+              $ref: '#/definitions/inventory.CycleCountLine'
             type: array
         "404":
           description: Not Found
@@ -2907,14 +2907,14 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/internal_module_inventory.AddCountLineInput'
+          $ref: '#/definitions/inventory.AddCountLineInput'
       produces:
       - application/json
       responses:
         "201":
           description: Created
           schema:
-            $ref: '#/definitions/internal_module_inventory.CycleCountLine'
+            $ref: '#/definitions/inventory.CycleCountLine'
         "400":
           description: Bad Request
           schema:
@@ -2995,7 +2995,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_inventory_InventoryLot'
+            $ref: '#/definitions/httpkit.PagedResult-inventory_InventoryLot'
         "500":
           description: Internal Server Error
           schema:
@@ -3016,14 +3016,14 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/internal_module_inventory.ReceiveStockInput'
+          $ref: '#/definitions/inventory.ReceiveStockInput'
       produces:
       - application/json
       responses:
         "201":
           description: Created
           schema:
-            $ref: '#/definitions/internal_module_inventory.InventoryLot'
+            $ref: '#/definitions/inventory.InventoryLot'
         "400":
           description: Bad Request
           schema:
@@ -3073,7 +3073,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/internal_module_inventory.OverflowStatus'
+            $ref: '#/definitions/inventory.OverflowStatus'
         "500":
           description: Internal Server Error
           schema:
@@ -3119,7 +3119,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_inventory_Remnant'
+            $ref: '#/definitions/httpkit.PagedResult-inventory_Remnant'
         "500":
           description: Internal Server Error
           schema:
@@ -3145,7 +3145,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/internal_module_inventory.Remnant'
+            $ref: '#/definitions/inventory.Remnant'
         "400":
           description: Bad Request
           schema:
@@ -3264,7 +3264,7 @@ paths:
           description: OK
           schema:
             items:
-              $ref: '#/definitions/internal_module_inventory.Remnant'
+              $ref: '#/definitions/inventory.Remnant'
             type: array
         "400":
           description: Bad Request
@@ -3386,7 +3386,7 @@ paths:
           description: OK
           schema:
             items:
-              $ref: '#/definitions/internal_module_inventory.RemnantSuggestion'
+              $ref: '#/definitions/inventory.RemnantSuggestion'
             type: array
         "400":
           description: Bad Request
@@ -3428,7 +3428,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_inventory_BoardSheet'
+            $ref: '#/definitions/httpkit.PagedResult-inventory_BoardSheet'
         "400":
           description: Bad Request
           schema:
@@ -3460,7 +3460,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/internal_module_inventory.BoardSheet'
+            $ref: '#/definitions/inventory.BoardSheet'
         "400":
           description: Bad Request
           schema:
@@ -3493,7 +3493,7 @@ paths:
           description: OK
           schema:
             items:
-              $ref: '#/definitions/internal_module_inventory.Remnant'
+              $ref: '#/definitions/inventory.Remnant'
             type: array
         "400":
           description: Bad Request
@@ -3522,14 +3522,14 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/internal_module_inventory.TransferInput'
+          $ref: '#/definitions/inventory.TransferInput'
       produces:
       - application/json
       responses:
         "201":
           description: Created
           schema:
-            $ref: '#/definitions/internal_module_inventory.TransferResult'
+            $ref: '#/definitions/inventory.TransferResult'
         "400":
           description: Bad Request
           schema:
@@ -3597,7 +3597,7 @@ paths:
           description: OK
           schema:
             items:
-              $ref: '#/definitions/internal_module_production.Machine'
+              $ref: '#/definitions/production.Machine'
             type: array
       security:
       - BearerAuth: []
@@ -3613,14 +3613,14 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/internal_module_production.CreateMachineInput'
+          $ref: '#/definitions/production.CreateMachineInput'
       produces:
       - application/json
       responses:
         "201":
           description: Created
           schema:
-            $ref: '#/definitions/internal_module_production.Machine'
+            $ref: '#/definitions/production.Machine'
         "400":
           description: Bad Request
           schema:
@@ -3669,7 +3669,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/internal_module_production.Machine'
+            $ref: '#/definitions/production.Machine'
         "404":
           description: Not Found
           schema:
@@ -3706,7 +3706,7 @@ paths:
           description: OK
           schema:
             items:
-              $ref: '#/definitions/internal_module_production.MachineShiftSlot'
+              $ref: '#/definitions/production.MachineShiftSlot'
             type: array
         "400":
           description: Bad Request
@@ -3733,14 +3733,14 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/internal_module_production.CreateSlotInput'
+          $ref: '#/definitions/production.CreateSlotInput'
       produces:
       - application/json
       responses:
         "201":
           description: Created
           schema:
-            $ref: '#/definitions/internal_module_production.MachineShiftSlot'
+            $ref: '#/definitions/production.MachineShiftSlot'
         "400":
           description: Bad Request
           schema:
@@ -3781,7 +3781,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_catalog_Material'
+            $ref: '#/definitions/httpkit.PagedResult-catalog_Material'
         "401":
           description: Unauthorized
           schema:
@@ -3808,14 +3808,14 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/internal_module_catalog.CreateMaterialInput'
+          $ref: '#/definitions/catalog.CreateMaterialInput'
       produces:
       - application/json
       responses:
         "201":
           description: Created
           schema:
-            $ref: '#/definitions/internal_module_catalog.Material'
+            $ref: '#/definitions/catalog.Material'
         "400":
           description: Bad Request
           schema:
@@ -3882,7 +3882,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/internal_module_catalog.Material'
+            $ref: '#/definitions/catalog.Material'
         "400":
           description: Bad Request
           schema:
@@ -3963,7 +3963,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_planning_Plan'
+            $ref: '#/definitions/httpkit.PagedResult-planning_Plan'
         "401":
           description: Unauthorized
           schema:
@@ -3990,14 +3990,14 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/internal_module_planning.CreatePlanInput'
+          $ref: '#/definitions/planning.CreatePlanInput'
       produces:
       - application/json
       responses:
         "201":
           description: Created
           schema:
-            $ref: '#/definitions/internal_module_planning.Plan'
+            $ref: '#/definitions/planning.Plan'
         "400":
           description: Bad Request
           schema:
@@ -4029,7 +4029,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/internal_module_planning.Plan'
+            $ref: '#/definitions/planning.Plan'
         "400":
           description: Bad Request
           schema:
@@ -4110,7 +4110,7 @@ paths:
         in: body
         name: body
         schema:
-          $ref: '#/definitions/internal_module_planning.cancelPlanRequest'
+          $ref: '#/definitions/planning.cancelPlanRequest'
       produces:
       - application/json
       responses:
@@ -4178,7 +4178,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_planning_PlanLookupItem'
+            $ref: '#/definitions/httpkit.PagedResult-planning_PlanLookupItem'
         "400":
           description: Bad Request
           schema:
@@ -4235,7 +4235,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_order_PO'
+            $ref: '#/definitions/httpkit.PagedResult-order_PO'
         "400":
           description: Bad Request
           schema:
@@ -4268,14 +4268,14 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/internal_module_order.CreatePOInput'
+          $ref: '#/definitions/order.CreatePOInput'
       produces:
       - application/json
       responses:
         "201":
           description: Created
           schema:
-            $ref: '#/definitions/internal_module_order.PO'
+            $ref: '#/definitions/order.PO'
         "400":
           description: Bad Request
           schema:
@@ -4342,7 +4342,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/internal_module_order.PO'
+            $ref: '#/definitions/order.PO'
         "400":
           description: Bad Request
           schema:
@@ -4381,7 +4381,7 @@ paths:
           description: OK
           schema:
             items:
-              $ref: '#/definitions/internal_module_order.LineItem'
+              $ref: '#/definitions/order.LineItem'
             type: array
         "400":
           description: Bad Request
@@ -4441,7 +4441,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_purchasing_PurchaseOrder'
+            $ref: '#/definitions/httpkit.PagedResult-purchasing_PurchaseOrder'
         "400":
           description: Bad Request
           schema:
@@ -4462,14 +4462,14 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/internal_module_purchasing.CreatePOInput'
+          $ref: '#/definitions/purchasing.CreatePOInput'
       produces:
       - application/json
       responses:
         "201":
           description: Created
           schema:
-            $ref: '#/definitions/internal_module_purchasing.PurchaseOrder'
+            $ref: '#/definitions/purchasing.PurchaseOrder'
         "400":
           description: Bad Request
           schema:
@@ -4501,7 +4501,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/internal_module_purchasing.PurchaseOrder'
+            $ref: '#/definitions/purchasing.PurchaseOrder'
         "404":
           description: Not Found
           schema:
@@ -4527,7 +4527,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/internal_module_purchasing.PurchaseOrder'
+            $ref: '#/definitions/purchasing.PurchaseOrder'
         "409":
           description: Conflict
           schema:
@@ -4554,14 +4554,14 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/internal_module_purchasing.AddPOItemInput'
+          $ref: '#/definitions/purchasing.AddPOItemInput'
       produces:
       - application/json
       responses:
         "201":
           description: Created
           schema:
-            $ref: '#/definitions/internal_module_purchasing.POItem'
+            $ref: '#/definitions/purchasing.POItem'
         "400":
           description: Bad Request
           schema:
@@ -4628,7 +4628,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/internal_module_purchasing.PurchaseOrder'
+            $ref: '#/definitions/purchasing.PurchaseOrder'
         "409":
           description: Conflict
           schema:
@@ -4660,7 +4660,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/internal_module_purchasing.PurchaseOrder'
+            $ref: '#/definitions/purchasing.PurchaseOrder'
         "409":
           description: Conflict
           schema:
@@ -4837,7 +4837,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_catalog_SKU'
+            $ref: '#/definitions/httpkit.PagedResult-catalog_SKU'
         "401":
           description: Unauthorized
           schema:
@@ -4864,14 +4864,14 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/internal_module_catalog.CreateSKUInput'
+          $ref: '#/definitions/catalog.CreateSKUInput'
       produces:
       - application/json
       responses:
         "201":
           description: Created
           schema:
-            $ref: '#/definitions/internal_module_catalog.SKU'
+            $ref: '#/definitions/catalog.SKU'
         "400":
           description: Bad Request
           schema:
@@ -4938,7 +4938,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/internal_module_catalog.SKU'
+            $ref: '#/definitions/catalog.SKU'
         "400":
           description: Bad Request
           schema:
@@ -4980,7 +4980,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/internal_module_catalog.BOM'
+            $ref: '#/definitions/catalog.BOM'
         "400":
           description: Bad Request
           schema:
@@ -5018,14 +5018,14 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/internal_module_catalog.SetBOMInput'
+          $ref: '#/definitions/catalog.SetBOMInput'
       produces:
       - application/json
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/internal_module_catalog.BOM'
+            $ref: '#/definitions/catalog.BOM'
         "400":
           description: Bad Request
           schema:
@@ -5064,7 +5064,7 @@ paths:
           description: OK
           schema:
             items:
-              $ref: '#/definitions/internal_module_catalog.BOMVariant'
+              $ref: '#/definitions/catalog.BOMVariant'
             type: array
         "400":
           description: Bad Request
@@ -5103,14 +5103,14 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/internal_module_catalog.CreateBOMVariantInput'
+          $ref: '#/definitions/catalog.CreateBOMVariantInput'
       produces:
       - application/json
       responses:
         "201":
           description: Created
           schema:
-            $ref: '#/definitions/internal_module_catalog.BOMVariant'
+            $ref: '#/definitions/catalog.BOMVariant'
         "400":
           description: Bad Request
           schema:
@@ -5171,7 +5171,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/internal_module_production.MachineShiftSlot'
+            $ref: '#/definitions/production.MachineShiftSlot'
         "404":
           description: Not Found
           schema:
@@ -5194,7 +5194,7 @@ paths:
           description: OK
           schema:
             items:
-              $ref: '#/definitions/internal_module_inventory.StorageLocation'
+              $ref: '#/definitions/inventory.StorageLocation'
             type: array
         "500":
           description: Internal Server Error
@@ -5215,7 +5215,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/internal_module_authn.UserDetail'
+            $ref: '#/definitions/authn.UserDetail'
       security:
       - BearerAuth: []
       summary: Get current user profile
@@ -5241,7 +5241,7 @@ paths:
           description: OK
           schema:
             items:
-              $ref: '#/definitions/internal_module_authn.WorkerSummary'
+              $ref: '#/definitions/authn.WorkerSummary'
             type: array
       security:
       - BearerAuth: []
@@ -5306,7 +5306,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_production_WorkOrder'
+            $ref: '#/definitions/httpkit.PagedResult-production_WorkOrder'
         "400":
           description: Bad Request
           schema:
@@ -5345,14 +5345,14 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/internal_module_production.CreateWOInput'
+          $ref: '#/definitions/production.CreateWOInput'
       produces:
       - application/json
       responses:
         "201":
           description: Created
           schema:
-            $ref: '#/definitions/internal_module_production.WorkOrder'
+            $ref: '#/definitions/production.WorkOrder'
         "400":
           description: Bad Request
           schema:
@@ -5384,7 +5384,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/internal_module_production.WorkOrder'
+            $ref: '#/definitions/production.WorkOrder'
         "400":
           description: Bad Request
           schema:
@@ -5430,7 +5430,7 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/internal_module_production.AdvanceStatusInput'
+          $ref: '#/definitions/production.AdvanceStatusInput'
       produces:
       - application/json
       responses:
@@ -5492,7 +5492,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/internal_module_production.WorkOrder'
+            $ref: '#/definitions/production.WorkOrder'
         "400":
           description: Bad Request
           schema:
@@ -5537,14 +5537,14 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/internal_module_production.AssignSlotInput'
+          $ref: '#/definitions/production.AssignSlotInput'
       produces:
       - application/json
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/internal_module_production.WorkOrder'
+            $ref: '#/definitions/production.WorkOrder'
         "400":
           description: Bad Request
           schema:
@@ -5583,7 +5583,7 @@ paths:
           description: OK
           schema:
             items:
-              $ref: '#/definitions/internal_module_production.ConsumptionRecord'
+              $ref: '#/definitions/production.ConsumptionRecord'
             type: array
         "400":
           description: Bad Request
@@ -5622,14 +5622,14 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/internal_module_production.RecordConsumptionInput'
+          $ref: '#/definitions/production.RecordConsumptionInput'
       produces:
       - application/json
       responses:
         "201":
           description: Created
           schema:
-            $ref: '#/definitions/internal_module_production.ConsumptionRecord'
+            $ref: '#/definitions/production.ConsumptionRecord'
         "400":
           description: Bad Request
           schema:
@@ -5668,14 +5668,14 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/internal_module_production.SetEstimatedHoursInput'
+          $ref: '#/definitions/production.SetEstimatedHoursInput'
       produces:
       - application/json
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/internal_module_production.WorkOrder'
+            $ref: '#/definitions/production.WorkOrder'
         "400":
           description: Bad Request
           schema:
@@ -5708,7 +5708,7 @@ paths:
           description: OK
           schema:
             items:
-              $ref: '#/definitions/internal_module_production.LaborEntry'
+              $ref: '#/definitions/production.LaborEntry'
             type: array
         "400":
           description: Bad Request
@@ -5750,14 +5750,14 @@ paths:
         name: body
         required: true
         schema:
-          $ref: '#/definitions/internal_module_production.RecordLaborEntryInput'
+          $ref: '#/definitions/production.RecordLaborEntryInput'
       produces:
       - application/json
       responses:
         "201":
           description: Created
           schema:
-            $ref: '#/definitions/internal_module_production.LaborEntry'
+            $ref: '#/definitions/production.LaborEntry'
         "400":
           description: Bad Request
           schema:
@@ -5801,7 +5801,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/internal_module_production.SuggestAssignmentResult'
+            $ref: '#/definitions/production.SuggestAssignmentResult'
         "400":
           description: Bad Request
           schema:
@@ -5840,7 +5840,7 @@ paths:
           description: OK
           schema:
             items:
-              $ref: '#/definitions/internal_module_production.ScheduleSuggestion'
+              $ref: '#/definitions/production.ScheduleSuggestion'
             type: array
         "400":
           description: Bad Request
@@ -5873,7 +5873,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/internal_module_production.WorkOrder'
+            $ref: '#/definitions/production.WorkOrder'
         "400":
           description: Bad Request
           schema:
@@ -5900,7 +5900,7 @@ paths:
           description: OK
           schema:
             items:
-              $ref: '#/definitions/internal_module_production.WorkOrder'
+              $ref: '#/definitions/production.WorkOrder'
             type: array
         "401":
           description: Unauthorized
