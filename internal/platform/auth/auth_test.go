@@ -58,6 +58,7 @@ func TestMiddleware_ValidToken_SetsIdentity(t *testing.T) {
 	}
 	if id == nil {
 		t.Fatal("Identity must be set in context")
+		return // unreachable; satisfies staticcheck SA5011 nil-deref analysis
 	}
 	if id.UserID != "user-42" {
 		t.Errorf("UserID = %q, want %q", id.UserID, "user-42")
