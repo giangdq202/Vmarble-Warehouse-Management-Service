@@ -36,7 +36,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/authn.LoginInput"
+                            "$ref": "#/definitions/internal_module_authn.LoginInput"
                         }
                     }
                 ],
@@ -44,7 +44,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/authn.LoginResult"
+                            "$ref": "#/definitions/internal_module_authn.LoginResult"
                         }
                     },
                     "400": {
@@ -130,7 +130,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/httpkit.PagedResult-authn_UserDetail"
+                            "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_authn_UserDetail"
                         }
                     }
                 }
@@ -158,7 +158,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/authn.CreateUserInput"
+                            "$ref": "#/definitions/internal_module_authn.CreateUserInput"
                         }
                     }
                 ],
@@ -166,7 +166,7 @@ const docTemplate = `{
                     "201": {
                         "description": "Created",
                         "schema": {
-                            "$ref": "#/definitions/authn.UserDetail"
+                            "$ref": "#/definitions/internal_module_authn.UserDetail"
                         }
                     }
                 }
@@ -199,7 +199,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/authn.UserDetail"
+                            "$ref": "#/definitions/internal_module_authn.UserDetail"
                         }
                     }
                 }
@@ -234,7 +234,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/authn.UpdateUserInput"
+                            "$ref": "#/definitions/internal_module_authn.UpdateUserInput"
                         }
                     }
                 ],
@@ -242,7 +242,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/authn.UserDetail"
+                            "$ref": "#/definitions/internal_module_authn.UserDetail"
                         }
                     }
                 }
@@ -307,7 +307,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/authn.UpdatePasswordInput"
+                            "$ref": "#/definitions/internal_module_authn.UpdatePasswordInput"
                         }
                     }
                 ],
@@ -347,7 +347,7 @@ const docTemplate = `{
                         "schema": {
                             "type": "array",
                             "items": {
-                                "$ref": "#/definitions/barcode.Barcode"
+                                "$ref": "#/definitions/internal_module_barcode.Barcode"
                             }
                         }
                     },
@@ -394,7 +394,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/barcode.GenerateBarcodeInput"
+                            "$ref": "#/definitions/internal_module_barcode.GenerateBarcodeInput"
                         }
                     }
                 ],
@@ -402,7 +402,7 @@ const docTemplate = `{
                     "201": {
                         "description": "Created",
                         "schema": {
-                            "$ref": "#/definitions/barcode.Barcode"
+                            "$ref": "#/definitions/internal_module_barcode.Barcode"
                         }
                     },
                     "400": {
@@ -450,7 +450,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/barcode.BatchPrintInput"
+                            "$ref": "#/definitions/internal_module_barcode.BatchPrintInput"
                         }
                     }
                 ],
@@ -518,7 +518,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/barcode.Barcode"
+                            "$ref": "#/definitions/internal_module_barcode.Barcode"
                         }
                     },
                     "400": {
@@ -716,7 +716,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/httpkit.CursorResult-barcode_ScanEvent"
+                            "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_platform_httpkit.CursorResult-internal_module_barcode_ScanEvent"
                         }
                     },
                     "400": {
@@ -778,7 +778,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/barcode.RecordScanInput"
+                            "$ref": "#/definitions/internal_module_barcode.RecordScanInput"
                         }
                     }
                 ],
@@ -786,7 +786,7 @@ const docTemplate = `{
                     "201": {
                         "description": "Created",
                         "schema": {
-                            "$ref": "#/definitions/barcode.ScanResult"
+                            "$ref": "#/definitions/internal_module_barcode.ScanResult"
                         }
                     },
                     "400": {
@@ -872,7 +872,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/httpkit.PagedResult-costing_CostingRecord"
+                            "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_costing_CostingRecord"
                         }
                     },
                     "401": {
@@ -943,7 +943,7 @@ const docTemplate = `{
                         "schema": {
                             "type": "array",
                             "items": {
-                                "$ref": "#/definitions/costing.WasteReportRow"
+                                "$ref": "#/definitions/internal_module_costing.WasteReportRow"
                             }
                         }
                     },
@@ -995,7 +995,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/costing.CostingRecord"
+                            "$ref": "#/definitions/internal_module_costing.CostingRecord"
                         }
                     },
                     "400": {
@@ -1057,7 +1057,7 @@ const docTemplate = `{
                         "schema": {
                             "type": "array",
                             "items": {
-                                "$ref": "#/definitions/costing.CostingAdjustment"
+                                "$ref": "#/definitions/internal_module_costing.CostingAdjustment"
                             }
                         }
                     },
@@ -1120,7 +1120,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/costing.CreateAdjustmentInput"
+                            "$ref": "#/definitions/internal_module_costing.CreateAdjustmentInput"
                         }
                     }
                 ],
@@ -1128,7 +1128,7 @@ const docTemplate = `{
                     "201": {
                         "description": "Created",
                         "schema": {
-                            "$ref": "#/definitions/costing.CostingAdjustment"
+                            "$ref": "#/definitions/internal_module_costing.CostingAdjustment"
                         }
                     },
                     "400": {
@@ -1198,7 +1198,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/costing.CostingRecord"
+                            "$ref": "#/definitions/internal_module_costing.CostingRecord"
                         }
                     },
                     "400": {
@@ -1277,7 +1277,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/costing.CostingRecordDetail"
+                            "$ref": "#/definitions/internal_module_costing.CostingRecordDetail"
                         }
                     },
                     "400": {
@@ -1394,7 +1394,7 @@ const docTemplate = `{
                         "schema": {
                             "type": "array",
                             "items": {
-                                "$ref": "#/definitions/dashboard.BoardStockSummaryItem"
+                                "$ref": "#/definitions/internal_module_dashboard.BoardStockSummaryItem"
                             }
                         }
                     },
@@ -1447,7 +1447,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/dashboard.OverviewOutput"
+                            "$ref": "#/definitions/internal_module_dashboard.OverviewOutput"
                         }
                     },
                     "401": {
@@ -1499,7 +1499,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/dashboard.WIPPipelineOutput"
+                            "$ref": "#/definitions/internal_module_dashboard.WIPPipelineOutput"
                         }
                     },
                     "401": {
@@ -1562,7 +1562,7 @@ const docTemplate = `{
                         "schema": {
                             "type": "array",
                             "items": {
-                                "$ref": "#/definitions/inventory.AuditLogEntry"
+                                "$ref": "#/definitions/internal_module_inventory.AuditLogEntry"
                             }
                         }
                     },
@@ -1614,7 +1614,7 @@ const docTemplate = `{
                         "schema": {
                             "type": "array",
                             "items": {
-                                "$ref": "#/definitions/inventory.AuditLogEntry"
+                                "$ref": "#/definitions/internal_module_inventory.AuditLogEntry"
                             }
                         }
                     },
@@ -1654,7 +1654,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/inventory.RecordCutInput"
+                            "$ref": "#/definitions/internal_module_inventory.RecordCutInput"
                         }
                     }
                 ],
@@ -1662,7 +1662,7 @@ const docTemplate = `{
                     "201": {
                         "description": "Created",
                         "schema": {
-                            "$ref": "#/definitions/inventory.CutResult"
+                            "$ref": "#/definitions/internal_module_inventory.CutResult"
                         }
                     },
                     "400": {
@@ -1743,7 +1743,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/httpkit.PagedResult-inventory_CuttingRecordReport"
+                            "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_inventory_CuttingRecordReport"
                         }
                     },
                     "400": {
@@ -1858,7 +1858,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/inventory.CreateCycleCountInput"
+                            "$ref": "#/definitions/internal_module_inventory.CreateCycleCountInput"
                         }
                     }
                 ],
@@ -1866,7 +1866,7 @@ const docTemplate = `{
                     "201": {
                         "description": "Created",
                         "schema": {
-                            "$ref": "#/definitions/inventory.CycleCountSession"
+                            "$ref": "#/definitions/internal_module_inventory.CycleCountSession"
                         }
                     },
                     "400": {
@@ -1908,7 +1908,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/inventory.CycleCountSession"
+                            "$ref": "#/definitions/internal_module_inventory.CycleCountSession"
                         }
                     },
                     "404": {
@@ -2006,7 +2006,7 @@ const docTemplate = `{
                         "schema": {
                             "type": "array",
                             "items": {
-                                "$ref": "#/definitions/inventory.CycleCountLine"
+                                "$ref": "#/definitions/internal_module_inventory.CycleCountLine"
                             }
                         }
                     },
@@ -2051,7 +2051,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/inventory.AddCountLineInput"
+                            "$ref": "#/definitions/internal_module_inventory.AddCountLineInput"
                         }
                     }
                 ],
@@ -2059,7 +2059,7 @@ const docTemplate = `{
                     "201": {
                         "description": "Created",
                         "schema": {
-                            "$ref": "#/definitions/inventory.CycleCountLine"
+                            "$ref": "#/definitions/internal_module_inventory.CycleCountLine"
                         }
                     },
                     "400": {
@@ -2187,7 +2187,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/httpkit.PagedResult-inventory_InventoryLot"
+                            "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_inventory_InventoryLot"
                         }
                     },
                     "500": {
@@ -2224,7 +2224,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/inventory.ReceiveStockInput"
+                            "$ref": "#/definitions/internal_module_inventory.ReceiveStockInput"
                         }
                     }
                 ],
@@ -2232,7 +2232,7 @@ const docTemplate = `{
                     "201": {
                         "description": "Created",
                         "schema": {
-                            "$ref": "#/definitions/inventory.InventoryLot"
+                            "$ref": "#/definitions/internal_module_inventory.InventoryLot"
                         }
                     },
                     "400": {
@@ -2313,7 +2313,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/inventory.OverflowStatus"
+                            "$ref": "#/definitions/internal_module_inventory.OverflowStatus"
                         }
                     },
                     "500": {
@@ -2384,7 +2384,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/httpkit.PagedResult-inventory_Remnant"
+                            "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_inventory_Remnant"
                         }
                     },
                     "500": {
@@ -2442,7 +2442,7 @@ const docTemplate = `{
                         "schema": {
                             "type": "array",
                             "items": {
-                                "$ref": "#/definitions/inventory.RemnantSuggestion"
+                                "$ref": "#/definitions/internal_module_inventory.RemnantSuggestion"
                             }
                         }
                     },
@@ -2485,7 +2485,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/inventory.Remnant"
+                            "$ref": "#/definitions/internal_module_inventory.Remnant"
                         }
                     },
                     "400": {
@@ -2671,7 +2671,7 @@ const docTemplate = `{
                         "schema": {
                             "type": "array",
                             "items": {
-                                "$ref": "#/definitions/inventory.Remnant"
+                                "$ref": "#/definitions/internal_module_inventory.Remnant"
                             }
                         }
                     },
@@ -2866,7 +2866,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/httpkit.PagedResult-inventory_BoardSheet"
+                            "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_inventory_BoardSheet"
                         }
                     },
                     "400": {
@@ -2917,7 +2917,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/inventory.BoardSheet"
+                            "$ref": "#/definitions/internal_module_inventory.BoardSheet"
                         }
                     },
                     "400": {
@@ -2970,7 +2970,7 @@ const docTemplate = `{
                         "schema": {
                             "type": "array",
                             "items": {
-                                "$ref": "#/definitions/inventory.Remnant"
+                                "$ref": "#/definitions/internal_module_inventory.Remnant"
                             }
                         }
                     },
@@ -3019,7 +3019,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/inventory.TransferInput"
+                            "$ref": "#/definitions/internal_module_inventory.TransferInput"
                         }
                     }
                 ],
@@ -3027,7 +3027,7 @@ const docTemplate = `{
                     "201": {
                         "description": "Created",
                         "schema": {
-                            "$ref": "#/definitions/inventory.TransferResult"
+                            "$ref": "#/definitions/internal_module_inventory.TransferResult"
                         }
                     },
                     "400": {
@@ -3132,7 +3132,7 @@ const docTemplate = `{
                         "schema": {
                             "type": "array",
                             "items": {
-                                "$ref": "#/definitions/production.Machine"
+                                "$ref": "#/definitions/internal_module_production.Machine"
                             }
                         }
                     }
@@ -3161,7 +3161,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/production.CreateMachineInput"
+                            "$ref": "#/definitions/internal_module_production.CreateMachineInput"
                         }
                     }
                 ],
@@ -3169,7 +3169,7 @@ const docTemplate = `{
                     "201": {
                         "description": "Created",
                         "schema": {
-                            "$ref": "#/definitions/production.Machine"
+                            "$ref": "#/definitions/internal_module_production.Machine"
                         }
                     },
                     "400": {
@@ -3211,7 +3211,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/production.Machine"
+                            "$ref": "#/definitions/internal_module_production.Machine"
                         }
                     },
                     "404": {
@@ -3306,7 +3306,7 @@ const docTemplate = `{
                         "schema": {
                             "type": "array",
                             "items": {
-                                "$ref": "#/definitions/production.MachineShiftSlot"
+                                "$ref": "#/definitions/internal_module_production.MachineShiftSlot"
                             }
                         }
                     },
@@ -3351,7 +3351,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/production.CreateSlotInput"
+                            "$ref": "#/definitions/internal_module_production.CreateSlotInput"
                         }
                     }
                 ],
@@ -3359,7 +3359,7 @@ const docTemplate = `{
                     "201": {
                         "description": "Created",
                         "schema": {
-                            "$ref": "#/definitions/production.MachineShiftSlot"
+                            "$ref": "#/definitions/internal_module_production.MachineShiftSlot"
                         }
                     },
                     "400": {
@@ -3424,7 +3424,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/httpkit.PagedResult-catalog_Material"
+                            "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_catalog_Material"
                         }
                     },
                     "401": {
@@ -3470,7 +3470,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/catalog.CreateMaterialInput"
+                            "$ref": "#/definitions/internal_module_catalog.CreateMaterialInput"
                         }
                     }
                 ],
@@ -3478,7 +3478,7 @@ const docTemplate = `{
                     "201": {
                         "description": "Created",
                         "schema": {
-                            "$ref": "#/definitions/catalog.Material"
+                            "$ref": "#/definitions/internal_module_catalog.Material"
                         }
                     },
                     "400": {
@@ -3529,7 +3529,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/catalog.Material"
+                            "$ref": "#/definitions/internal_module_catalog.Material"
                         }
                     },
                     "400": {
@@ -3707,7 +3707,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/httpkit.PagedResult-planning_Plan"
+                            "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_planning_Plan"
                         }
                     },
                     "401": {
@@ -3753,7 +3753,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/planning.CreatePlanInput"
+                            "$ref": "#/definitions/internal_module_planning.CreatePlanInput"
                         }
                     }
                 ],
@@ -3761,7 +3761,7 @@ const docTemplate = `{
                     "201": {
                         "description": "Created",
                         "schema": {
-                            "$ref": "#/definitions/planning.Plan"
+                            "$ref": "#/definitions/internal_module_planning.Plan"
                         }
                     },
                     "400": {
@@ -3842,7 +3842,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/httpkit.PagedResult-planning_PlanLookupItem"
+                            "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_planning_PlanLookupItem"
                         }
                     },
                     "400": {
@@ -3893,7 +3893,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/planning.Plan"
+                            "$ref": "#/definitions/internal_module_planning.Plan"
                         }
                     },
                     "400": {
@@ -4020,7 +4020,7 @@ const docTemplate = `{
                         "name": "body",
                         "in": "body",
                         "schema": {
-                            "$ref": "#/definitions/planning.cancelPlanRequest"
+                            "$ref": "#/definitions/internal_module_planning.cancelPlanRequest"
                         }
                     }
                 ],
@@ -4126,7 +4126,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/httpkit.PagedResult-order_PO"
+                            "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_order_PO"
                         }
                     },
                     "400": {
@@ -4181,7 +4181,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/order.CreatePOInput"
+                            "$ref": "#/definitions/internal_module_order.CreatePOInput"
                         }
                     }
                 ],
@@ -4189,7 +4189,7 @@ const docTemplate = `{
                     "201": {
                         "description": "Created",
                         "schema": {
-                            "$ref": "#/definitions/order.PO"
+                            "$ref": "#/definitions/internal_module_order.PO"
                         }
                     },
                     "400": {
@@ -4240,7 +4240,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/order.PO"
+                            "$ref": "#/definitions/internal_module_order.PO"
                         }
                     },
                     "400": {
@@ -4357,7 +4357,7 @@ const docTemplate = `{
                         "schema": {
                             "type": "array",
                             "items": {
-                                "$ref": "#/definitions/order.LineItem"
+                                "$ref": "#/definitions/internal_module_order.LineItem"
                             }
                         }
                     },
@@ -4447,7 +4447,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/httpkit.PagedResult-purchasing_PurchaseOrder"
+                            "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_purchasing_PurchaseOrder"
                         }
                     },
                     "400": {
@@ -4484,7 +4484,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/purchasing.CreatePOInput"
+                            "$ref": "#/definitions/internal_module_purchasing.CreatePOInput"
                         }
                     }
                 ],
@@ -4492,7 +4492,7 @@ const docTemplate = `{
                     "201": {
                         "description": "Created",
                         "schema": {
-                            "$ref": "#/definitions/purchasing.PurchaseOrder"
+                            "$ref": "#/definitions/internal_module_purchasing.PurchaseOrder"
                         }
                     },
                     "400": {
@@ -4543,7 +4543,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/purchasing.PurchaseOrder"
+                            "$ref": "#/definitions/internal_module_purchasing.PurchaseOrder"
                         }
                     },
                     "404": {
@@ -4585,7 +4585,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/purchasing.PurchaseOrder"
+                            "$ref": "#/definitions/internal_module_purchasing.PurchaseOrder"
                         }
                     },
                     "409": {
@@ -4631,7 +4631,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/purchasing.AddPOItemInput"
+                            "$ref": "#/definitions/internal_module_purchasing.AddPOItemInput"
                         }
                     }
                 ],
@@ -4639,7 +4639,7 @@ const docTemplate = `{
                     "201": {
                         "description": "Created",
                         "schema": {
-                            "$ref": "#/definitions/purchasing.POItem"
+                            "$ref": "#/definitions/internal_module_purchasing.POItem"
                         }
                     },
                     "400": {
@@ -4745,7 +4745,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/purchasing.PurchaseOrder"
+                            "$ref": "#/definitions/internal_module_purchasing.PurchaseOrder"
                         }
                     },
                     "409": {
@@ -4796,7 +4796,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/purchasing.PurchaseOrder"
+                            "$ref": "#/definitions/internal_module_purchasing.PurchaseOrder"
                         }
                     },
                     "409": {
@@ -5082,7 +5082,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/httpkit.PagedResult-catalog_SKU"
+                            "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_catalog_SKU"
                         }
                     },
                     "401": {
@@ -5128,7 +5128,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/catalog.CreateSKUInput"
+                            "$ref": "#/definitions/internal_module_catalog.CreateSKUInput"
                         }
                     }
                 ],
@@ -5136,7 +5136,7 @@ const docTemplate = `{
                     "201": {
                         "description": "Created",
                         "schema": {
-                            "$ref": "#/definitions/catalog.SKU"
+                            "$ref": "#/definitions/internal_module_catalog.SKU"
                         }
                     },
                     "400": {
@@ -5187,7 +5187,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/catalog.SKU"
+                            "$ref": "#/definitions/internal_module_catalog.SKU"
                         }
                     },
                     "400": {
@@ -5308,7 +5308,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/catalog.BOM"
+                            "$ref": "#/definitions/internal_module_catalog.BOM"
                         }
                     },
                     "400": {
@@ -5370,7 +5370,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/catalog.SetBOMInput"
+                            "$ref": "#/definitions/internal_module_catalog.SetBOMInput"
                         }
                     }
                 ],
@@ -5378,7 +5378,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/catalog.BOM"
+                            "$ref": "#/definitions/internal_module_catalog.BOM"
                         }
                     },
                     "400": {
@@ -5440,7 +5440,7 @@ const docTemplate = `{
                         "schema": {
                             "type": "array",
                             "items": {
-                                "$ref": "#/definitions/catalog.BOMVariant"
+                                "$ref": "#/definitions/internal_module_catalog.BOMVariant"
                             }
                         }
                     },
@@ -5503,7 +5503,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/catalog.CreateBOMVariantInput"
+                            "$ref": "#/definitions/internal_module_catalog.CreateBOMVariantInput"
                         }
                     }
                 ],
@@ -5511,7 +5511,7 @@ const docTemplate = `{
                     "201": {
                         "description": "Created",
                         "schema": {
-                            "$ref": "#/definitions/catalog.BOMVariant"
+                            "$ref": "#/definitions/internal_module_catalog.BOMVariant"
                         }
                     },
                     "400": {
@@ -5571,7 +5571,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/production.MachineShiftSlot"
+                            "$ref": "#/definitions/internal_module_production.MachineShiftSlot"
                         }
                     },
                     "404": {
@@ -5644,7 +5644,7 @@ const docTemplate = `{
                         "schema": {
                             "type": "array",
                             "items": {
-                                "$ref": "#/definitions/inventory.StorageLocation"
+                                "$ref": "#/definitions/internal_module_inventory.StorageLocation"
                             }
                         }
                     },
@@ -5678,7 +5678,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/authn.UserDetail"
+                            "$ref": "#/definitions/internal_module_authn.UserDetail"
                         }
                     }
                 }
@@ -5719,7 +5719,7 @@ const docTemplate = `{
                         "schema": {
                             "type": "array",
                             "items": {
-                                "$ref": "#/definitions/authn.WorkerSummary"
+                                "$ref": "#/definitions/internal_module_authn.WorkerSummary"
                             }
                         }
                     }
@@ -5812,7 +5812,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/httpkit.PagedResult-production_WorkOrder"
+                            "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_production_WorkOrder"
                         }
                     },
                     "400": {
@@ -5868,7 +5868,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/production.CreateWOInput"
+                            "$ref": "#/definitions/internal_module_production.CreateWOInput"
                         }
                     }
                 ],
@@ -5876,7 +5876,7 @@ const docTemplate = `{
                     "201": {
                         "description": "Created",
                         "schema": {
-                            "$ref": "#/definitions/production.WorkOrder"
+                            "$ref": "#/definitions/internal_module_production.WorkOrder"
                         }
                     },
                     "400": {
@@ -5920,7 +5920,7 @@ const docTemplate = `{
                         "schema": {
                             "type": "array",
                             "items": {
-                                "$ref": "#/definitions/production.WorkOrder"
+                                "$ref": "#/definitions/internal_module_production.WorkOrder"
                             }
                         }
                     },
@@ -5972,7 +5972,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/production.WorkOrder"
+                            "$ref": "#/definitions/internal_module_production.WorkOrder"
                         }
                     },
                     "400": {
@@ -6037,7 +6037,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/production.AdvanceStatusInput"
+                            "$ref": "#/definitions/internal_module_production.AdvanceStatusInput"
                         }
                     }
                 ],
@@ -6129,7 +6129,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/production.WorkOrder"
+                            "$ref": "#/definitions/internal_module_production.WorkOrder"
                         }
                     },
                     "400": {
@@ -6202,7 +6202,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/production.AssignSlotInput"
+                            "$ref": "#/definitions/internal_module_production.AssignSlotInput"
                         }
                     }
                 ],
@@ -6210,7 +6210,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/production.WorkOrder"
+                            "$ref": "#/definitions/internal_module_production.WorkOrder"
                         }
                     },
                     "400": {
@@ -6272,7 +6272,7 @@ const docTemplate = `{
                         "schema": {
                             "type": "array",
                             "items": {
-                                "$ref": "#/definitions/production.ConsumptionRecord"
+                                "$ref": "#/definitions/internal_module_production.ConsumptionRecord"
                             }
                         }
                     },
@@ -6335,7 +6335,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/production.RecordConsumptionInput"
+                            "$ref": "#/definitions/internal_module_production.RecordConsumptionInput"
                         }
                     }
                 ],
@@ -6343,7 +6343,7 @@ const docTemplate = `{
                     "201": {
                         "description": "Created",
                         "schema": {
-                            "$ref": "#/definitions/production.ConsumptionRecord"
+                            "$ref": "#/definitions/internal_module_production.ConsumptionRecord"
                         }
                     },
                     "400": {
@@ -6407,7 +6407,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/production.SetEstimatedHoursInput"
+                            "$ref": "#/definitions/internal_module_production.SetEstimatedHoursInput"
                         }
                     }
                 ],
@@ -6415,7 +6415,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/production.WorkOrder"
+                            "$ref": "#/definitions/internal_module_production.WorkOrder"
                         }
                     },
                     "400": {
@@ -6468,7 +6468,7 @@ const docTemplate = `{
                         "schema": {
                             "type": "array",
                             "items": {
-                                "$ref": "#/definitions/production.LaborEntry"
+                                "$ref": "#/definitions/internal_module_production.LaborEntry"
                             }
                         }
                     },
@@ -6532,7 +6532,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/production.RecordLaborEntryInput"
+                            "$ref": "#/definitions/internal_module_production.RecordLaborEntryInput"
                         }
                     }
                 ],
@@ -6540,7 +6540,7 @@ const docTemplate = `{
                     "201": {
                         "description": "Created",
                         "schema": {
-                            "$ref": "#/definitions/production.LaborEntry"
+                            "$ref": "#/definitions/internal_module_production.LaborEntry"
                         }
                     },
                     "400": {
@@ -6609,7 +6609,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/production.SuggestAssignmentResult"
+                            "$ref": "#/definitions/internal_module_production.SuggestAssignmentResult"
                         }
                     },
                     "400": {
@@ -6671,7 +6671,7 @@ const docTemplate = `{
                         "schema": {
                             "type": "array",
                             "items": {
-                                "$ref": "#/definitions/production.ScheduleSuggestion"
+                                "$ref": "#/definitions/internal_module_production.ScheduleSuggestion"
                             }
                         }
                     },
@@ -6723,7 +6723,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/production.WorkOrder"
+                            "$ref": "#/definitions/internal_module_production.WorkOrder"
                         }
                     },
                     "400": {
@@ -6749,7 +6749,407 @@ const docTemplate = `{
         }
     },
     "definitions": {
-        "authn.CreateUserInput": {
+        "github_com_vmarble_warehouse-management-service_internal_domain.Dimension": {
+            "type": "object",
+            "properties": {
+                "length_mm": {
+                    "type": "integer"
+                },
+                "width_mm": {
+                    "type": "integer"
+                }
+            }
+        },
+        "github_com_vmarble_warehouse-management-service_internal_domain.LaborStage": {
+            "type": "string",
+            "enum": [
+                "CNC",
+                "GRINDING",
+                "ASSEMBLY",
+                "POLISHING"
+            ],
+            "x-enum-varnames": [
+                "LaborStageCNC",
+                "LaborStageGrinding",
+                "LaborStageAssembly",
+                "LaborStagePolishing"
+            ]
+        },
+        "github_com_vmarble_warehouse-management-service_internal_domain.Money": {
+            "type": "object",
+            "properties": {
+                "amount": {
+                    "type": "integer"
+                },
+                "currency": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_vmarble_warehouse-management-service_internal_domain.PlanStatus": {
+            "type": "string",
+            "enum": [
+                "DRAFT",
+                "APPROVED",
+                "CANCELED"
+            ],
+            "x-enum-varnames": [
+                "PlanDraft",
+                "PlanApproved",
+                "PlanCanceled"
+            ]
+        },
+        "github_com_vmarble_warehouse-management-service_internal_domain.RemnantStatus": {
+            "type": "string",
+            "enum": [
+                "AVAILABLE",
+                "ALLOCATED",
+                "CONSUMED",
+                "WASTE"
+            ],
+            "x-enum-varnames": [
+                "RemnantAvailable",
+                "RemnantAllocated",
+                "RemnantConsumed",
+                "RemnantWaste"
+            ]
+        },
+        "github_com_vmarble_warehouse-management-service_internal_domain.WorkOrderStatus": {
+            "type": "string",
+            "enum": [
+                "PLANNED",
+                "IN_CUTTING",
+                "IN_PROCESSING",
+                "COMPLETED",
+                "COSTED",
+                "CANCELED"
+            ],
+            "x-enum-varnames": [
+                "WOPlanned",
+                "WOInCutting",
+                "WOInProcessing",
+                "WOCompleted",
+                "WOCosted",
+                "WOCanceled"
+            ]
+        },
+        "github_com_vmarble_warehouse-management-service_internal_platform_httpkit.CursorResult-internal_module_barcode_ScanEvent": {
+            "type": "object",
+            "properties": {
+                "has_more": {
+                    "type": "boolean"
+                },
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_module_barcode.ScanEvent"
+                    }
+                },
+                "next_cursor": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_authn_UserDetail": {
+            "type": "object",
+            "properties": {
+                "current_page": {
+                    "type": "integer"
+                },
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_module_authn.UserDetail"
+                    }
+                },
+                "limit": {
+                    "type": "integer"
+                },
+                "total_items": {
+                    "type": "integer"
+                },
+                "total_pages": {
+                    "type": "integer"
+                }
+            }
+        },
+        "github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_catalog_Material": {
+            "type": "object",
+            "properties": {
+                "current_page": {
+                    "type": "integer"
+                },
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_module_catalog.Material"
+                    }
+                },
+                "limit": {
+                    "type": "integer"
+                },
+                "total_items": {
+                    "type": "integer"
+                },
+                "total_pages": {
+                    "type": "integer"
+                }
+            }
+        },
+        "github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_catalog_SKU": {
+            "type": "object",
+            "properties": {
+                "current_page": {
+                    "type": "integer"
+                },
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_module_catalog.SKU"
+                    }
+                },
+                "limit": {
+                    "type": "integer"
+                },
+                "total_items": {
+                    "type": "integer"
+                },
+                "total_pages": {
+                    "type": "integer"
+                }
+            }
+        },
+        "github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_costing_CostingRecord": {
+            "type": "object",
+            "properties": {
+                "current_page": {
+                    "type": "integer"
+                },
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_module_costing.CostingRecord"
+                    }
+                },
+                "limit": {
+                    "type": "integer"
+                },
+                "total_items": {
+                    "type": "integer"
+                },
+                "total_pages": {
+                    "type": "integer"
+                }
+            }
+        },
+        "github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_inventory_BoardSheet": {
+            "type": "object",
+            "properties": {
+                "current_page": {
+                    "type": "integer"
+                },
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_module_inventory.BoardSheet"
+                    }
+                },
+                "limit": {
+                    "type": "integer"
+                },
+                "total_items": {
+                    "type": "integer"
+                },
+                "total_pages": {
+                    "type": "integer"
+                }
+            }
+        },
+        "github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_inventory_CuttingRecordReport": {
+            "type": "object",
+            "properties": {
+                "current_page": {
+                    "type": "integer"
+                },
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_module_inventory.CuttingRecordReport"
+                    }
+                },
+                "limit": {
+                    "type": "integer"
+                },
+                "total_items": {
+                    "type": "integer"
+                },
+                "total_pages": {
+                    "type": "integer"
+                }
+            }
+        },
+        "github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_inventory_InventoryLot": {
+            "type": "object",
+            "properties": {
+                "current_page": {
+                    "type": "integer"
+                },
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_module_inventory.InventoryLot"
+                    }
+                },
+                "limit": {
+                    "type": "integer"
+                },
+                "total_items": {
+                    "type": "integer"
+                },
+                "total_pages": {
+                    "type": "integer"
+                }
+            }
+        },
+        "github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_inventory_Remnant": {
+            "type": "object",
+            "properties": {
+                "current_page": {
+                    "type": "integer"
+                },
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_module_inventory.Remnant"
+                    }
+                },
+                "limit": {
+                    "type": "integer"
+                },
+                "total_items": {
+                    "type": "integer"
+                },
+                "total_pages": {
+                    "type": "integer"
+                }
+            }
+        },
+        "github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_order_PO": {
+            "type": "object",
+            "properties": {
+                "current_page": {
+                    "type": "integer"
+                },
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_module_order.PO"
+                    }
+                },
+                "limit": {
+                    "type": "integer"
+                },
+                "total_items": {
+                    "type": "integer"
+                },
+                "total_pages": {
+                    "type": "integer"
+                }
+            }
+        },
+        "github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_planning_Plan": {
+            "type": "object",
+            "properties": {
+                "current_page": {
+                    "type": "integer"
+                },
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_module_planning.Plan"
+                    }
+                },
+                "limit": {
+                    "type": "integer"
+                },
+                "total_items": {
+                    "type": "integer"
+                },
+                "total_pages": {
+                    "type": "integer"
+                }
+            }
+        },
+        "github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_planning_PlanLookupItem": {
+            "type": "object",
+            "properties": {
+                "current_page": {
+                    "type": "integer"
+                },
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_module_planning.PlanLookupItem"
+                    }
+                },
+                "limit": {
+                    "type": "integer"
+                },
+                "total_items": {
+                    "type": "integer"
+                },
+                "total_pages": {
+                    "type": "integer"
+                }
+            }
+        },
+        "github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_production_WorkOrder": {
+            "type": "object",
+            "properties": {
+                "current_page": {
+                    "type": "integer"
+                },
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_module_production.WorkOrder"
+                    }
+                },
+                "limit": {
+                    "type": "integer"
+                },
+                "total_items": {
+                    "type": "integer"
+                },
+                "total_pages": {
+                    "type": "integer"
+                }
+            }
+        },
+        "github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_purchasing_PurchaseOrder": {
+            "type": "object",
+            "properties": {
+                "current_page": {
+                    "type": "integer"
+                },
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_module_purchasing.PurchaseOrder"
+                    }
+                },
+                "limit": {
+                    "type": "integer"
+                },
+                "total_items": {
+                    "type": "integer"
+                },
+                "total_pages": {
+                    "type": "integer"
+                }
+            }
+        },
+        "internal_module_authn.CreateUserInput": {
             "type": "object",
             "required": [
                 "password",
@@ -6776,7 +7176,7 @@ const docTemplate = `{
                 }
             }
         },
-        "authn.LoginInput": {
+        "internal_module_authn.LoginInput": {
             "type": "object",
             "required": [
                 "password",
@@ -6791,7 +7191,7 @@ const docTemplate = `{
                 }
             }
         },
-        "authn.LoginResult": {
+        "internal_module_authn.LoginResult": {
             "type": "object",
             "properties": {
                 "expires_at": {
@@ -6805,7 +7205,7 @@ const docTemplate = `{
                 }
             }
         },
-        "authn.UpdatePasswordInput": {
+        "internal_module_authn.UpdatePasswordInput": {
             "type": "object",
             "required": [
                 "new_password"
@@ -6817,7 +7217,7 @@ const docTemplate = `{
                 }
             }
         },
-        "authn.UpdateUserInput": {
+        "internal_module_authn.UpdateUserInput": {
             "type": "object",
             "required": [
                 "role"
@@ -6834,7 +7234,7 @@ const docTemplate = `{
                 }
             }
         },
-        "authn.UserDetail": {
+        "internal_module_authn.UserDetail": {
             "type": "object",
             "properties": {
                 "created_at": {
@@ -6863,7 +7263,7 @@ const docTemplate = `{
                 }
             }
         },
-        "authn.WorkerSummary": {
+        "internal_module_authn.WorkerSummary": {
             "type": "object",
             "properties": {
                 "full_name": {
@@ -6883,7 +7283,7 @@ const docTemplate = `{
                 }
             }
         },
-        "barcode.Barcode": {
+        "internal_module_barcode.Barcode": {
             "type": "object",
             "properties": {
                 "created_at": {
@@ -6918,7 +7318,7 @@ const docTemplate = `{
                 }
             }
         },
-        "barcode.BatchPrintInput": {
+        "internal_module_barcode.BatchPrintInput": {
             "type": "object",
             "properties": {
                 "barcode_ids": {
@@ -6928,11 +7328,11 @@ const docTemplate = `{
                     }
                 },
                 "size": {
-                    "$ref": "#/definitions/barcode.LabelSize"
+                    "$ref": "#/definitions/internal_module_barcode.LabelSize"
                 }
             }
         },
-        "barcode.GenerateBarcodeInput": {
+        "internal_module_barcode.GenerateBarcodeInput": {
             "type": "object",
             "properties": {
                 "dimensions": {
@@ -6961,7 +7361,7 @@ const docTemplate = `{
                 }
             }
         },
-        "barcode.LabelSize": {
+        "internal_module_barcode.LabelSize": {
             "type": "string",
             "enum": [
                 "50x30",
@@ -6972,11 +7372,11 @@ const docTemplate = `{
                 "LabelSize100x70"
             ]
         },
-        "barcode.RecordScanInput": {
+        "internal_module_barcode.RecordScanInput": {
             "type": "object",
             "properties": {
                 "checkpoint": {
-                    "$ref": "#/definitions/barcode.ScanCheckpoint"
+                    "$ref": "#/definitions/internal_module_barcode.ScanCheckpoint"
                 },
                 "device_id": {
                     "type": "string"
@@ -6995,7 +7395,7 @@ const docTemplate = `{
                 }
             }
         },
-        "barcode.ScanCheckpoint": {
+        "internal_module_barcode.ScanCheckpoint": {
             "type": "string",
             "enum": [
                 "CNC_COMPLETE",
@@ -7008,14 +7408,14 @@ const docTemplate = `{
                 "CheckpointShipped"
             ]
         },
-        "barcode.ScanEvent": {
+        "internal_module_barcode.ScanEvent": {
             "type": "object",
             "properties": {
                 "barcode_id": {
                     "type": "string"
                 },
                 "checkpoint": {
-                    "$ref": "#/definitions/barcode.ScanCheckpoint"
+                    "$ref": "#/definitions/internal_module_barcode.ScanCheckpoint"
                 },
                 "device_id": {
                     "type": "string"
@@ -7043,14 +7443,14 @@ const docTemplate = `{
                 }
             }
         },
-        "barcode.ScanResult": {
+        "internal_module_barcode.ScanResult": {
             "type": "object",
             "properties": {
                 "barcode_id": {
                     "type": "string"
                 },
                 "checkpoint": {
-                    "$ref": "#/definitions/barcode.ScanCheckpoint"
+                    "$ref": "#/definitions/internal_module_barcode.ScanCheckpoint"
                 },
                 "device_id": {
                     "type": "string"
@@ -7059,7 +7459,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "next_checkpoint": {
-                    "$ref": "#/definitions/barcode.ScanCheckpoint"
+                    "$ref": "#/definitions/internal_module_barcode.ScanCheckpoint"
                 },
                 "scan_id": {
                     "type": "string"
@@ -7077,18 +7477,18 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "work_order": {
-                    "$ref": "#/definitions/barcode.WorkOrderScan"
+                    "$ref": "#/definitions/internal_module_barcode.WorkOrderScan"
                 }
             }
         },
-        "barcode.WorkOrderScan": {
+        "internal_module_barcode.WorkOrderScan": {
             "type": "object",
             "properties": {
                 "id": {
                     "type": "string"
                 },
                 "new_status": {
-                    "$ref": "#/definitions/domain.WorkOrderStatus"
+                    "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.WorkOrderStatus"
                 },
                 "sku_code": {
                     "type": "string"
@@ -7098,13 +7498,13 @@ const docTemplate = `{
                 }
             }
         },
-        "catalog.BOM": {
+        "internal_module_catalog.BOM": {
             "type": "object",
             "properties": {
                 "components": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/catalog.BOMComponent"
+                        "$ref": "#/definitions/internal_module_catalog.BOMComponent"
                     }
                 },
                 "sku_id": {
@@ -7112,14 +7512,14 @@ const docTemplate = `{
                 }
             }
         },
-        "catalog.BOMComponent": {
+        "internal_module_catalog.BOMComponent": {
             "type": "object",
             "properties": {
                 "material_id": {
                     "type": "string"
                 },
                 "material_type": {
-                    "$ref": "#/definitions/catalog.MaterialType"
+                    "$ref": "#/definitions/internal_module_catalog.MaterialType"
                 },
                 "quantity_per_unit": {
                     "type": "number"
@@ -7129,7 +7529,7 @@ const docTemplate = `{
                 }
             }
         },
-        "catalog.BOMVariant": {
+        "internal_module_catalog.BOMVariant": {
             "type": "object",
             "properties": {
                 "created_at": {
@@ -7152,13 +7552,13 @@ const docTemplate = `{
                 }
             }
         },
-        "catalog.CreateBOMVariantInput": {
+        "internal_module_catalog.CreateBOMVariantInput": {
             "type": "object",
             "properties": {
                 "components": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/catalog.BOMComponent"
+                        "$ref": "#/definitions/internal_module_catalog.BOMComponent"
                     }
                 },
                 "name": {
@@ -7172,28 +7572,28 @@ const docTemplate = `{
                 }
             }
         },
-        "catalog.CreateMaterialInput": {
+        "internal_module_catalog.CreateMaterialInput": {
             "type": "object",
             "properties": {
                 "name": {
                     "type": "string"
                 },
                 "type": {
-                    "$ref": "#/definitions/catalog.MaterialType"
+                    "$ref": "#/definitions/internal_module_catalog.MaterialType"
                 },
                 "unit": {
                     "type": "string"
                 }
             }
         },
-        "catalog.CreateSKUInput": {
+        "internal_module_catalog.CreateSKUInput": {
             "type": "object",
             "properties": {
                 "code": {
                     "type": "string"
                 },
                 "dimensions": {
-                    "$ref": "#/definitions/domain.Dimension"
+                    "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.Dimension"
                 },
                 "name": {
                     "type": "string"
@@ -7203,7 +7603,7 @@ const docTemplate = `{
                 }
             }
         },
-        "catalog.Material": {
+        "internal_module_catalog.Material": {
             "type": "object",
             "properties": {
                 "created_at": {
@@ -7219,14 +7619,14 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "type": {
-                    "$ref": "#/definitions/catalog.MaterialType"
+                    "$ref": "#/definitions/internal_module_catalog.MaterialType"
                 },
                 "unit": {
                     "type": "string"
                 }
             }
         },
-        "catalog.MaterialType": {
+        "internal_module_catalog.MaterialType": {
             "type": "string",
             "enum": [
                 "PLYWOOD",
@@ -7241,7 +7641,7 @@ const docTemplate = `{
                 "MaterialTypeOther"
             ]
         },
-        "catalog.SKU": {
+        "internal_module_catalog.SKU": {
             "type": "object",
             "properties": {
                 "code": {
@@ -7251,7 +7651,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "dimensions": {
-                    "$ref": "#/definitions/domain.Dimension"
+                    "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.Dimension"
                 },
                 "id": {
                     "type": "string"
@@ -7267,13 +7667,13 @@ const docTemplate = `{
                 }
             }
         },
-        "catalog.SetBOMInput": {
+        "internal_module_catalog.SetBOMInput": {
             "type": "object",
             "properties": {
                 "components": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/catalog.BOMComponent"
+                        "$ref": "#/definitions/internal_module_catalog.BOMComponent"
                     }
                 },
                 "sku_id": {
@@ -7281,7 +7681,7 @@ const docTemplate = `{
                 }
             }
         },
-        "costing.CostingAdjustment": {
+        "internal_module_costing.CostingAdjustment": {
             "type": "object",
             "properties": {
                 "costing_record_id": {
@@ -7294,16 +7694,16 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "delta_auxiliary": {
-                    "$ref": "#/definitions/domain.Money"
+                    "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.Money"
                 },
                 "delta_labor": {
-                    "$ref": "#/definitions/domain.Money"
+                    "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.Money"
                 },
                 "delta_material": {
-                    "$ref": "#/definitions/domain.Money"
+                    "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.Money"
                 },
                 "delta_total": {
-                    "$ref": "#/definitions/domain.Money"
+                    "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.Money"
                 },
                 "id": {
                     "type": "string"
@@ -7313,14 +7713,14 @@ const docTemplate = `{
                 }
             }
         },
-        "costing.CostingRecord": {
+        "internal_module_costing.CostingRecord": {
             "type": "object",
             "properties": {
                 "auxiliary_cost": {
-                    "$ref": "#/definitions/domain.Money"
+                    "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.Money"
                 },
                 "costing_type": {
-                    "$ref": "#/definitions/costing.CostingType"
+                    "$ref": "#/definitions/internal_module_costing.CostingType"
                 },
                 "created_at": {
                     "type": "string"
@@ -7338,49 +7738,49 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "labor_cost": {
-                    "$ref": "#/definitions/domain.Money"
+                    "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.Money"
                 },
                 "material_cost": {
-                    "$ref": "#/definitions/domain.Money"
+                    "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.Money"
                 },
                 "sku_id": {
                     "type": "string"
                 },
                 "total_cost": {
-                    "$ref": "#/definitions/domain.Money"
+                    "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.Money"
                 },
                 "work_order_id": {
                     "type": "string"
                 }
             }
         },
-        "costing.CostingRecordDetail": {
+        "internal_module_costing.CostingRecordDetail": {
             "type": "object",
             "properties": {
                 "adjustments": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/costing.CostingAdjustment"
+                        "$ref": "#/definitions/internal_module_costing.CostingAdjustment"
                     }
                 },
                 "effective_auxiliary": {
-                    "$ref": "#/definitions/domain.Money"
+                    "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.Money"
                 },
                 "effective_labor": {
-                    "$ref": "#/definitions/domain.Money"
+                    "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.Money"
                 },
                 "effective_material": {
-                    "$ref": "#/definitions/domain.Money"
+                    "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.Money"
                 },
                 "effective_total": {
-                    "$ref": "#/definitions/domain.Money"
+                    "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.Money"
                 },
                 "record": {
-                    "$ref": "#/definitions/costing.CostingRecord"
+                    "$ref": "#/definitions/internal_module_costing.CostingRecord"
                 }
             }
         },
-        "costing.CostingType": {
+        "internal_module_costing.CostingType": {
             "type": "string",
             "enum": [
                 "ESTIMATED",
@@ -7391,28 +7791,28 @@ const docTemplate = `{
                 "CostingTypeActual"
             ]
         },
-        "costing.CreateAdjustmentInput": {
+        "internal_module_costing.CreateAdjustmentInput": {
             "type": "object",
             "properties": {
                 "delta_auxiliary": {
-                    "$ref": "#/definitions/domain.Money"
+                    "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.Money"
                 },
                 "delta_labor": {
-                    "$ref": "#/definitions/domain.Money"
+                    "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.Money"
                 },
                 "delta_material": {
-                    "$ref": "#/definitions/domain.Money"
+                    "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.Money"
                 },
                 "reason": {
                     "type": "string"
                 }
             }
         },
-        "costing.WasteReportRow": {
+        "internal_module_costing.WasteReportRow": {
             "type": "object",
             "properties": {
                 "avg_sheet_cost": {
-                    "$ref": "#/definitions/domain.Money"
+                    "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.Money"
                 },
                 "material_id": {
                     "type": "string"
@@ -7424,14 +7824,14 @@ const docTemplate = `{
                     "type": "integer"
                 },
                 "total_waste_cost": {
-                    "$ref": "#/definitions/domain.Money"
+                    "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.Money"
                 },
                 "waste_area_mm2": {
                     "type": "integer"
                 }
             }
         },
-        "dashboard.BoardStockSummaryItem": {
+        "internal_module_dashboard.BoardStockSummaryItem": {
             "type": "object",
             "properties": {
                 "allocated": {
@@ -7451,30 +7851,30 @@ const docTemplate = `{
                 }
             }
         },
-        "dashboard.ChartsOutput": {
+        "internal_module_dashboard.ChartsOutput": {
             "type": "object",
             "properties": {
                 "cost_allocation": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/dashboard.CostAllocationItem"
+                        "$ref": "#/definitions/internal_module_dashboard.CostAllocationItem"
                     }
                 },
                 "material_usage": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/dashboard.MaterialUsagePoint"
+                        "$ref": "#/definitions/internal_module_dashboard.MaterialUsagePoint"
                     }
                 },
                 "remnant_trend_7d": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/dashboard.RemnantTrendPoint"
+                        "$ref": "#/definitions/internal_module_dashboard.RemnantTrendPoint"
                     }
                 }
             }
         },
-        "dashboard.CostAllocationItem": {
+        "internal_module_dashboard.CostAllocationItem": {
             "type": "object",
             "properties": {
                 "cost": {
@@ -7485,7 +7885,7 @@ const docTemplate = `{
                 }
             }
         },
-        "dashboard.KPIOutput": {
+        "internal_module_dashboard.KPIOutput": {
             "type": "object",
             "properties": {
                 "active_work_orders": {
@@ -7495,14 +7895,14 @@ const docTemplate = `{
                     "type": "integer"
                 },
                 "remnants": {
-                    "$ref": "#/definitions/dashboard.RemnantKPIOutput"
+                    "$ref": "#/definitions/internal_module_dashboard.RemnantKPIOutput"
                 },
                 "utilization_pct": {
                     "type": "number"
                 }
             }
         },
-        "dashboard.MaterialUsagePoint": {
+        "internal_module_dashboard.MaterialUsagePoint": {
             "type": "object",
             "properties": {
                 "ACCESSORY": {
@@ -7519,44 +7919,44 @@ const docTemplate = `{
                 }
             }
         },
-        "dashboard.OverviewOutput": {
+        "internal_module_dashboard.OverviewOutput": {
             "type": "object",
             "properties": {
                 "charts": {
-                    "$ref": "#/definitions/dashboard.ChartsOutput"
+                    "$ref": "#/definitions/internal_module_dashboard.ChartsOutput"
                 },
                 "kpi": {
-                    "$ref": "#/definitions/dashboard.KPIOutput"
+                    "$ref": "#/definitions/internal_module_dashboard.KPIOutput"
                 },
                 "recent_activity": {
-                    "$ref": "#/definitions/dashboard.RecentActivityOutput"
+                    "$ref": "#/definitions/internal_module_dashboard.RecentActivityOutput"
                 }
             }
         },
-        "dashboard.RecentActivityOutput": {
+        "internal_module_dashboard.RecentActivityOutput": {
             "type": "object",
             "properties": {
                 "completed_work_orders": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/dashboard.RecentWorkOrderItem"
+                        "$ref": "#/definitions/internal_module_dashboard.RecentWorkOrderItem"
                     }
                 },
                 "costing_finalizations": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/dashboard.RecentCostingFinalizationItem"
+                        "$ref": "#/definitions/internal_module_dashboard.RecentCostingFinalizationItem"
                     }
                 },
                 "recent_cuts": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/dashboard.RecentCutItem"
+                        "$ref": "#/definitions/internal_module_dashboard.RecentCutItem"
                     }
                 }
             }
         },
-        "dashboard.RecentCostingFinalizationItem": {
+        "internal_module_dashboard.RecentCostingFinalizationItem": {
             "type": "object",
             "properties": {
                 "created_at": {
@@ -7573,7 +7973,7 @@ const docTemplate = `{
                 }
             }
         },
-        "dashboard.RecentCutItem": {
+        "internal_module_dashboard.RecentCutItem": {
             "type": "object",
             "properties": {
                 "created_at": {
@@ -7593,7 +7993,7 @@ const docTemplate = `{
                 }
             }
         },
-        "dashboard.RecentWorkOrderItem": {
+        "internal_module_dashboard.RecentWorkOrderItem": {
             "type": "object",
             "properties": {
                 "created_at": {
@@ -7610,7 +8010,7 @@ const docTemplate = `{
                 }
             }
         },
-        "dashboard.RemnantKPIOutput": {
+        "internal_module_dashboard.RemnantKPIOutput": {
             "type": "object",
             "properties": {
                 "allocated": {
@@ -7630,7 +8030,7 @@ const docTemplate = `{
                 }
             }
         },
-        "dashboard.RemnantTrendPoint": {
+        "internal_module_dashboard.RemnantTrendPoint": {
             "type": "object",
             "properties": {
                 "allocated": {
@@ -7647,18 +8047,18 @@ const docTemplate = `{
                 }
             }
         },
-        "dashboard.WIPPipelineOutput": {
+        "internal_module_dashboard.WIPPipelineOutput": {
             "type": "object",
             "properties": {
                 "stages": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/dashboard.WIPStageRow"
+                        "$ref": "#/definitions/internal_module_dashboard.WIPStageRow"
                     }
                 }
             }
         },
-        "dashboard.WIPStageRow": {
+        "internal_module_dashboard.WIPStageRow": {
             "type": "object",
             "properties": {
                 "at_risk_count": {
@@ -7675,407 +8075,7 @@ const docTemplate = `{
                 }
             }
         },
-        "domain.Dimension": {
-            "type": "object",
-            "properties": {
-                "length_mm": {
-                    "type": "integer"
-                },
-                "width_mm": {
-                    "type": "integer"
-                }
-            }
-        },
-        "domain.LaborStage": {
-            "type": "string",
-            "enum": [
-                "CNC",
-                "GRINDING",
-                "ASSEMBLY",
-                "POLISHING"
-            ],
-            "x-enum-varnames": [
-                "LaborStageCNC",
-                "LaborStageGrinding",
-                "LaborStageAssembly",
-                "LaborStagePolishing"
-            ]
-        },
-        "domain.Money": {
-            "type": "object",
-            "properties": {
-                "amount": {
-                    "type": "integer"
-                },
-                "currency": {
-                    "type": "string"
-                }
-            }
-        },
-        "domain.PlanStatus": {
-            "type": "string",
-            "enum": [
-                "DRAFT",
-                "APPROVED",
-                "CANCELED"
-            ],
-            "x-enum-varnames": [
-                "PlanDraft",
-                "PlanApproved",
-                "PlanCanceled"
-            ]
-        },
-        "domain.RemnantStatus": {
-            "type": "string",
-            "enum": [
-                "AVAILABLE",
-                "ALLOCATED",
-                "CONSUMED",
-                "WASTE"
-            ],
-            "x-enum-varnames": [
-                "RemnantAvailable",
-                "RemnantAllocated",
-                "RemnantConsumed",
-                "RemnantWaste"
-            ]
-        },
-        "domain.WorkOrderStatus": {
-            "type": "string",
-            "enum": [
-                "PLANNED",
-                "IN_CUTTING",
-                "IN_PROCESSING",
-                "COMPLETED",
-                "COSTED",
-                "CANCELED"
-            ],
-            "x-enum-varnames": [
-                "WOPlanned",
-                "WOInCutting",
-                "WOInProcessing",
-                "WOCompleted",
-                "WOCosted",
-                "WOCanceled"
-            ]
-        },
-        "httpkit.CursorResult-barcode_ScanEvent": {
-            "type": "object",
-            "properties": {
-                "has_more": {
-                    "type": "boolean"
-                },
-                "items": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/barcode.ScanEvent"
-                    }
-                },
-                "next_cursor": {
-                    "type": "string"
-                }
-            }
-        },
-        "httpkit.PagedResult-authn_UserDetail": {
-            "type": "object",
-            "properties": {
-                "current_page": {
-                    "type": "integer"
-                },
-                "items": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/authn.UserDetail"
-                    }
-                },
-                "limit": {
-                    "type": "integer"
-                },
-                "total_items": {
-                    "type": "integer"
-                },
-                "total_pages": {
-                    "type": "integer"
-                }
-            }
-        },
-        "httpkit.PagedResult-catalog_Material": {
-            "type": "object",
-            "properties": {
-                "current_page": {
-                    "type": "integer"
-                },
-                "items": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/catalog.Material"
-                    }
-                },
-                "limit": {
-                    "type": "integer"
-                },
-                "total_items": {
-                    "type": "integer"
-                },
-                "total_pages": {
-                    "type": "integer"
-                }
-            }
-        },
-        "httpkit.PagedResult-catalog_SKU": {
-            "type": "object",
-            "properties": {
-                "current_page": {
-                    "type": "integer"
-                },
-                "items": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/catalog.SKU"
-                    }
-                },
-                "limit": {
-                    "type": "integer"
-                },
-                "total_items": {
-                    "type": "integer"
-                },
-                "total_pages": {
-                    "type": "integer"
-                }
-            }
-        },
-        "httpkit.PagedResult-costing_CostingRecord": {
-            "type": "object",
-            "properties": {
-                "current_page": {
-                    "type": "integer"
-                },
-                "items": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/costing.CostingRecord"
-                    }
-                },
-                "limit": {
-                    "type": "integer"
-                },
-                "total_items": {
-                    "type": "integer"
-                },
-                "total_pages": {
-                    "type": "integer"
-                }
-            }
-        },
-        "httpkit.PagedResult-inventory_BoardSheet": {
-            "type": "object",
-            "properties": {
-                "current_page": {
-                    "type": "integer"
-                },
-                "items": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/inventory.BoardSheet"
-                    }
-                },
-                "limit": {
-                    "type": "integer"
-                },
-                "total_items": {
-                    "type": "integer"
-                },
-                "total_pages": {
-                    "type": "integer"
-                }
-            }
-        },
-        "httpkit.PagedResult-inventory_CuttingRecordReport": {
-            "type": "object",
-            "properties": {
-                "current_page": {
-                    "type": "integer"
-                },
-                "items": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/inventory.CuttingRecordReport"
-                    }
-                },
-                "limit": {
-                    "type": "integer"
-                },
-                "total_items": {
-                    "type": "integer"
-                },
-                "total_pages": {
-                    "type": "integer"
-                }
-            }
-        },
-        "httpkit.PagedResult-inventory_InventoryLot": {
-            "type": "object",
-            "properties": {
-                "current_page": {
-                    "type": "integer"
-                },
-                "items": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/inventory.InventoryLot"
-                    }
-                },
-                "limit": {
-                    "type": "integer"
-                },
-                "total_items": {
-                    "type": "integer"
-                },
-                "total_pages": {
-                    "type": "integer"
-                }
-            }
-        },
-        "httpkit.PagedResult-inventory_Remnant": {
-            "type": "object",
-            "properties": {
-                "current_page": {
-                    "type": "integer"
-                },
-                "items": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/inventory.Remnant"
-                    }
-                },
-                "limit": {
-                    "type": "integer"
-                },
-                "total_items": {
-                    "type": "integer"
-                },
-                "total_pages": {
-                    "type": "integer"
-                }
-            }
-        },
-        "httpkit.PagedResult-order_PO": {
-            "type": "object",
-            "properties": {
-                "current_page": {
-                    "type": "integer"
-                },
-                "items": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/order.PO"
-                    }
-                },
-                "limit": {
-                    "type": "integer"
-                },
-                "total_items": {
-                    "type": "integer"
-                },
-                "total_pages": {
-                    "type": "integer"
-                }
-            }
-        },
-        "httpkit.PagedResult-planning_Plan": {
-            "type": "object",
-            "properties": {
-                "current_page": {
-                    "type": "integer"
-                },
-                "items": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/planning.Plan"
-                    }
-                },
-                "limit": {
-                    "type": "integer"
-                },
-                "total_items": {
-                    "type": "integer"
-                },
-                "total_pages": {
-                    "type": "integer"
-                }
-            }
-        },
-        "httpkit.PagedResult-planning_PlanLookupItem": {
-            "type": "object",
-            "properties": {
-                "current_page": {
-                    "type": "integer"
-                },
-                "items": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/planning.PlanLookupItem"
-                    }
-                },
-                "limit": {
-                    "type": "integer"
-                },
-                "total_items": {
-                    "type": "integer"
-                },
-                "total_pages": {
-                    "type": "integer"
-                }
-            }
-        },
-        "httpkit.PagedResult-production_WorkOrder": {
-            "type": "object",
-            "properties": {
-                "current_page": {
-                    "type": "integer"
-                },
-                "items": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/production.WorkOrder"
-                    }
-                },
-                "limit": {
-                    "type": "integer"
-                },
-                "total_items": {
-                    "type": "integer"
-                },
-                "total_pages": {
-                    "type": "integer"
-                }
-            }
-        },
-        "httpkit.PagedResult-purchasing_PurchaseOrder": {
-            "type": "object",
-            "properties": {
-                "current_page": {
-                    "type": "integer"
-                },
-                "items": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/purchasing.PurchaseOrder"
-                    }
-                },
-                "limit": {
-                    "type": "integer"
-                },
-                "total_items": {
-                    "type": "integer"
-                },
-                "total_pages": {
-                    "type": "integer"
-                }
-            }
-        },
-        "inventory.AddCountLineInput": {
+        "internal_module_inventory.AddCountLineInput": {
             "type": "object",
             "properties": {
                 "counted_location_id": {
@@ -8095,7 +8095,7 @@ const docTemplate = `{
                 }
             }
         },
-        "inventory.AuditLogEntry": {
+        "internal_module_inventory.AuditLogEntry": {
             "type": "object",
             "properties": {
                 "action": {
@@ -8142,17 +8142,17 @@ const docTemplate = `{
                 }
             }
         },
-        "inventory.BoardSheet": {
+        "internal_module_inventory.BoardSheet": {
             "type": "object",
             "properties": {
                 "bin_location_id": {
                     "type": "string"
                 },
                 "cost_per_sheet": {
-                    "$ref": "#/definitions/domain.Money"
+                    "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.Money"
                 },
                 "dimensions": {
-                    "$ref": "#/definitions/domain.Dimension"
+                    "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.Dimension"
                 },
                 "grain_pattern": {
                     "type": "string"
@@ -8186,7 +8186,7 @@ const docTemplate = `{
                 }
             }
         },
-        "inventory.CreateCycleCountInput": {
+        "internal_module_inventory.CreateCycleCountInput": {
             "type": "object",
             "properties": {
                 "zone": {
@@ -8194,7 +8194,7 @@ const docTemplate = `{
                 }
             }
         },
-        "inventory.CutResult": {
+        "internal_module_inventory.CutResult": {
             "type": "object",
             "properties": {
                 "barcode_ids": {
@@ -8211,7 +8211,7 @@ const docTemplate = `{
                 }
             }
         },
-        "inventory.CuttingRecordReport": {
+        "internal_module_inventory.CuttingRecordReport": {
             "type": "object",
             "properties": {
                 "assigned_full_name": {
@@ -8249,14 +8249,14 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "used_dimension": {
-                    "$ref": "#/definitions/domain.Dimension"
+                    "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.Dimension"
                 },
                 "work_order_id": {
                     "type": "string"
                 }
             }
         },
-        "inventory.CycleCountLine": {
+        "internal_module_inventory.CycleCountLine": {
             "type": "object",
             "properties": {
                 "counted_location_id": {
@@ -8285,7 +8285,7 @@ const docTemplate = `{
                 }
             }
         },
-        "inventory.CycleCountSession": {
+        "internal_module_inventory.CycleCountSession": {
             "type": "object",
             "properties": {
                 "created_at": {
@@ -8311,11 +8311,11 @@ const docTemplate = `{
                 }
             }
         },
-        "inventory.InventoryLot": {
+        "internal_module_inventory.InventoryLot": {
             "type": "object",
             "properties": {
                 "cost_per_sheet": {
-                    "$ref": "#/definitions/domain.Money"
+                    "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.Money"
                 },
                 "id": {
                     "type": "string"
@@ -8337,7 +8337,7 @@ const docTemplate = `{
                 }
             }
         },
-        "inventory.OverflowLevel": {
+        "internal_module_inventory.OverflowLevel": {
             "type": "string",
             "enum": [
                 "GREEN",
@@ -8348,7 +8348,7 @@ const docTemplate = `{
                 "OverflowRed"
             ]
         },
-        "inventory.OverflowStatus": {
+        "internal_module_inventory.OverflowStatus": {
             "type": "object",
             "properties": {
                 "block_new_sheet_issue": {
@@ -8358,7 +8358,7 @@ const docTemplate = `{
                     "type": "number"
                 },
                 "status": {
-                    "$ref": "#/definitions/inventory.OverflowLevel"
+                    "$ref": "#/definitions/internal_module_inventory.OverflowLevel"
                 },
                 "threshold_pct": {
                     "type": "number"
@@ -8371,14 +8371,14 @@ const docTemplate = `{
                 }
             }
         },
-        "inventory.ReceiveStockInput": {
+        "internal_module_inventory.ReceiveStockInput": {
             "type": "object",
             "properties": {
                 "cost_per_sheet": {
-                    "$ref": "#/definitions/domain.Money"
+                    "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.Money"
                 },
                 "dimensions": {
-                    "$ref": "#/definitions/domain.Dimension"
+                    "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.Dimension"
                 },
                 "material_id": {
                     "type": "string"
@@ -8391,7 +8391,7 @@ const docTemplate = `{
                 }
             }
         },
-        "inventory.RecordCutInput": {
+        "internal_module_inventory.RecordCutInput": {
             "type": "object",
             "properties": {
                 "bounding_box_length_mm": {
@@ -8406,7 +8406,7 @@ const docTemplate = `{
                     "type": "boolean"
                 },
                 "remnant_dimension": {
-                    "$ref": "#/definitions/domain.Dimension"
+                    "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.Dimension"
                 },
                 "remnant_id": {
                     "type": "string"
@@ -8422,14 +8422,14 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "used_dimension": {
-                    "$ref": "#/definitions/domain.Dimension"
+                    "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.Dimension"
                 },
                 "work_order_id": {
                     "type": "string"
                 }
             }
         },
-        "inventory.Remnant": {
+        "internal_module_inventory.Remnant": {
             "type": "object",
             "properties": {
                 "allocated_at": {
@@ -8451,7 +8451,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "dimensions": {
-                    "$ref": "#/definitions/domain.Dimension"
+                    "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.Dimension"
                 },
                 "grain_pattern": {
                     "type": "string"
@@ -8475,28 +8475,28 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "status": {
-                    "$ref": "#/definitions/domain.RemnantStatus"
+                    "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.RemnantStatus"
                 },
                 "supplier_code": {
                     "type": "string"
                 }
             }
         },
-        "inventory.RemnantSuggestion": {
+        "internal_module_inventory.RemnantSuggestion": {
             "type": "object",
             "properties": {
                 "location": {
-                    "$ref": "#/definitions/inventory.StorageLocation"
+                    "$ref": "#/definitions/internal_module_inventory.StorageLocation"
                 },
                 "rank": {
                     "type": "integer"
                 },
                 "remnant": {
-                    "$ref": "#/definitions/inventory.Remnant"
+                    "$ref": "#/definitions/internal_module_inventory.Remnant"
                 }
             }
         },
-        "inventory.StorageLocation": {
+        "internal_module_inventory.StorageLocation": {
             "type": "object",
             "properties": {
                 "barcode": {
@@ -8525,7 +8525,7 @@ const docTemplate = `{
                 }
             }
         },
-        "inventory.TransferInput": {
+        "internal_module_inventory.TransferInput": {
             "type": "object",
             "properties": {
                 "entity_id": {
@@ -8539,7 +8539,7 @@ const docTemplate = `{
                 }
             }
         },
-        "inventory.TransferResult": {
+        "internal_module_inventory.TransferResult": {
             "type": "object",
             "properties": {
                 "audit_log_id": {
@@ -8559,21 +8559,21 @@ const docTemplate = `{
                 }
             }
         },
-        "order.CreateLineItemInput": {
+        "internal_module_order.CreateLineItemInput": {
             "type": "object",
             "properties": {
                 "quantity": {
                     "type": "integer"
                 },
                 "selling_price": {
-                    "$ref": "#/definitions/domain.Money"
+                    "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.Money"
                 },
                 "sku_id": {
                     "type": "string"
                 }
             }
         },
-        "order.CreatePOInput": {
+        "internal_module_order.CreatePOInput": {
             "type": "object",
             "properties": {
                 "code": {
@@ -8585,12 +8585,12 @@ const docTemplate = `{
                 "line_items": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/order.CreateLineItemInput"
+                        "$ref": "#/definitions/internal_module_order.CreateLineItemInput"
                     }
                 }
             }
         },
-        "order.LineItem": {
+        "internal_module_order.LineItem": {
             "type": "object",
             "properties": {
                 "id": {
@@ -8603,14 +8603,14 @@ const docTemplate = `{
                     "type": "integer"
                 },
                 "selling_price": {
-                    "$ref": "#/definitions/domain.Money"
+                    "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.Money"
                 },
                 "sku_id": {
                     "type": "string"
                 }
             }
         },
-        "order.PO": {
+        "internal_module_order.PO": {
             "type": "object",
             "properties": {
                 "code": {
@@ -8634,7 +8634,7 @@ const docTemplate = `{
                 "line_items": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/order.LineItem"
+                        "$ref": "#/definitions/internal_module_order.LineItem"
                     }
                 },
                 "total_quantity": {
@@ -8645,7 +8645,7 @@ const docTemplate = `{
                 }
             }
         },
-        "planning.CreatePlanInput": {
+        "internal_module_planning.CreatePlanInput": {
             "type": "object",
             "properties": {
                 "deadline": {
@@ -8654,7 +8654,7 @@ const docTemplate = `{
                 "items": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/planning.PlanItemInput"
+                        "$ref": "#/definitions/internal_module_planning.PlanItemInput"
                     }
                 },
                 "po_id": {
@@ -8662,7 +8662,7 @@ const docTemplate = `{
                 }
             }
         },
-        "planning.Plan": {
+        "internal_module_planning.Plan": {
             "type": "object",
             "properties": {
                 "canceled_at": {
@@ -8689,7 +8689,7 @@ const docTemplate = `{
                 "items": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/planning.PlanItem"
+                        "$ref": "#/definitions/internal_module_planning.PlanItem"
                     }
                 },
                 "po_code": {
@@ -8699,11 +8699,11 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "status": {
-                    "$ref": "#/definitions/domain.PlanStatus"
+                    "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.PlanStatus"
                 }
             }
         },
-        "planning.PlanItem": {
+        "internal_module_planning.PlanItem": {
             "type": "object",
             "properties": {
                 "id": {
@@ -8720,7 +8720,7 @@ const docTemplate = `{
                 }
             }
         },
-        "planning.PlanItemInput": {
+        "internal_module_planning.PlanItemInput": {
             "type": "object",
             "properties": {
                 "quantity": {
@@ -8731,7 +8731,7 @@ const docTemplate = `{
                 }
             }
         },
-        "planning.PlanLookupItem": {
+        "internal_module_planning.PlanLookupItem": {
             "type": "object",
             "properties": {
                 "code": {
@@ -8747,11 +8747,11 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "status": {
-                    "$ref": "#/definitions/domain.PlanStatus"
+                    "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.PlanStatus"
                 }
             }
         },
-        "planning.cancelPlanRequest": {
+        "internal_module_planning.cancelPlanRequest": {
             "type": "object",
             "properties": {
                 "reason": {
@@ -8759,7 +8759,7 @@ const docTemplate = `{
                 }
             }
         },
-        "production.AdvanceStatusInput": {
+        "internal_module_production.AdvanceStatusInput": {
             "type": "object",
             "properties": {
                 "bypass_overflow": {
@@ -8772,11 +8772,11 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "status": {
-                    "$ref": "#/definitions/domain.WorkOrderStatus"
+                    "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.WorkOrderStatus"
                 }
             }
         },
-        "production.AssignSlotInput": {
+        "internal_module_production.AssignSlotInput": {
             "type": "object",
             "properties": {
                 "slot_id": {
@@ -8784,7 +8784,7 @@ const docTemplate = `{
                 }
             }
         },
-        "production.ConsumptionRecord": {
+        "internal_module_production.ConsumptionRecord": {
             "type": "object",
             "properties": {
                 "created_at": {
@@ -8810,7 +8810,7 @@ const docTemplate = `{
                 }
             }
         },
-        "production.CreateMachineInput": {
+        "internal_module_production.CreateMachineInput": {
             "type": "object",
             "properties": {
                 "capacity_hours_per_shift": {
@@ -8824,7 +8824,7 @@ const docTemplate = `{
                 }
             }
         },
-        "production.CreateSlotInput": {
+        "internal_module_production.CreateSlotInput": {
             "type": "object",
             "properties": {
                 "capacity_hours": {
@@ -8838,7 +8838,7 @@ const docTemplate = `{
                 }
             }
         },
-        "production.CreateWOInput": {
+        "internal_module_production.CreateWOInput": {
             "type": "object",
             "properties": {
                 "bypass_reason": {
@@ -8856,7 +8856,7 @@ const docTemplate = `{
                 }
             }
         },
-        "production.LaborEntry": {
+        "internal_module_production.LaborEntry": {
             "type": "object",
             "properties": {
                 "actor_id": {
@@ -8875,7 +8875,7 @@ const docTemplate = `{
                     "type": "integer"
                 },
                 "stage": {
-                    "$ref": "#/definitions/domain.LaborStage"
+                    "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.LaborStage"
                 },
                 "work_order_id": {
                     "type": "string"
@@ -8885,7 +8885,7 @@ const docTemplate = `{
                 }
             }
         },
-        "production.Machine": {
+        "internal_module_production.Machine": {
             "type": "object",
             "properties": {
                 "capacity_hours_per_shift": {
@@ -8908,7 +8908,7 @@ const docTemplate = `{
                 }
             }
         },
-        "production.MachineShiftSlot": {
+        "internal_module_production.MachineShiftSlot": {
             "type": "object",
             "properties": {
                 "assigned_hours": {
@@ -8940,7 +8940,7 @@ const docTemplate = `{
                 }
             }
         },
-        "production.RecordConsumptionInput": {
+        "internal_module_production.RecordConsumptionInput": {
             "type": "object",
             "properties": {
                 "material_id": {
@@ -8960,7 +8960,7 @@ const docTemplate = `{
                 }
             }
         },
-        "production.RecordLaborEntryInput": {
+        "internal_module_production.RecordLaborEntryInput": {
             "type": "object",
             "properties": {
                 "minutes": {
@@ -8970,14 +8970,14 @@ const docTemplate = `{
                     "type": "integer"
                 },
                 "stage": {
-                    "$ref": "#/definitions/domain.LaborStage"
+                    "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.LaborStage"
                 },
                 "worker_id": {
                     "type": "string"
                 }
             }
         },
-        "production.ScheduleSuggestion": {
+        "internal_module_production.ScheduleSuggestion": {
             "type": "object",
             "properties": {
                 "available_hours": {
@@ -8987,11 +8987,11 @@ const docTemplate = `{
                     "type": "integer"
                 },
                 "slot": {
-                    "$ref": "#/definitions/production.MachineShiftSlot"
+                    "$ref": "#/definitions/internal_module_production.MachineShiftSlot"
                 }
             }
         },
-        "production.SetEstimatedHoursInput": {
+        "internal_module_production.SetEstimatedHoursInput": {
             "type": "object",
             "properties": {
                 "estimated_hours": {
@@ -8999,7 +8999,7 @@ const docTemplate = `{
                 }
             }
         },
-        "production.SuggestAssignmentResult": {
+        "internal_module_production.SuggestAssignmentResult": {
             "type": "object",
             "properties": {
                 "in_cutting_count": {
@@ -9010,7 +9010,7 @@ const docTemplate = `{
                 }
             }
         },
-        "production.WorkOrder": {
+        "internal_module_production.WorkOrder": {
             "type": "object",
             "properties": {
                 "assigned_at": {
@@ -9041,7 +9041,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "sku_dimensions": {
-                    "$ref": "#/definitions/domain.Dimension"
+                    "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.Dimension"
                 },
                 "sku_id": {
                     "type": "string"
@@ -9050,11 +9050,11 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "status": {
-                    "$ref": "#/definitions/domain.WorkOrderStatus"
+                    "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.WorkOrderStatus"
                 }
             }
         },
-        "purchasing.AddPOItemInput": {
+        "internal_module_purchasing.AddPOItemInput": {
             "type": "object",
             "properties": {
                 "length_mm": {
@@ -9064,14 +9064,14 @@ const docTemplate = `{
                     "type": "integer"
                 },
                 "unit_cost": {
-                    "$ref": "#/definitions/domain.Money"
+                    "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.Money"
                 },
                 "width_mm": {
                     "type": "integer"
                 }
             }
         },
-        "purchasing.CreatePOInput": {
+        "internal_module_purchasing.CreatePOInput": {
             "type": "object",
             "properties": {
                 "code": {
@@ -9088,7 +9088,7 @@ const docTemplate = `{
                 }
             }
         },
-        "purchasing.POItem": {
+        "internal_module_purchasing.POItem": {
             "type": "object",
             "properties": {
                 "created_at": {
@@ -9110,14 +9110,14 @@ const docTemplate = `{
                     "type": "integer"
                 },
                 "unit_cost": {
-                    "$ref": "#/definitions/domain.Money"
+                    "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.Money"
                 },
                 "width_mm": {
                     "type": "integer"
                 }
             }
         },
-        "purchasing.POStatus": {
+        "internal_module_purchasing.POStatus": {
             "type": "string",
             "enum": [
                 "DRAFT",
@@ -9132,7 +9132,7 @@ const docTemplate = `{
                 "StatusCancelled"
             ]
         },
-        "purchasing.PurchaseOrder": {
+        "internal_module_purchasing.PurchaseOrder": {
             "type": "object",
             "properties": {
                 "code": {
@@ -9150,7 +9150,7 @@ const docTemplate = `{
                 "items": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/purchasing.POItem"
+                        "$ref": "#/definitions/internal_module_purchasing.POItem"
                     }
                 },
                 "material_id": {
@@ -9166,7 +9166,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "status": {
-                    "$ref": "#/definitions/purchasing.POStatus"
+                    "$ref": "#/definitions/internal_module_purchasing.POStatus"
                 },
                 "supplier": {
                     "type": "string"
