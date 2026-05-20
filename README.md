@@ -3,10 +3,23 @@
 [![CI](https://github.com/giangdq202/Vmarble-Warehouse-Management-Service/actions/workflows/ci.yml/badge.svg)](https://github.com/giangdq202/Vmarble-Warehouse-Management-Service/actions/workflows/ci.yml)
 [![Go](https://img.shields.io/badge/Go-1.24-00ADD8?logo=go)](https://go.dev)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-17-336791?logo=postgresql)](https://www.postgresql.org)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![License: PolyForm Noncommercial](https://img.shields.io/badge/License-PolyForm%20Noncommercial-blue.svg)](https://polyformproject.org/licenses/noncommercial/1.0.0/)
 
 Backend service for a furniture workshop's warehouse and production management system.
 Tracks the full lifecycle from Purchase Orders → CNC cutting → Processing → Costing, with remnant optimisation and barcode scan checkpoints.
+
+## License
+
+This project is licensed under the **PolyForm Noncommercial License 1.0.0**.
+
+**What this means:**
+- ✅ Free for personal use, research, and education
+- ✅ You can fork, modify, and study the code
+- ❌ Commercial use requires a separate commercial license
+
+**For commercial licensing:** Contact giangdq202@gmail.com
+
+See [LICENSE](./LICENSE) for full terms.
 
 ---
 
