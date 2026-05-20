@@ -213,11 +213,13 @@ func (h *Handler) recordScan(c *gin.Context) {
 
 // listScans godoc
 //
-// @Summary      List scan events
+// @Summary      List scan events (keyset paginated)
 // @Tags         barcode
 // @Produce      json
-// @Param        id   path      string  true  "barcode id (uuid)"
-// @Success      200  {array}   ScanEvent
+// @Param        id      path      string  true   "barcode id (uuid)"
+// @Param        cursor  query     string  false  "opaque cursor token returned in next_cursor; omit for first page"
+// @Param        limit   query     int     false  "page size (default 50, max 200)"
+// @Success      200  {object}  httpkit.CursorResult[barcode.ScanEvent]
 // @Failure      400  {object}  map[string]string
 // @Failure      404  {object}  map[string]string
 // @Security     BearerAuth
@@ -229,12 +231,13 @@ func (h *Handler) listScans(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
 		return
 	}
-	events, err := h.svc.ListScans(c.Request.Context(), id)
+	params := httpkit.BindCursorParams(c)
+	res, err := h.svc.ListScans(c.Request.Context(), id, params)
 	if err != nil {
 		httpkit.Error(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, events)
+	c.JSON(http.StatusOK, res)
 }
 
 // generateBatchLabelPDF godoc

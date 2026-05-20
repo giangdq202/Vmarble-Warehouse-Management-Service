@@ -674,6 +674,17 @@ definitions:
     - WOCompleted
     - WOCosted
     - WOCanceled
+  httpkit.CursorResult-barcode_ScanEvent:
+    properties:
+      has_more:
+        type: boolean
+      items:
+        items:
+          $ref: '#/definitions/barcode.ScanEvent'
+        type: array
+      next_cursor:
+        type: string
+    type: object
   httpkit.PagedResult-authn_UserDetail:
     properties:
       current_page:
@@ -1991,15 +2002,21 @@ paths:
         name: id
         required: true
         type: string
+      - description: opaque cursor token returned in next_cursor; omit for first page
+        in: query
+        name: cursor
+        type: string
+      - description: page size (default 50, max 200)
+        in: query
+        name: limit
+        type: integer
       produces:
       - application/json
       responses:
         "200":
           description: OK
           schema:
-            items:
-              $ref: '#/definitions/barcode.ScanEvent'
-            type: array
+            $ref: '#/definitions/httpkit.CursorResult-barcode_ScanEvent'
         "400":
           description: Bad Request
           schema:
@@ -2020,7 +2037,7 @@ paths:
             type: object
       security:
       - BearerAuth: []
-      summary: List scan events
+      summary: List scan events (keyset paginated)
       tags:
       - barcode
     post:
