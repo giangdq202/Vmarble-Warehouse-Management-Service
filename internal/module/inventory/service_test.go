@@ -130,14 +130,18 @@ type mockStore struct {
 	insertAuditLogEntry  AuditLogEntry
 	insertAuditLogErr    error
 
-	// selectAuditLogByEntity
+	// selectAuditLogByEntityKeyset
 	selectAuditLogByEntityResult []AuditLogEntry
 	selectAuditLogByEntityErr    error
+	selectAuditLogByEntityCur    httpkit.Cursor
+	selectAuditLogByEntityLim    int
 
-	// selectAuditLogByAction
+	// selectAuditLogByActionKeyset
 	selectAuditLogByActionResult []AuditLogEntry
 	selectAuditLogByActionErr    error
 	selectAuditLogByActionAction string
+	selectAuditLogByActionCur    httpkit.Cursor
+	selectAuditLogByActionLim    int
 
 	// insertCycleCountSession
 	insertCycleCountSessionErr error
@@ -274,12 +278,16 @@ func (m *mockStore) insertAuditLog(_ context.Context, entry AuditLogEntry) error
 	return m.insertAuditLogErr
 }
 
-func (m *mockStore) selectAuditLogByAction(_ context.Context, action string) ([]AuditLogEntry, error) {
+func (m *mockStore) selectAuditLogByActionKeyset(_ context.Context, action string, cur httpkit.Cursor, limit int) ([]AuditLogEntry, error) {
 	m.selectAuditLogByActionAction = action
+	m.selectAuditLogByActionCur = cur
+	m.selectAuditLogByActionLim = limit
 	return m.selectAuditLogByActionResult, m.selectAuditLogByActionErr
 }
 
-func (m *mockStore) selectAuditLogByEntity(_ context.Context, _ uuid.UUID, _ string) ([]AuditLogEntry, error) {
+func (m *mockStore) selectAuditLogByEntityKeyset(_ context.Context, _ uuid.UUID, _ string, cur httpkit.Cursor, limit int) ([]AuditLogEntry, error) {
+	m.selectAuditLogByEntityCur = cur
+	m.selectAuditLogByEntityLim = limit
 	return m.selectAuditLogByEntityResult, m.selectAuditLogByEntityErr
 }
 
@@ -3915,26 +3923,99 @@ func TestLogRemnantBypass_MissingActor_Rejected(t *testing.T) {
 
 func TestListAuditLogByAction_PassesActionToStore(t *testing.T) {
 	st := &mockStore{
-		selectAuditLogByActionResult: []AuditLogEntry{{ID: uuid.New(), Action: auditActionRemnantBypassed}},
+		selectAuditLogByActionResult: []AuditLogEntry{{ID: uuid.New(), Action: auditActionRemnantBypassed, CreatedAt: time.Now().UTC()}},
 	}
 	svc := NewService(st, nil)
-	got, err := svc.ListAuditLogByAction(context.Background(), auditActionRemnantBypassed)
+	got, err := svc.ListAuditLogByAction(context.Background(), auditActionRemnantBypassed, httpkit.CursorParams{Limit: 50})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if st.selectAuditLogByActionAction != auditActionRemnantBypassed {
 		t.Errorf("action passed to store = %q, want %q", st.selectAuditLogByActionAction, auditActionRemnantBypassed)
 	}
-	if len(got) != 1 {
-		t.Errorf("want 1 entry, got %d", len(got))
+	if st.selectAuditLogByActionLim != 51 {
+		t.Errorf("limit passed to store = %d, want 51 (params.Limit+1 over-fetch)", st.selectAuditLogByActionLim)
+	}
+	if len(got.Items) != 1 {
+		t.Errorf("want 1 entry, got %d", len(got.Items))
+	}
+	if got.HasMore {
+		t.Errorf("HasMore = true, want false")
 	}
 }
 
 func TestListAuditLogByAction_EmptyAction_Rejected(t *testing.T) {
 	svc := NewService(&mockStore{}, nil)
-	_, err := svc.ListAuditLogByAction(context.Background(), "")
+	_, err := svc.ListAuditLogByAction(context.Background(), "", httpkit.CursorParams{Limit: 50})
 	if !errors.Is(err, domain.ErrInvalidInput) {
 		t.Errorf("want ErrInvalidInput, got %v", err)
+	}
+}
+
+func TestListAuditLogByAction_OverFetched_TrimsAndSetsCursor(t *testing.T) {
+	now := time.Now().UTC()
+	lastKept := AuditLogEntry{ID: uuid.New(), Action: auditActionRemnantBypassed, CreatedAt: now.Add(-2 * time.Second)}
+	st := &mockStore{
+		selectAuditLogByActionResult: []AuditLogEntry{
+			{ID: uuid.New(), Action: auditActionRemnantBypassed, CreatedAt: now},
+			lastKept,
+			// sentinel — proves there's another page
+			{ID: uuid.New(), Action: auditActionRemnantBypassed, CreatedAt: now.Add(-3 * time.Second)},
+		},
+	}
+	svc := NewService(st, nil)
+	got, err := svc.ListAuditLogByAction(context.Background(), auditActionRemnantBypassed, httpkit.CursorParams{Limit: 2})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !got.HasMore {
+		t.Errorf("HasMore = false, want true (over-fetched 3 > limit 2)")
+	}
+	if len(got.Items) != 2 {
+		t.Errorf("len(items) = %d, want 2 (sentinel must be trimmed)", len(got.Items))
+	}
+	decoded, err := httpkit.DecodeCursor(got.NextCursor)
+	if err != nil {
+		t.Fatalf("DecodeCursor(NextCursor) = %v", err)
+	}
+	if !decoded.Ts.Equal(lastKept.CreatedAt) || decoded.ID != lastKept.ID {
+		t.Errorf("cursor = %+v, want Ts=%v ID=%v (last kept row, not sentinel)", decoded, lastKept.CreatedAt, lastKept.ID)
+	}
+}
+
+func TestListAuditLogByAction_InvalidCursor_ReturnsErr(t *testing.T) {
+	st := &mockStore{}
+	svc := NewService(st, nil)
+	_, err := svc.ListAuditLogByAction(context.Background(), auditActionRemnantBypassed, httpkit.CursorParams{
+		Cursor: "not!valid!base64!@#", Limit: 10,
+	})
+	if !errors.Is(err, httpkit.ErrInvalidCursor) {
+		t.Errorf("err = %v, want wraps ErrInvalidCursor", err)
+	}
+	if st.selectAuditLogByActionLim != 0 {
+		t.Errorf("store should not be called when cursor is invalid, got limit=%d", st.selectAuditLogByActionLim)
+	}
+}
+
+func TestListAuditLog_InvalidEntityType_Rejected(t *testing.T) {
+	svc := NewService(&mockStore{}, nil)
+	_, err := svc.ListAuditLog(context.Background(), uuid.New(), "BOGUS_TYPE", httpkit.CursorParams{Limit: 50})
+	if !errors.Is(err, domain.ErrInvalidInput) {
+		t.Errorf("want ErrInvalidInput, got %v", err)
+	}
+}
+
+func TestListAuditLog_PassesCursorToStore(t *testing.T) {
+	cur := httpkit.Cursor{Ts: time.Now().UTC(), ID: uuid.New()}
+	st := &mockStore{}
+	svc := NewService(st, nil)
+	if _, err := svc.ListAuditLog(context.Background(), uuid.New(), entityTypeRemnant, httpkit.CursorParams{
+		Cursor: cur.Encode(), Limit: 10,
+	}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !st.selectAuditLogByEntityCur.Ts.Equal(cur.Ts) || st.selectAuditLogByEntityCur.ID != cur.ID {
+		t.Errorf("store got cursor %+v, want %+v", st.selectAuditLogByEntityCur, cur)
 	}
 }
 

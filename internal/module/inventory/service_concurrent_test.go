@@ -222,10 +222,10 @@ func (s *concurrentMockStore) updateSheetBinLocation(_ context.Context, _ uuid.U
 func (s *concurrentMockStore) insertAuditLog(_ context.Context, _ AuditLogEntry) error {
 	return nil
 }
-func (s *concurrentMockStore) selectAuditLogByEntity(_ context.Context, _ uuid.UUID, _ string) ([]AuditLogEntry, error) {
+func (s *concurrentMockStore) selectAuditLogByEntityKeyset(_ context.Context, _ uuid.UUID, _ string, _ httpkit.Cursor, _ int) ([]AuditLogEntry, error) {
 	return nil, nil
 }
-func (s *concurrentMockStore) selectAuditLogByAction(_ context.Context, _ string) ([]AuditLogEntry, error) {
+func (s *concurrentMockStore) selectAuditLogByActionKeyset(_ context.Context, _ string, _ httpkit.Cursor, _ int) ([]AuditLogEntry, error) {
 	return nil, nil
 }
 func (s *concurrentMockStore) insertCycleCountSession(_ context.Context, _ CycleCountSession) error {

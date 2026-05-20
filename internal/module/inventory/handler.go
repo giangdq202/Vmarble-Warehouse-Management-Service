@@ -586,38 +586,40 @@ func (h *Handler) transfer(c *gin.Context) {
 
 // listAuditLogByAction godoc
 //
-// @Summary      List audit log entries by action across all entities
+// @Summary      List audit log entries by action across all entities (keyset paginated)
 // @Description  Useful for accountant/admin review (e.g. action=REMNANT_BYPASSED,
 // @Description  OVERFLOW_BYPASSED). Restricted to accountant + admin roles.
 // @Tags         inventory
 // @Produce      json
-// @Param        action  query     string  true  "audit action (REMNANT_BYPASSED, OVERFLOW_BYPASSED, TRANSFER, ADJUSTMENT)"
+// @Param        action  query     string  true   "audit action (REMNANT_BYPASSED, OVERFLOW_BYPASSED, TRANSFER, ADJUSTMENT)"
+// @Param        cursor  query     string  false  "opaque cursor token returned in next_cursor; omit for first page"
+// @Param        limit   query     int     false  "page size (default 50, max 200)"
 // @Security     BearerAuth
-// @Success      200  {array}   AuditLogEntry
+// @Success      200  {object}  httpkit.CursorResult[inventory.AuditLogEntry]
 // @Failure      400  {object}  map[string]string
 // @Router       /api/v1/inventory/audit-log [get]
 func (h *Handler) listAuditLogByAction(c *gin.Context) {
 	action := c.Query("action")
-	entries, err := h.svc.ListAuditLogByAction(c.Request.Context(), action)
+	params := httpkit.BindCursorParams(c)
+	res, err := h.svc.ListAuditLogByAction(c.Request.Context(), action, params)
 	if err != nil {
 		httpkit.Error(c, err)
 		return
 	}
-	if entries == nil {
-		entries = []AuditLogEntry{}
-	}
-	c.JSON(http.StatusOK, entries)
+	c.JSON(http.StatusOK, res)
 }
 
 // listAuditLog godoc
 //
-// @Summary      List audit log entries for an inventory entity
+// @Summary      List audit log entries for an inventory entity (keyset paginated)
 // @Tags         inventory
 // @Produce      json
-// @Param        entity_type  path      string  true  "entity type: REMNANT or BOARD_SHEET"
-// @Param        entity_id    path      string  true  "entity id (uuid)"
+// @Param        entity_type  path      string  true   "entity type: REMNANT or BOARD_SHEET"
+// @Param        entity_id    path      string  true   "entity id (uuid)"
+// @Param        cursor       query     string  false  "opaque cursor token returned in next_cursor; omit for first page"
+// @Param        limit        query     int     false  "page size (default 50, max 200)"
 // @Security     BearerAuth
-// @Success      200  {array}   AuditLogEntry
+// @Success      200  {object}  httpkit.CursorResult[inventory.AuditLogEntry]
 // @Failure      400  {object}  map[string]string
 // @Router       /api/v1/inventory/audit-log/{entity_type}/{entity_id} [get]
 func (h *Handler) listAuditLog(c *gin.Context) {
@@ -627,15 +629,13 @@ func (h *Handler) listAuditLog(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid entity_id"})
 		return
 	}
-	entries, err := h.svc.ListAuditLog(c.Request.Context(), entityID, entityType)
+	params := httpkit.BindCursorParams(c)
+	res, err := h.svc.ListAuditLog(c.Request.Context(), entityID, entityType, params)
 	if err != nil {
 		httpkit.Error(c, err)
 		return
 	}
-	if entries == nil {
-		entries = []AuditLogEntry{}
-	}
-	c.JSON(http.StatusOK, entries)
+	c.JSON(http.StatusOK, res)
 }
 
 // createCycleCount godoc

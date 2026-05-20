@@ -599,19 +599,39 @@ func (s *service) Transfer(ctx context.Context, in TransferInput) (TransferResul
 	}, nil
 }
 
-func (s *service) ListAuditLog(ctx context.Context, entityID uuid.UUID, entityType string) ([]AuditLogEntry, error) {
+func (s *service) ListAuditLog(ctx context.Context, entityID uuid.UUID, entityType string, params httpkit.CursorParams) (httpkit.CursorResult[AuditLogEntry], error) {
 	if entityType != entityTypeRemnant && entityType != entityTypeBoardSheet && entityType != entityTypeWorkOrder {
-		return nil, domain.NewBizError(domain.ErrInvalidInput,
+		return httpkit.CursorResult[AuditLogEntry]{}, domain.NewBizError(domain.ErrInvalidInput,
 			"entity_type must be REMNANT, BOARD_SHEET, or WORK_ORDER")
 	}
-	return s.st.selectAuditLogByEntity(ctx, entityID, entityType)
+	cur, err := params.Decoded()
+	if err != nil {
+		return httpkit.CursorResult[AuditLogEntry]{}, err
+	}
+	rows, err := s.st.selectAuditLogByEntityKeyset(ctx, entityID, entityType, cur, params.Limit+1)
+	if err != nil {
+		return httpkit.CursorResult[AuditLogEntry]{}, err
+	}
+	return httpkit.NewCursorResult(rows, params.Limit, func(e AuditLogEntry) httpkit.Cursor {
+		return httpkit.Cursor{Ts: e.CreatedAt, ID: e.ID}
+	}), nil
 }
 
-func (s *service) ListAuditLogByAction(ctx context.Context, action string) ([]AuditLogEntry, error) {
+func (s *service) ListAuditLogByAction(ctx context.Context, action string, params httpkit.CursorParams) (httpkit.CursorResult[AuditLogEntry], error) {
 	if action == "" {
-		return nil, domain.NewBizError(domain.ErrInvalidInput, "action is required")
+		return httpkit.CursorResult[AuditLogEntry]{}, domain.NewBizError(domain.ErrInvalidInput, "action is required")
 	}
-	return s.st.selectAuditLogByAction(ctx, action)
+	cur, err := params.Decoded()
+	if err != nil {
+		return httpkit.CursorResult[AuditLogEntry]{}, err
+	}
+	rows, err := s.st.selectAuditLogByActionKeyset(ctx, action, cur, params.Limit+1)
+	if err != nil {
+		return httpkit.CursorResult[AuditLogEntry]{}, err
+	}
+	return httpkit.NewCursorResult(rows, params.Limit, func(e AuditLogEntry) httpkit.Cursor {
+		return httpkit.Cursor{Ts: e.CreatedAt, ID: e.ID}
+	}), nil
 }
 
 func (s *service) LogRemnantBypass(ctx context.Context, in LogRemnantBypassInput) error {
