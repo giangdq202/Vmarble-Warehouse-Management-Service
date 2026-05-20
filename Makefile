@@ -1,4 +1,4 @@
-.PHONY: dev run build test test-integration lint swagger migrate-up migrate-down migrate-create docker-build docker-up docker-down docker-rebuild seed loadtest loadtest-build loadtest-soak
+.PHONY: dev run build test test-integration lint swagger migrate-up migrate-down migrate-create docker-build docker-up docker-down docker-rebuild seed install-hooks loadtest loadtest-build loadtest-soak
 
 # Load .env if it exists
 ifneq (,$(wildcard ./.env))
@@ -41,6 +41,13 @@ lint:
 
 swagger:
 	$(SWAG) init --parseInternal --parseDependency --parseDepth 2 -g cmd/server/main.go -o docs
+
+# ── Git hooks (one-time setup per clone) ────────────────────
+# Points core.hooksPath at scripts/git-hooks so the version-controlled
+# hooks (e.g. swagger regeneration) run on every commit. Repeat-safe.
+install-hooks:
+	@git config core.hooksPath scripts/git-hooks
+	@echo "core.hooksPath -> scripts/git-hooks (active hooks: $$(ls scripts/git-hooks))"
 
 # ── Database Migrations ─────────────────────────────────────
 
