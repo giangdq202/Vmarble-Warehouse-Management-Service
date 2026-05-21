@@ -64,6 +64,17 @@ definitions:
     - WOCompleted
     - WOCosted
     - WOCanceled
+  github_com_vmarble_warehouse-management-service_internal_platform_httpkit.CursorResult-internal_module_barcode_ScanEvent:
+    properties:
+      has_more:
+        type: boolean
+      items:
+        items:
+          $ref: '#/definitions/internal_module_barcode.ScanEvent'
+        type: array
+      next_cursor:
+        type: string
+    type: object
   github_com_vmarble_warehouse-management-service_internal_platform_httpkit.CursorResult-internal_module_inventory_AuditLogEntry:
     properties:
       has_more:
@@ -2002,15 +2013,21 @@ paths:
         name: id
         required: true
         type: string
+      - description: opaque cursor token returned in next_cursor; omit for first page
+        in: query
+        name: cursor
+        type: string
+      - description: page size (default 50, max 200)
+        in: query
+        name: limit
+        type: integer
       produces:
       - application/json
       responses:
         "200":
           description: OK
           schema:
-            items:
-              $ref: '#/definitions/internal_module_barcode.ScanEvent'
-            type: array
+            $ref: '#/definitions/github_com_vmarble_warehouse-management-service_internal_platform_httpkit.CursorResult-internal_module_barcode_ScanEvent'
         "400":
           description: Bad Request
           schema:
@@ -2031,7 +2048,7 @@ paths:
             type: object
       security:
       - BearerAuth: []
-      summary: List scan events
+      summary: List scan events (keyset paginated)
       tags:
       - barcode
     post:

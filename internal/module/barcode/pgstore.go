@@ -8,6 +8,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/vmarble/warehouse-management-service/internal/domain"
+	"github.com/vmarble/warehouse-management-service/internal/platform/httpkit"
 )
 
 type pgStore struct {
@@ -112,12 +113,38 @@ func (s *pgStore) insertScanEvent(ctx context.Context, e ScanEvent) error {
 	return err
 }
 
-func (s *pgStore) selectScanEventsByBarcode(ctx context.Context, barcodeID uuid.UUID) ([]ScanEvent, error) {
-	rows, err := s.pool.Query(ctx,
-		`SELECT id, barcode_id, checkpoint, scanned_by, location, note, device_id, device_name, shift, scanned_at
-		 FROM scan_events WHERE barcode_id = $1 ORDER BY scanned_at`,
-		barcodeID,
+func (s *pgStore) selectScanEventsByBarcodeKeyset(ctx context.Context, barcodeID uuid.UUID, cur httpkit.Cursor, limit int) ([]ScanEvent, error) {
+	// Two SQL shapes so the first-page case stays a clean prefix scan
+	// rather than evaluating an always-true comparison. Index used in both:
+	// idx_scan_events_barcode_scanned_at_id (barcode_id, scanned_at, id).
+	const baseCols = `id, barcode_id, checkpoint, scanned_by, location, note, device_id, device_name, shift, scanned_at`
+
+	var (
+		rows pgx.Rows
+		err  error
 	)
+	if cur.IsZero() {
+		rows, err = s.pool.Query(ctx,
+			`SELECT `+baseCols+`
+			   FROM scan_events
+			  WHERE barcode_id = $1
+			  ORDER BY scanned_at, id
+			  LIMIT $2`,
+			barcodeID, limit,
+		)
+	} else {
+		// Strict "after this row" predicate using the row constructor; the
+		// composite index supports this comparison directly.
+		rows, err = s.pool.Query(ctx,
+			`SELECT `+baseCols+`
+			   FROM scan_events
+			  WHERE barcode_id = $1
+			    AND (scanned_at, id) > ($2, $3)
+			  ORDER BY scanned_at, id
+			  LIMIT $4`,
+			barcodeID, cur.Ts, cur.ID, limit,
+		)
+	}
 	if err != nil {
 		return nil, err
 	}

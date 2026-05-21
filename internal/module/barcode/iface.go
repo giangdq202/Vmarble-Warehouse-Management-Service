@@ -6,6 +6,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/vmarble/warehouse-management-service/internal/domain"
+	"github.com/vmarble/warehouse-management-service/internal/platform/httpkit"
 )
 
 type ScanCheckpoint string
@@ -101,7 +102,7 @@ type Service interface {
 	LookupBarcode(ctx context.Context, barcodeID uuid.UUID) (Barcode, error)
 	ListBarcodesByWorkOrder(ctx context.Context, workOrderID uuid.UUID) ([]Barcode, error)
 	RecordScan(ctx context.Context, in RecordScanInput) (ScanResult, error)
-	ListScans(ctx context.Context, barcodeID uuid.UUID) ([]ScanEvent, error)
+	ListScans(ctx context.Context, barcodeID uuid.UUID, params httpkit.CursorParams) (httpkit.CursorResult[ScanEvent], error)
 	GenerateQRCode(ctx context.Context, barcodeID uuid.UUID) ([]byte, error)
 	GenerateLabelPDF(ctx context.Context, barcodeID uuid.UUID, size LabelSize) ([]byte, error)
 	GenerateBatchLabelPDF(ctx context.Context, in BatchPrintInput) ([]byte, error)

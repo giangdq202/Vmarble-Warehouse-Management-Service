@@ -690,7 +690,7 @@ const docTemplate = `{
                 "tags": [
                     "barcode"
                 ],
-                "summary": "List scan events",
+                "summary": "List scan events (keyset paginated)",
                 "parameters": [
                     {
                         "type": "string",
@@ -698,16 +698,25 @@ const docTemplate = `{
                         "name": "id",
                         "in": "path",
                         "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "opaque cursor token returned in next_cursor; omit for first page",
+                        "name": "cursor",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "page size (default 50, max 200)",
+                        "name": "limit",
+                        "in": "query"
                     }
                 ],
                 "responses": {
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "type": "array",
-                            "items": {
-                                "$ref": "#/definitions/internal_module_barcode.ScanEvent"
-                            }
+                            "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_platform_httpkit.CursorResult-internal_module_barcode_ScanEvent"
                         }
                     },
                     "400": {
@@ -6841,6 +6850,23 @@ const docTemplate = `{
                 "WOCosted",
                 "WOCanceled"
             ]
+        },
+        "github_com_vmarble_warehouse-management-service_internal_platform_httpkit.CursorResult-internal_module_barcode_ScanEvent": {
+            "type": "object",
+            "properties": {
+                "has_more": {
+                    "type": "boolean"
+                },
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_module_barcode.ScanEvent"
+                    }
+                },
+                "next_cursor": {
+                    "type": "string"
+                }
+            }
         },
         "github_com_vmarble_warehouse-management-service_internal_platform_httpkit.CursorResult-internal_module_inventory_AuditLogEntry": {
             "type": "object",
