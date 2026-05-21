@@ -1546,7 +1546,7 @@ const docTemplate = `{
                 "tags": [
                     "inventory"
                 ],
-                "summary": "List audit log entries by action across all entities",
+                "summary": "List audit log entries by action across all entities (keyset paginated)",
                 "parameters": [
                     {
                         "type": "string",
@@ -1554,16 +1554,25 @@ const docTemplate = `{
                         "name": "action",
                         "in": "query",
                         "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "opaque cursor token returned in next_cursor; omit for first page",
+                        "name": "cursor",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "page size (default 50, max 200)",
+                        "name": "limit",
+                        "in": "query"
                     }
                 ],
                 "responses": {
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "type": "array",
-                            "items": {
-                                "$ref": "#/definitions/internal_module_inventory.AuditLogEntry"
-                            }
+                            "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_platform_httpkit.CursorResult-internal_module_inventory_AuditLogEntry"
                         }
                     },
                     "400": {
@@ -1591,7 +1600,7 @@ const docTemplate = `{
                 "tags": [
                     "inventory"
                 ],
-                "summary": "List audit log entries for an inventory entity",
+                "summary": "List audit log entries for an inventory entity (keyset paginated)",
                 "parameters": [
                     {
                         "type": "string",
@@ -1606,16 +1615,25 @@ const docTemplate = `{
                         "name": "entity_id",
                         "in": "path",
                         "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "opaque cursor token returned in next_cursor; omit for first page",
+                        "name": "cursor",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "page size (default 50, max 200)",
+                        "name": "limit",
+                        "in": "query"
                     }
                 ],
                 "responses": {
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "type": "array",
-                            "items": {
-                                "$ref": "#/definitions/internal_module_inventory.AuditLogEntry"
-                            }
+                            "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_platform_httpkit.CursorResult-internal_module_inventory_AuditLogEntry"
                         }
                     },
                     "400": {
@@ -6843,6 +6861,23 @@ const docTemplate = `{
                     "type": "array",
                     "items": {
                         "$ref": "#/definitions/internal_module_barcode.ScanEvent"
+                    }
+                },
+                "next_cursor": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_vmarble_warehouse-management-service_internal_platform_httpkit.CursorResult-internal_module_inventory_AuditLogEntry": {
+            "type": "object",
+            "properties": {
+                "has_more": {
+                    "type": "boolean"
+                },
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_module_inventory.AuditLogEntry"
                     }
                 },
                 "next_cursor": {

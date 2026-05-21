@@ -68,11 +68,13 @@ type store interface {
 
 	// insertAuditLog persists an inventory change audit event.
 	insertAuditLog(ctx context.Context, entry AuditLogEntry) error
-	// selectAuditLogByEntity returns audit entries for the given entity, newest first.
-	selectAuditLogByEntity(ctx context.Context, entityID uuid.UUID, entityType string) ([]AuditLogEntry, error)
-	// selectAuditLogByAction returns audit entries for the given action across all
-	// entities, newest first.
-	selectAuditLogByAction(ctx context.Context, action string) ([]AuditLogEntry, error)
+	// selectAuditLogByEntityKeyset returns audit entries for an entity strictly
+	// before the (created_at, id) cursor (newest first). Callers pass limit+1
+	// so the service layer can detect has_more.
+	selectAuditLogByEntityKeyset(ctx context.Context, entityID uuid.UUID, entityType string, cur httpkit.Cursor, limit int) ([]AuditLogEntry, error)
+	// selectAuditLogByActionKeyset returns audit entries for a given action
+	// strictly before the (created_at, id) cursor (newest first).
+	selectAuditLogByActionKeyset(ctx context.Context, action string, cur httpkit.Cursor, limit int) ([]AuditLogEntry, error)
 
 	// insertCycleCountSession persists a new cycle count session row.
 	insertCycleCountSession(ctx context.Context, s CycleCountSession) error

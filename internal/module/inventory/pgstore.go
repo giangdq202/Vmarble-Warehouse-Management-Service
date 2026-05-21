@@ -1166,15 +1166,34 @@ func (s *pgStore) insertAuditLog(ctx context.Context, entry AuditLogEntry) error
 	return err
 }
 
-func (s *pgStore) selectAuditLogByEntity(ctx context.Context, entityID uuid.UUID, entityType string) ([]AuditLogEntry, error) {
-	rows, err := s.pool.Query(ctx,
-		`SELECT id, entity_type, entity_id, action, actor_id,
-		        from_location, to_location, from_status, to_status, reason, session_id, metadata, created_at
-		 FROM inventory_audit_log
-		 WHERE entity_id = $1 AND entity_type = $2
-		 ORDER BY created_at DESC`,
-		entityID, entityType,
+func (s *pgStore) selectAuditLogByEntityKeyset(ctx context.Context, entityID uuid.UUID, entityType string, cur httpkit.Cursor, limit int) ([]AuditLogEntry, error) {
+	const cols = `id, entity_type, entity_id, action, actor_id,
+	              from_location, to_location, from_status, to_status, reason, session_id, metadata, created_at`
+
+	var (
+		rows pgx.Rows
+		err  error
 	)
+	if cur.IsZero() {
+		rows, err = s.pool.Query(ctx,
+			`SELECT `+cols+`
+			   FROM inventory_audit_log
+			  WHERE entity_id = $1 AND entity_type = $2
+			  ORDER BY created_at DESC, id DESC
+			  LIMIT $3`,
+			entityID, entityType, limit,
+		)
+	} else {
+		rows, err = s.pool.Query(ctx,
+			`SELECT `+cols+`
+			   FROM inventory_audit_log
+			  WHERE entity_id = $1 AND entity_type = $2
+			    AND (created_at, id) < ($3, $4)
+			  ORDER BY created_at DESC, id DESC
+			  LIMIT $5`,
+			entityID, entityType, cur.Ts, cur.ID, limit,
+		)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -1191,15 +1210,34 @@ func (s *pgStore) selectAuditLogByEntity(ctx context.Context, entityID uuid.UUID
 	return out, rows.Err()
 }
 
-func (s *pgStore) selectAuditLogByAction(ctx context.Context, action string) ([]AuditLogEntry, error) {
-	rows, err := s.pool.Query(ctx,
-		`SELECT id, entity_type, entity_id, action, actor_id,
-		        from_location, to_location, from_status, to_status, reason, session_id, metadata, created_at
-		 FROM inventory_audit_log
-		 WHERE action = $1
-		 ORDER BY created_at DESC`,
-		action,
+func (s *pgStore) selectAuditLogByActionKeyset(ctx context.Context, action string, cur httpkit.Cursor, limit int) ([]AuditLogEntry, error) {
+	const cols = `id, entity_type, entity_id, action, actor_id,
+	              from_location, to_location, from_status, to_status, reason, session_id, metadata, created_at`
+
+	var (
+		rows pgx.Rows
+		err  error
 	)
+	if cur.IsZero() {
+		rows, err = s.pool.Query(ctx,
+			`SELECT `+cols+`
+			   FROM inventory_audit_log
+			  WHERE action = $1
+			  ORDER BY created_at DESC, id DESC
+			  LIMIT $2`,
+			action, limit,
+		)
+	} else {
+		rows, err = s.pool.Query(ctx,
+			`SELECT `+cols+`
+			   FROM inventory_audit_log
+			  WHERE action = $1
+			    AND (created_at, id) < ($2, $3)
+			  ORDER BY created_at DESC, id DESC
+			  LIMIT $4`,
+			action, cur.Ts, cur.ID, limit,
+		)
+	}
 	if err != nil {
 		return nil, err
 	}

@@ -329,12 +329,13 @@ type Service interface {
 
 	// Transfer moves a Remnant or BoardSheet to a new bin location and writes an audit log entry.
 	Transfer(ctx context.Context, in TransferInput) (TransferResult, error)
-	// ListAuditLog returns audit log entries for a given entity ordered by created_at DESC.
-	ListAuditLog(ctx context.Context, entityID uuid.UUID, entityType string) ([]AuditLogEntry, error)
+	// ListAuditLog returns audit log entries for a given entity, newest first,
+	// keyset-paginated by (created_at, id).
+	ListAuditLog(ctx context.Context, entityID uuid.UUID, entityType string, params httpkit.CursorParams) (httpkit.CursorResult[AuditLogEntry], error)
 	// ListAuditLogByAction returns audit log entries for a given action across
-	// all entities, ordered by created_at DESC. Used by accountant/admin review
-	// dashboards (e.g. action=REMNANT_BYPASSED, OVERFLOW_BYPASSED).
-	ListAuditLogByAction(ctx context.Context, action string) ([]AuditLogEntry, error)
+	// all entities, newest first, keyset-paginated. Used by accountant/admin
+	// review dashboards (e.g. action=REMNANT_BYPASSED, OVERFLOW_BYPASSED).
+	ListAuditLogByAction(ctx context.Context, action string, params httpkit.CursorParams) (httpkit.CursorResult[AuditLogEntry], error)
 	// LogRemnantBypass records that a planner chose to skip remnant suggestions
 	// when creating a work order. Caller must ensure SuggestedRemnantIDs is
 	// non-empty before invoking — that is the business condition that makes

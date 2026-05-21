@@ -75,6 +75,17 @@ definitions:
       next_cursor:
         type: string
     type: object
+  github_com_vmarble_warehouse-management-service_internal_platform_httpkit.CursorResult-internal_module_inventory_AuditLogEntry:
+    properties:
+      has_more:
+        type: boolean
+      items:
+        items:
+          $ref: '#/definitions/internal_module_inventory.AuditLogEntry'
+        type: array
+      next_cursor:
+        type: string
+    type: object
   github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_authn_UserDetail:
     properties:
       current_page:
@@ -2605,15 +2616,21 @@ paths:
         name: action
         required: true
         type: string
+      - description: opaque cursor token returned in next_cursor; omit for first page
+        in: query
+        name: cursor
+        type: string
+      - description: page size (default 50, max 200)
+        in: query
+        name: limit
+        type: integer
       produces:
       - application/json
       responses:
         "200":
           description: OK
           schema:
-            items:
-              $ref: '#/definitions/internal_module_inventory.AuditLogEntry'
-            type: array
+            $ref: '#/definitions/github_com_vmarble_warehouse-management-service_internal_platform_httpkit.CursorResult-internal_module_inventory_AuditLogEntry'
         "400":
           description: Bad Request
           schema:
@@ -2622,7 +2639,7 @@ paths:
             type: object
       security:
       - BearerAuth: []
-      summary: List audit log entries by action across all entities
+      summary: List audit log entries by action across all entities (keyset paginated)
       tags:
       - inventory
   /api/v1/inventory/audit-log/{entity_type}/{entity_id}:
@@ -2638,15 +2655,21 @@ paths:
         name: entity_id
         required: true
         type: string
+      - description: opaque cursor token returned in next_cursor; omit for first page
+        in: query
+        name: cursor
+        type: string
+      - description: page size (default 50, max 200)
+        in: query
+        name: limit
+        type: integer
       produces:
       - application/json
       responses:
         "200":
           description: OK
           schema:
-            items:
-              $ref: '#/definitions/internal_module_inventory.AuditLogEntry'
-            type: array
+            $ref: '#/definitions/github_com_vmarble_warehouse-management-service_internal_platform_httpkit.CursorResult-internal_module_inventory_AuditLogEntry'
         "400":
           description: Bad Request
           schema:
@@ -2655,7 +2678,7 @@ paths:
             type: object
       security:
       - BearerAuth: []
-      summary: List audit log entries for an inventory entity
+      summary: List audit log entries for an inventory entity (keyset paginated)
       tags:
       - inventory
   /api/v1/inventory/cuts:
