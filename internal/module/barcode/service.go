@@ -15,6 +15,7 @@ import (
 	"github.com/jung-kurt/gofpdf"
 	qrcode "github.com/skip2/go-qrcode"
 	"github.com/vmarble/warehouse-management-service/internal/domain"
+	"github.com/vmarble/warehouse-management-service/internal/platform/httpkit"
 )
 
 const (
@@ -352,8 +353,20 @@ func (s *service) resolveWorkOrderStatus(ctx context.Context, workOrderID uuid.U
 	return w.Status, true, nil
 }
 
-func (s *service) ListScans(ctx context.Context, barcodeID uuid.UUID) ([]ScanEvent, error) {
-	return s.st.selectScanEventsByBarcode(ctx, barcodeID)
+func (s *service) ListScans(ctx context.Context, barcodeID uuid.UUID, params httpkit.CursorParams) (httpkit.CursorResult[ScanEvent], error) {
+	cur, err := params.Decoded()
+	if err != nil {
+		return httpkit.CursorResult[ScanEvent]{}, err
+	}
+	// Over-fetch by 1 row so NewCursorResult can detect has_more without an
+	// extra round-trip.
+	rows, err := s.st.selectScanEventsByBarcodeKeyset(ctx, barcodeID, cur, params.Limit+1)
+	if err != nil {
+		return httpkit.CursorResult[ScanEvent]{}, err
+	}
+	return httpkit.NewCursorResult(rows, params.Limit, func(e ScanEvent) httpkit.Cursor {
+		return httpkit.Cursor{Ts: e.ScannedAt, ID: e.ID}
+	}), nil
 }
 
 // GenerateQRCode returns a PNG image containing the barcode's key metadata

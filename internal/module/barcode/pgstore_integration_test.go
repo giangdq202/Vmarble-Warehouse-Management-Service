@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/vmarble/warehouse-management-service/internal/platform/httpkit"
 	"github.com/vmarble/warehouse-management-service/internal/testhelper"
 )
 
@@ -118,9 +119,9 @@ func TestIntegration_PGStore_InsertAndListScanMetadata(t *testing.T) {
 		t.Fatalf("insertScanEvent: %v", err)
 	}
 
-	events, err := st.selectScanEventsByBarcode(ctx, bc.ID)
+	events, err := st.selectScanEventsByBarcodeKeyset(ctx, bc.ID, httpkit.Cursor{}, 50)
 	if err != nil {
-		t.Fatalf("selectScanEventsByBarcode: %v", err)
+		t.Fatalf("selectScanEventsByBarcodeKeyset: %v", err)
 	}
 	if len(events) != 1 {
 		t.Fatalf("events count = %d, want 1", len(events))

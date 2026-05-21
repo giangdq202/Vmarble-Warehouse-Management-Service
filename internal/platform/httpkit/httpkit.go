@@ -161,6 +161,8 @@ func Error(c *gin.Context, err error) {
 		status = http.StatusNotFound
 	case errors.Is(err, domain.ErrInvalidInput):
 		status = http.StatusBadRequest
+	case errors.Is(err, ErrInvalidCursor):
+		status = http.StatusBadRequest
 	case errors.Is(err, domain.ErrInsufficientStock):
 		status = http.StatusUnprocessableEntity
 	case errors.Is(err, domain.ErrInvalidTransition):

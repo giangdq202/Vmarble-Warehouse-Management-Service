@@ -16,6 +16,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/liyue201/goqr"
 	"github.com/vmarble/warehouse-management-service/internal/domain"
+	"github.com/vmarble/warehouse-management-service/internal/platform/httpkit"
 )
 
 // ── mockStore ─────────────────────────────────────────────────────────────────
@@ -42,9 +43,12 @@ type mockStore struct {
 	selectBarcodesByIDsOrderedErr    error
 	selectBarcodesByIDsOrderedArg    []uuid.UUID
 
-	// selectScanEventsByBarcode
-	selectScanEventsResult []ScanEvent
-	selectScanEventsErr    error
+	// selectScanEventsByBarcodeKeyset — captures inputs for assertion
+	selectScanEventsResult       []ScanEvent
+	selectScanEventsErr          error
+	selectScanEventsCapturedCur  httpkit.Cursor
+	selectScanEventsCapturedLim  int
+	selectScanEventsCapturedID   uuid.UUID
 
 	// selectLastScanEventByBarcode
 	selectLastScanEventResult ScanEvent
@@ -74,7 +78,10 @@ func (m *mockStore) insertScanEvent(_ context.Context, e ScanEvent) error {
 	return m.insertScanEventErr
 }
 
-func (m *mockStore) selectScanEventsByBarcode(_ context.Context, _ uuid.UUID) ([]ScanEvent, error) {
+func (m *mockStore) selectScanEventsByBarcodeKeyset(_ context.Context, barcodeID uuid.UUID, cur httpkit.Cursor, limit int) ([]ScanEvent, error) {
+	m.selectScanEventsCapturedID = barcodeID
+	m.selectScanEventsCapturedCur = cur
+	m.selectScanEventsCapturedLim = limit
 	return m.selectScanEventsResult, m.selectScanEventsErr
 }
 
@@ -545,36 +552,111 @@ func TestRecordScan_RejectsWhenWorkOrderStatusMismatched(t *testing.T) {
 func TestListScans_HappyPath_ReturnsScanEvents(t *testing.T) {
 	barcodeID := uuid.New()
 	events := []ScanEvent{
-		{ID: uuid.New(), BarcodeID: barcodeID, Checkpoint: CheckpointCNCComplete, ScannedAt: time.Now().UTC()},
-		{ID: uuid.New(), BarcodeID: barcodeID, Checkpoint: CheckpointFinishedGoods, ScannedAt: time.Now().UTC()},
+		{ID: uuid.New(), BarcodeID: barcodeID, Checkpoint: CheckpointCNCComplete, ScannedAt: time.Unix(1, 0)},
+		{ID: uuid.New(), BarcodeID: barcodeID, Checkpoint: CheckpointFinishedGoods, ScannedAt: time.Unix(2, 0)},
 	}
 	st := &mockStore{selectScanEventsResult: events}
 
 	svc := NewService(st)
-	got, err := svc.ListScans(context.Background(), barcodeID)
+	got, err := svc.ListScans(context.Background(), barcodeID, httpkit.CursorParams{Limit: 50})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(got) != 2 {
-		t.Errorf("len = %d, want 2", len(got))
+	if len(got.Items) != 2 {
+		t.Errorf("len = %d, want 2", len(got.Items))
 	}
-	for i, e := range got {
-		if e.BarcodeID != barcodeID {
-			t.Errorf("events[%d].BarcodeID = %v, want %v", i, e.BarcodeID, barcodeID)
-		}
+	if got.HasMore {
+		t.Errorf("HasMore = true, want false (returned 2 < limit 50)")
+	}
+	if got.NextCursor != "" {
+		t.Errorf("NextCursor = %q, want empty", got.NextCursor)
+	}
+	// Service must over-fetch by 1 so NewCursorResult can detect has_more.
+	if st.selectScanEventsCapturedLim != 51 {
+		t.Errorf("store called with limit %d, want 51 (params.Limit+1)", st.selectScanEventsCapturedLim)
+	}
+	if st.selectScanEventsCapturedID != barcodeID {
+		t.Errorf("store called with barcodeID %v, want %v", st.selectScanEventsCapturedID, barcodeID)
 	}
 }
 
-func TestListScans_Empty_ReturnsNil(t *testing.T) {
-	st := &mockStore{selectScanEventsResult: nil}
+func TestListScans_OverFetched_SetsNextCursorAndHasMore(t *testing.T) {
+	barcodeID := uuid.New()
+	lastKept := ScanEvent{ID: uuid.New(), BarcodeID: barcodeID, Checkpoint: CheckpointCNCComplete, ScannedAt: time.Unix(2, 0).UTC()}
+	events := []ScanEvent{
+		{ID: uuid.New(), BarcodeID: barcodeID, Checkpoint: CheckpointCNCComplete, ScannedAt: time.Unix(1, 0).UTC()},
+		lastKept,
+		// sentinel — the over-fetched row that proves there's another page.
+		{ID: uuid.New(), BarcodeID: barcodeID, Checkpoint: CheckpointFinishedGoods, ScannedAt: time.Unix(3, 0).UTC()},
+	}
+	st := &mockStore{selectScanEventsResult: events}
 
 	svc := NewService(st)
-	got, err := svc.ListScans(context.Background(), uuid.New())
+	got, err := svc.ListScans(context.Background(), barcodeID, httpkit.CursorParams{Limit: 2})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(got) != 0 {
-		t.Errorf("expected empty slice, got %d events", len(got))
+	if !got.HasMore {
+		t.Errorf("HasMore = false, want true (over-fetched 3 > limit 2)")
+	}
+	if len(got.Items) != 2 {
+		t.Errorf("len(items) = %d, want 2 (sentinel must be trimmed)", len(got.Items))
+	}
+	if got.NextCursor == "" {
+		t.Fatal("NextCursor empty, want non-empty token")
+	}
+	decoded, err := httpkit.DecodeCursor(got.NextCursor)
+	if err != nil {
+		t.Fatalf("DecodeCursor(NextCursor) = %v", err)
+	}
+	if !decoded.Ts.Equal(lastKept.ScannedAt) || decoded.ID != lastKept.ID {
+		t.Errorf("cursor = %+v, want Ts=%v ID=%v (last kept row, not sentinel)", decoded, lastKept.ScannedAt, lastKept.ID)
+	}
+}
+
+func TestListScans_PassesCursorToStore(t *testing.T) {
+	barcodeID := uuid.New()
+	cur := httpkit.Cursor{Ts: time.Unix(100, 0).UTC(), ID: uuid.New()}
+	st := &mockStore{}
+
+	svc := NewService(st)
+	if _, err := svc.ListScans(context.Background(), barcodeID, httpkit.CursorParams{
+		Cursor: cur.Encode(), Limit: 10,
+	}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !st.selectScanEventsCapturedCur.Ts.Equal(cur.Ts) || st.selectScanEventsCapturedCur.ID != cur.ID {
+		t.Errorf("store got cursor %+v, want %+v", st.selectScanEventsCapturedCur, cur)
+	}
+}
+
+func TestListScans_InvalidCursor_ReturnsErrInvalidCursor(t *testing.T) {
+	st := &mockStore{}
+	svc := NewService(st)
+	_, err := svc.ListScans(context.Background(), uuid.New(), httpkit.CursorParams{
+		Cursor: "not!valid!base64!@#", Limit: 10,
+	})
+	if !errors.Is(err, httpkit.ErrInvalidCursor) {
+		t.Errorf("err = %v, want wraps ErrInvalidCursor", err)
+	}
+	if st.selectScanEventsCapturedLim != 0 {
+		t.Errorf("store should not be called when cursor is invalid, but limit=%d was captured", st.selectScanEventsCapturedLim)
+	}
+}
+
+func TestListScans_Empty_ReturnsEmptyItemsNotNil(t *testing.T) {
+	st := &mockStore{selectScanEventsResult: nil}
+
+	svc := NewService(st)
+	got, err := svc.ListScans(context.Background(), uuid.New(), httpkit.CursorParams{Limit: 50})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got.Items == nil {
+		t.Error("Items is nil; want empty slice so JSON renders [] not null")
+	}
+	if len(got.Items) != 0 {
+		t.Errorf("expected empty slice, got %d events", len(got.Items))
 	}
 }
 
@@ -583,10 +665,10 @@ func TestListScans_StoreError_Propagates(t *testing.T) {
 	st := &mockStore{selectScanEventsErr: dbErr}
 
 	svc := NewService(st)
-	_, err := svc.ListScans(context.Background(), uuid.New())
+	_, err := svc.ListScans(context.Background(), uuid.New(), httpkit.CursorParams{Limit: 50})
 
 	if !errors.Is(err, dbErr) {
-		t.Errorf("expected selectScanEventsByBarcode error to propagate, got %v", err)
+		t.Errorf("expected store error to propagate, got %v", err)
 	}
 }
 
