@@ -38,6 +38,9 @@ type mockStore struct {
 	// selectCostingRecords
 	listResult []CostingRecord
 	listErr    error
+	listCur    httpkit.Cursor
+	listLim    int
+	listFin    *bool
 
 	// insertCostingAdjustment
 	insertAdjCalled bool
@@ -67,8 +70,11 @@ func (m *mockStore) selectCostingRecordByWO(_ context.Context, _ uuid.UUID) (Cos
 	return m.selectByWOResult, m.selectByWOErr
 }
 
-func (m *mockStore) selectCostingRecordsPaged(_ context.Context, _ httpkit.PageParams, _ *bool) ([]CostingRecord, int, error) {
-	return m.listResult, len(m.listResult), m.listErr
+func (m *mockStore) selectCostingRecordsKeyset(_ context.Context, finalized *bool, cur httpkit.Cursor, limit int) ([]CostingRecord, error) {
+	m.listCur = cur
+	m.listLim = limit
+	m.listFin = finalized
+	return m.listResult, m.listErr
 }
 
 func (m *mockStore) finalizeCostingRecord(_ context.Context, _ uuid.UUID, _ uuid.UUID) error {
@@ -1289,28 +1295,40 @@ func TestGetCostingRecordDetail_AdjustmentsStoreError_Propagates(t *testing.T) {
 
 func TestListCostingRecords_ReturnsAll(t *testing.T) {
 	records := []CostingRecord{
-		{ID: uuid.New(), WorkOrderID: uuid.New()},
-		{ID: uuid.New(), WorkOrderID: uuid.New()},
+		{ID: uuid.New(), WorkOrderID: uuid.New(), CreatedAt: time.Unix(1000, 0).UTC()},
+		{ID: uuid.New(), WorkOrderID: uuid.New(), CreatedAt: time.Unix(900, 0).UTC()},
 	}
 	st := &mockStore{listResult: records}
 	svc := newSvc(st, &mockWOR{}, &mockCDR{}, zeroCONR())
 
-	got, err := svc.ListCostingRecords(context.Background(), httpkit.PageParams{Page: 1, Limit: 10}, nil)
+	got, err := svc.ListCostingRecords(context.Background(), httpkit.CursorParams{Limit: 10}, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if len(got.Items) != len(records) {
 		t.Errorf("len = %d, want %d", len(got.Items), len(records))
 	}
+	if got.HasMore {
+		t.Errorf("HasMore = true, want false (no over-fetch)")
+	}
+	if got.NextCursor != "" {
+		t.Errorf("NextCursor = %q, want empty", got.NextCursor)
+	}
+	if st.listLim != 11 { // limit+1 over-fetch
+		t.Errorf("store called with limit %d, want 11 (limit+1)", st.listLim)
+	}
 }
 
-func TestListCostingRecords_Empty_ReturnsNil(t *testing.T) {
+func TestListCostingRecords_Empty_ReturnsEmptySlice(t *testing.T) {
 	st := &mockStore{listResult: nil}
 	svc := newSvc(st, &mockWOR{}, &mockCDR{}, zeroCONR())
 
-	got, err := svc.ListCostingRecords(context.Background(), httpkit.PageParams{Page: 1, Limit: 10}, nil)
+	got, err := svc.ListCostingRecords(context.Background(), httpkit.CursorParams{Limit: 10}, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+	if got.Items == nil {
+		t.Errorf("Items = nil, want empty []CostingRecord{} (NewCursorResult contract)")
 	}
 	if len(got.Items) != 0 {
 		t.Errorf("expected empty slice, got %d elements", len(got.Items))
@@ -1322,10 +1340,81 @@ func TestListCostingRecords_StoreError_Propagates(t *testing.T) {
 	st := &mockStore{listErr: storeErr}
 	svc := newSvc(st, &mockWOR{}, &mockCDR{}, zeroCONR())
 
-	_, err := svc.ListCostingRecords(context.Background(), httpkit.PageParams{Page: 1, Limit: 10}, nil)
+	_, err := svc.ListCostingRecords(context.Background(), httpkit.CursorParams{Limit: 10}, nil)
 
 	if !errors.Is(err, storeErr) {
 		t.Errorf("expected list error to propagate, got %v", err)
+	}
+}
+
+// TestListCostingRecords_OverFetch_TrimsAndSetsCursor verifies the over-fetch
+// (limit+1) protocol: when the store returns N+1 rows the service trims to N
+// and emits the cursor of the last kept row.
+func TestListCostingRecords_OverFetch_TrimsAndSetsCursor(t *testing.T) {
+	const limit = 3
+	now := time.Now().UTC()
+	rows := make([]CostingRecord, limit+1)
+	for i := range rows {
+		rows[i] = CostingRecord{
+			ID:        uuid.New(),
+			CreatedAt: now.Add(-time.Duration(i) * time.Second),
+		}
+	}
+	st := &mockStore{listResult: rows}
+	svc := newSvc(st, &mockWOR{}, &mockCDR{}, zeroCONR())
+
+	got, err := svc.ListCostingRecords(context.Background(), httpkit.CursorParams{Limit: limit}, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(got.Items) != limit {
+		t.Errorf("len(items) = %d, want %d (trimmed to limit)", len(got.Items), limit)
+	}
+	if !got.HasMore {
+		t.Error("HasMore = false, want true")
+	}
+	if got.NextCursor == "" {
+		t.Fatal("NextCursor empty, want non-empty")
+	}
+	decoded, err := httpkit.DecodeCursor(got.NextCursor)
+	if err != nil {
+		t.Fatalf("DecodeCursor: %v", err)
+	}
+	want := rows[limit-1] // last row of the trimmed slice
+	if !decoded.Ts.Equal(want.CreatedAt) || decoded.ID != want.ID {
+		t.Errorf("cursor = (%v, %s), want (%v, %s)", decoded.Ts, decoded.ID, want.CreatedAt, want.ID)
+	}
+}
+
+// TestListCostingRecords_InvalidCursor_Returns400 verifies an unparseable
+// cursor token surfaces as ErrInvalidCursor (handler maps to 400).
+func TestListCostingRecords_InvalidCursor_Returns400(t *testing.T) {
+	st := &mockStore{}
+	svc := newSvc(st, &mockWOR{}, &mockCDR{}, zeroCONR())
+
+	_, err := svc.ListCostingRecords(context.Background(), httpkit.CursorParams{Cursor: "not-base64-!@#$", Limit: 10}, nil)
+	if !errors.Is(err, httpkit.ErrInvalidCursor) {
+		t.Errorf("err = %v, want wrap of ErrInvalidCursor", err)
+	}
+}
+
+// TestListCostingRecords_PassesCursorAndFinalizedToStore verifies the service
+// forwards the decoded cursor and the finalized filter unchanged.
+func TestListCostingRecords_PassesCursorAndFinalizedToStore(t *testing.T) {
+	cur := httpkit.Cursor{Ts: time.Now().UTC(), ID: uuid.New()}
+	finalizedTrue := true
+	st := &mockStore{}
+	svc := newSvc(st, &mockWOR{}, &mockCDR{}, zeroCONR())
+
+	_, err := svc.ListCostingRecords(context.Background(), httpkit.CursorParams{Cursor: cur.Encode(), Limit: 10}, &finalizedTrue)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !st.listCur.Ts.Equal(cur.Ts) || st.listCur.ID != cur.ID {
+		t.Errorf("store cursor = %+v, want %+v", st.listCur, cur)
+	}
+	if st.listFin == nil || *st.listFin != true {
+		t.Errorf("store finalized = %v, want pointer to true", st.listFin)
 	}
 }
 

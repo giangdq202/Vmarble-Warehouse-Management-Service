@@ -11,7 +11,10 @@ type store interface {
 	insertCostingRecord(ctx context.Context, r CostingRecord) error
 	updateCostingRecord(ctx context.Context, r CostingRecord) error
 	selectCostingRecordByWO(ctx context.Context, woID uuid.UUID) (CostingRecord, error)
-	selectCostingRecordsPaged(ctx context.Context, p httpkit.PageParams, finalized *bool) ([]CostingRecord, int, error)
+	// selectCostingRecordsKeyset returns up to `limit` rows strictly older than
+	// the (created_at, id) cursor, ordered by created_at DESC, id DESC.
+	// Callers pass limit+1 to detect has_more.
+	selectCostingRecordsKeyset(ctx context.Context, finalized *bool, cur httpkit.Cursor, limit int) ([]CostingRecord, error)
 	finalizeCostingRecord(ctx context.Context, woID uuid.UUID, actorID uuid.UUID) error
 	hasCostingRecord(ctx context.Context, woID uuid.UUID) (bool, error)
 	insertCostingAdjustment(ctx context.Context, a CostingAdjustment) error

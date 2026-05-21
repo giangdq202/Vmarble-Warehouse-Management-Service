@@ -3,7 +3,6 @@ package costing
 import (
 	"context"
 	"errors"
-	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -104,31 +103,35 @@ func scanCostingRecord(row interface{ Scan(...any) error }) (CostingRecord, erro
 	return r, err
 }
 
-func (s *pgStore) selectCostingRecordsPaged(ctx context.Context, p httpkit.PageParams, finalized *bool) ([]CostingRecord, int, error) {
-	orderDir := "ASC"
-	if p.Order == "desc" {
-		orderDir = "DESC"
+// selectCostingRecordsKeyset implements keyset (cursor) pagination over
+// costing_records.created_at DESC, id DESC. The store fetches limit rows;
+// callers pass limit+1 so the service can detect has_more without a second
+// query. The (created_at, id) tuple comparison handles the boundary case
+// where two rows share the exact same timestamp — without the id tie-break
+// burst writes can either re-emit a row or skip one.
+//
+// The cursor predicate is NULL-guarded so the same SQL serves first-page
+// (cur.Ts.IsZero()) and subsequent pages — Postgres can use the
+// (created_at DESC, id DESC) composite index in either case.
+func (s *pgStore) selectCostingRecordsKeyset(ctx context.Context, finalized *bool, cur httpkit.Cursor, limit int) ([]CostingRecord, error) {
+	var curTs any
+	var curID any
+	if !cur.IsZero() {
+		curTs = cur.Ts
+		curID = cur.ID
 	}
 
-	var total int
-	if err := s.pool.QueryRow(ctx,
-		`SELECT COUNT(*) FROM costing_records WHERE ($1::boolean IS NULL OR finalized = $1)`,
-		finalized,
-	).Scan(&total); err != nil {
-		return nil, 0, err
-	}
-
-	query := fmt.Sprintf(
+	rows, err := s.pool.Query(ctx,
 		`SELECT `+selectCostingCols+`
 		 FROM costing_records
 		 WHERE ($1::boolean IS NULL OR finalized = $1)
-		 ORDER BY created_at %s
-		 LIMIT $2 OFFSET $3`,
-		orderDir,
+		   AND ($2::timestamptz IS NULL OR (created_at, id) < ($2, $3))
+		 ORDER BY created_at DESC, id DESC
+		 LIMIT $4`,
+		finalized, curTs, curID, limit,
 	)
-	rows, err := s.pool.Query(ctx, query, finalized, p.Limit, p.Offset())
 	if err != nil {
-		return nil, 0, err
+		return nil, err
 	}
 	defer rows.Close()
 
@@ -136,11 +139,11 @@ func (s *pgStore) selectCostingRecordsPaged(ctx context.Context, p httpkit.PageP
 	for rows.Next() {
 		r, err := scanCostingRecord(rows)
 		if err != nil {
-			return nil, 0, err
+			return nil, err
 		}
 		out = append(out, r)
 	}
-	return out, total, rows.Err()
+	return out, rows.Err()
 }
 
 func (s *pgStore) finalizeCostingRecord(ctx context.Context, woID uuid.UUID, actorID uuid.UUID) error {

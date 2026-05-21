@@ -289,12 +289,18 @@ func (s *service) IsCostingFinalized(ctx context.Context, workOrderID uuid.UUID)
 	return record.Finalized, nil
 }
 
-func (s *service) ListCostingRecords(ctx context.Context, p httpkit.PageParams, finalized *bool) (httpkit.PagedResult[CostingRecord], error) {
-	records, total, err := s.st.selectCostingRecordsPaged(ctx, p, finalized)
+func (s *service) ListCostingRecords(ctx context.Context, params httpkit.CursorParams, finalized *bool) (httpkit.CursorResult[CostingRecord], error) {
+	cur, err := params.Decoded()
 	if err != nil {
-		return httpkit.PagedResult[CostingRecord]{}, err
+		return httpkit.CursorResult[CostingRecord]{}, err
 	}
-	return httpkit.NewPagedResult(records, total, p), nil
+	items, err := s.st.selectCostingRecordsKeyset(ctx, finalized, cur, params.Limit+1)
+	if err != nil {
+		return httpkit.CursorResult[CostingRecord]{}, err
+	}
+	return httpkit.NewCursorResult(items, params.Limit, func(r CostingRecord) httpkit.Cursor {
+		return httpkit.Cursor{Ts: r.CreatedAt, ID: r.ID}
+	}), nil
 }
 
 func (s *service) ListWasteReport(ctx context.Context, filter WasteReportFilter) ([]WasteReportRow, error) {

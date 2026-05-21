@@ -339,26 +339,26 @@ func writeWasteReportCSV(c *gin.Context, rows []WasteReportRow) {
 
 // listCostingRecords godoc
 //
-// @Summary      List costing records
+// @Summary      List costing records (keyset pagination)
 // @Tags         costing
 // @Produce      json
-// @Param        page       query     int     false  "page number (default 1)"
+// @Param        cursor     query     string  false  "opaque keyset cursor from a previous response (omit for first page)"
 // @Param        limit      query     int     false  "items per page (default 10, max 100)"
 // @Param        finalized  query     bool    false  "filter by finalized: true or false (omit for all)"
-// @Param        order      query     string  false  "sort direction: asc, desc (default asc)"
-// @Success      200  {object}  httpkit.PagedResult[CostingRecord]
+// @Success      200  {object}  httpkit.CursorResult[CostingRecord]
+// @Failure      400  {object}  map[string]string
 // @Failure      500  {object}  map[string]string
 // @Security     BearerAuth
 // @Failure      401  {object}  map[string]string
 // @Router       /api/v1/costing [get]
 func (h *Handler) list(c *gin.Context) {
-	p := httpkit.BindPageParams(c)
+	params := httpkit.BindCursorParams(c)
 	var finalized *bool
 	if v := c.Query("finalized"); v != "" {
 		b := v == "true"
 		finalized = &b
 	}
-	result, err := h.svc.ListCostingRecords(c.Request.Context(), p, finalized)
+	result, err := h.svc.ListCostingRecords(c.Request.Context(), params, finalized)
 	if err != nil {
 		httpkit.Error(c, err)
 		return
