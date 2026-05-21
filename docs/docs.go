@@ -6920,6 +6920,9 @@ const docTemplate = `{
                 "limit": {
                     "type": "integer"
                 },
+                "total_is_estimate": {
+                    "type": "boolean"
+                },
                 "total_items": {
                     "type": "integer"
                 },
@@ -6942,6 +6945,9 @@ const docTemplate = `{
                 },
                 "limit": {
                     "type": "integer"
+                },
+                "total_is_estimate": {
+                    "type": "boolean"
                 },
                 "total_items": {
                     "type": "integer"
@@ -6966,6 +6972,9 @@ const docTemplate = `{
                 "limit": {
                     "type": "integer"
                 },
+                "total_is_estimate": {
+                    "type": "boolean"
+                },
                 "total_items": {
                     "type": "integer"
                 },
@@ -6988,6 +6997,9 @@ const docTemplate = `{
                 },
                 "limit": {
                     "type": "integer"
+                },
+                "total_is_estimate": {
+                    "type": "boolean"
                 },
                 "total_items": {
                     "type": "integer"
@@ -7012,6 +7024,9 @@ const docTemplate = `{
                 "limit": {
                     "type": "integer"
                 },
+                "total_is_estimate": {
+                    "type": "boolean"
+                },
                 "total_items": {
                     "type": "integer"
                 },
@@ -7034,6 +7049,9 @@ const docTemplate = `{
                 },
                 "limit": {
                     "type": "integer"
+                },
+                "total_is_estimate": {
+                    "type": "boolean"
                 },
                 "total_items": {
                     "type": "integer"
@@ -7058,6 +7076,9 @@ const docTemplate = `{
                 "limit": {
                     "type": "integer"
                 },
+                "total_is_estimate": {
+                    "type": "boolean"
+                },
                 "total_items": {
                     "type": "integer"
                 },
@@ -7080,6 +7101,9 @@ const docTemplate = `{
                 },
                 "limit": {
                     "type": "integer"
+                },
+                "total_is_estimate": {
+                    "type": "boolean"
                 },
                 "total_items": {
                     "type": "integer"
@@ -7104,6 +7128,9 @@ const docTemplate = `{
                 "limit": {
                     "type": "integer"
                 },
+                "total_is_estimate": {
+                    "type": "boolean"
+                },
                 "total_items": {
                     "type": "integer"
                 },
@@ -7126,6 +7153,9 @@ const docTemplate = `{
                 },
                 "limit": {
                     "type": "integer"
+                },
+                "total_is_estimate": {
+                    "type": "boolean"
                 },
                 "total_items": {
                     "type": "integer"
@@ -7150,6 +7180,9 @@ const docTemplate = `{
                 "limit": {
                     "type": "integer"
                 },
+                "total_is_estimate": {
+                    "type": "boolean"
+                },
                 "total_items": {
                     "type": "integer"
                 },
@@ -7172,6 +7205,9 @@ const docTemplate = `{
                 },
                 "limit": {
                     "type": "integer"
+                },
+                "total_is_estimate": {
+                    "type": "boolean"
                 },
                 "total_items": {
                     "type": "integer"
