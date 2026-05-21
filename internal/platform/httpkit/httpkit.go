@@ -9,12 +9,29 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/vmarble/warehouse-management-service/internal/domain"
 )
 
 const (
 	defaultPageLimit = 10
 	maxPageLimit     = 100
+
+	// MaxOffset bounds how deep an OFFSET-paginated request may walk before
+	// the handler refuses with 400. Set to 10,000 because past this depth
+	// Postgres still has to scan + discard the first N rows, work_mem
+	// pressure spikes, and on a multi-million row table the response
+	// degrades to multi-second on warm cache. Tables that legitimately
+	// need deeper paging belong on keyset (see Cursor in cursor.go).
+	MaxOffset = 10_000
+
+	// CountThreshold is the row-count below which list endpoints should
+	// run a real COUNT(*) for accuracy. Above it, callers should fall
+	// back to EstimateRowCount: COUNT(*) on a 5M-row table is a multi-
+	// second scan even with the visibility map, while the autovacuum
+	// estimate is a single index hit and 5–10% off — perfectly fine for
+	// "showing ~5.2M items" UI.
+	CountThreshold = 50_000
 )
 
 // PageParams holds the validated pagination and search query parameters.
@@ -29,17 +46,35 @@ type PageParams struct {
 
 // PagedResult is the standard paginated response envelope returned by all
 // list endpoints that support pagination.
+//
+// TotalIsEstimate is true when TotalItems came from
+// pg_stat_user_tables.n_live_tup rather than a real COUNT(*) — clients
+// should render the number as "~1.2M" so users know not to trust the last
+// few digits. The field is omitted when false so existing FE code that
+// branches on its presence keeps working.
 type PagedResult[T any] struct {
-	Items       []T `json:"items"`
-	TotalItems  int `json:"total_items"`
-	TotalPages  int `json:"total_pages"`
-	CurrentPage int `json:"current_page"`
-	Limit       int `json:"limit"`
+	Items           []T  `json:"items"`
+	TotalItems      int  `json:"total_items"`
+	TotalPages      int  `json:"total_pages"`
+	CurrentPage     int  `json:"current_page"`
+	Limit           int  `json:"limit"`
+	TotalIsEstimate bool `json:"total_is_estimate,omitempty"`
 }
 
 // NewPagedResult builds a PagedResult from the fetched items and metadata.
 // items must already be the correct page slice (len <= params.Limit).
 func NewPagedResult[T any](items []T, totalItems int, params PageParams) PagedResult[T] {
+	return newPagedResult(items, totalItems, params, false)
+}
+
+// NewPagedResultEstimated is like NewPagedResult but flags TotalItems as an
+// estimate. Use this when totalItems came from pg_stat_user_tables instead
+// of a real COUNT(*) — see EstimateRowCount.
+func NewPagedResultEstimated[T any](items []T, totalItems int, params PageParams) PagedResult[T] {
+	return newPagedResult(items, totalItems, params, true)
+}
+
+func newPagedResult[T any](items []T, totalItems int, params PageParams, isEstimate bool) PagedResult[T] {
 	if items == nil {
 		items = []T{}
 	}
@@ -52,11 +87,12 @@ func NewPagedResult[T any](items []T, totalItems int, params PageParams) PagedRe
 		totalPages = 1
 	}
 	return PagedResult[T]{
-		Items:       items,
-		TotalItems:  totalItems,
-		TotalPages:  totalPages,
-		CurrentPage: params.Page,
-		Limit:       limit,
+		Items:           items,
+		TotalItems:      totalItems,
+		TotalPages:      totalPages,
+		CurrentPage:     params.Page,
+		Limit:           limit,
+		TotalIsEstimate: isEstimate,
 	}
 }
 
@@ -69,6 +105,10 @@ func (p PageParams) Offset() int {
 // request query string, applies defaults and caps, and returns a validated
 // PageParams. It never writes an error response — callers receive safe values
 // even when parameters are absent or malformed.
+//
+// Note: BindPageParams does NOT enforce MaxOffset. Call ValidateOffset
+// (or use Error to translate its result) once the params are bound, so the
+// 400 path stays explicit at the handler layer.
 func BindPageParams(c *gin.Context) PageParams {
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	if page < 1 {
@@ -95,6 +135,48 @@ func BindPageParams(c *gin.Context) PageParams {
 		SortBy: c.Query("sort_by"),
 		Order:  order,
 	}
+}
+
+// ValidateOffset rejects page/limit combinations that would force Postgres
+// to scan past MaxOffset rows. Callers should propagate the returned error
+// to httpkit.Error, which maps it to 400. The hint message names the
+// alternative — apply a date filter, or migrate the endpoint to keyset
+// (see Cursor in cursor.go) for unbounded paging.
+func ValidateOffset(p PageParams) error {
+	if p.Offset() > MaxOffset {
+		return domain.NewBizError(domain.ErrInvalidInput,
+			"page * limit exceeds offset cap of 10000; narrow the result set with a date filter or use the cursor-based endpoint")
+	}
+	return nil
+}
+
+// CountOrEstimate returns either a real COUNT(*) (when the table is small
+// enough that COUNT is cheap) or pg_stat_user_tables.n_live_tup. The bool
+// is true when the second value is an estimate.
+//
+// Decision rule: read EstimateRowCount once. If the table-wide estimate is
+// under CountThreshold, run realCount() — even with WHERE filters, COUNT
+// stays sub-second on a 50K-row table. Above threshold, skip the real count
+// entirely and return the estimate; FE renders "~1.2M" via the
+// total_is_estimate flag.
+//
+// This trades 5–10% accuracy on the upper bound for predictably bounded
+// query latency on hot list endpoints, which is the right call for
+// dashboards and admin tables. Endpoints that need exact counts (billing,
+// audit reconciliation) should bypass this helper.
+func CountOrEstimate(ctx context.Context, pool *pgxpool.Pool, table string, realCount func() (int, error)) (count int, isEstimate bool, err error) {
+	est, err := EstimateRowCount(ctx, pool, table)
+	if err != nil {
+		return 0, false, err
+	}
+	if est < CountThreshold {
+		n, err := realCount()
+		if err != nil {
+			return 0, false, err
+		}
+		return n, false, nil
+	}
+	return int(est), true, nil
 }
 
 // healthz godoc
