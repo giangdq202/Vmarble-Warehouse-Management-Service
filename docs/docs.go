@@ -1711,14 +1711,14 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Returns a paginated history of cut events enriched with SKU code/name and the work-order assignee. Ordered by created_at DESC. Optional filters: user_id (maps to work_orders.assigned_to), work_order_id, from/to (RFC3339).",
+                "description": "Returns a keyset-paginated history of cut events enriched with SKU code/name and the work-order assignee. Ordered by created_at DESC. Optional filters: user_id (maps to work_orders.assigned_to), work_order_id, from/to (RFC3339).",
                 "produces": [
                     "application/json"
                 ],
                 "tags": [
                     "inventory"
                 ],
-                "summary": "List cutting records (history report)",
+                "summary": "List cutting records (history report, keyset paginated)",
                 "parameters": [
                     {
                         "type": "string",
@@ -1745,14 +1745,14 @@ const docTemplate = `{
                         "in": "query"
                     },
                     {
-                        "type": "integer",
-                        "description": "page number (default 1)",
-                        "name": "page",
+                        "type": "string",
+                        "description": "opaque cursor token returned in next_cursor; omit for first page",
+                        "name": "cursor",
                         "in": "query"
                     },
                     {
                         "type": "integer",
-                        "description": "items per page (default 10, max 100)",
+                        "description": "page size (default 50, max 200)",
                         "name": "limit",
                         "in": "query"
                     }
@@ -1761,7 +1761,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_inventory_CuttingRecordReport"
+                            "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_platform_httpkit.CursorResult-internal_module_inventory_CuttingRecordReport"
                         }
                     },
                     "400": {
@@ -6885,6 +6885,23 @@ const docTemplate = `{
                 }
             }
         },
+        "github_com_vmarble_warehouse-management-service_internal_platform_httpkit.CursorResult-internal_module_inventory_CuttingRecordReport": {
+            "type": "object",
+            "properties": {
+                "has_more": {
+                    "type": "boolean"
+                },
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_module_inventory.CuttingRecordReport"
+                    }
+                },
+                "next_cursor": {
+                    "type": "string"
+                }
+            }
+        },
         "github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_authn_UserDetail": {
             "type": "object",
             "properties": {
@@ -6999,32 +7016,6 @@ const docTemplate = `{
                     "type": "array",
                     "items": {
                         "$ref": "#/definitions/internal_module_inventory.BoardSheet"
-                    }
-                },
-                "limit": {
-                    "type": "integer"
-                },
-                "total_is_estimate": {
-                    "type": "boolean"
-                },
-                "total_items": {
-                    "type": "integer"
-                },
-                "total_pages": {
-                    "type": "integer"
-                }
-            }
-        },
-        "github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_inventory_CuttingRecordReport": {
-            "type": "object",
-            "properties": {
-                "current_page": {
-                    "type": "integer"
-                },
-                "items": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/internal_module_inventory.CuttingRecordReport"
                     }
                 },
                 "limit": {

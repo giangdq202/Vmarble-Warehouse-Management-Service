@@ -174,11 +174,12 @@ type mockStore struct {
 	selectAllocatedRemnantsByWOResult []PickSlipLine
 	selectAllocatedRemnantsByWOErr    error
 
-	// selectCuttingRecordsReport
+	// selectCuttingRecordsReportKeyset
 	selectCuttingRecordsReportResult []CuttingRecordReport
-	selectCuttingRecordsReportTotal  int
 	selectCuttingRecordsReportErr    error
 	selectCuttingRecordsReportFilter CuttingRecordFilter
+	selectCuttingRecordsReportCur    httpkit.Cursor
+	selectCuttingRecordsReportLim    int
 }
 
 func (m *mockStore) insertLot(_ context.Context, _ InventoryLot) error {
@@ -326,9 +327,11 @@ func (m *mockStore) selectAllocatedRemnantsByWO(_ context.Context, _ uuid.UUID) 
 	return m.selectAllocatedRemnantsByWOResult, m.selectAllocatedRemnantsByWOErr
 }
 
-func (m *mockStore) selectCuttingRecordsReport(_ context.Context, f CuttingRecordFilter, _ httpkit.PageParams) ([]CuttingRecordReport, int, error) {
+func (m *mockStore) selectCuttingRecordsReportKeyset(_ context.Context, f CuttingRecordFilter, cur httpkit.Cursor, limit int) ([]CuttingRecordReport, error) {
 	m.selectCuttingRecordsReportFilter = f
-	return m.selectCuttingRecordsReportResult, m.selectCuttingRecordsReportTotal, m.selectCuttingRecordsReportErr
+	m.selectCuttingRecordsReportCur = cur
+	m.selectCuttingRecordsReportLim = limit
+	return m.selectCuttingRecordsReportResult, m.selectCuttingRecordsReportErr
 }
 
 // ── helpers ──────────────────────────────────────────────────────────────────
@@ -4707,7 +4710,7 @@ func TestGeneratePickSlipPDF_RemnantWithNoLocation_ShowsDash(t *testing.T) {
 
 // ── ListCuttingRecords ───────────────────────────────────────────────────────
 
-func TestListCuttingRecords_HappyPath_ReturnsPagedResult(t *testing.T) {
+func TestListCuttingRecords_HappyPath_ReturnsCursorResult(t *testing.T) {
 	woID := uuid.New()
 	skuID := uuid.New()
 	userID := uuid.New()
@@ -4730,45 +4733,92 @@ func TestListCuttingRecords_HappyPath_ReturnsPagedResult(t *testing.T) {
 			CreatedAt:        time.Date(2026, 5, 10, 9, 0, 0, 0, time.UTC),
 		},
 	}
-	st := &mockStore{
-		selectCuttingRecordsReportResult: items,
-		selectCuttingRecordsReportTotal:  1,
-	}
+	st := &mockStore{selectCuttingRecordsReportResult: items}
 	svc := NewService(st, nil)
 
 	res, err := svc.ListCuttingRecords(context.Background(),
 		CuttingRecordFilter{UserID: &userID},
-		httpkit.PageParams{Page: 1, Limit: 10},
+		httpkit.CursorParams{Limit: 50},
 	)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
-	}
-	if res.TotalItems != 1 {
-		t.Fatalf("total = %d, want 1", res.TotalItems)
 	}
 	if len(res.Items) != 1 || res.Items[0].SKUCode != "SKU-001" {
 		t.Fatalf("unexpected items: %+v", res.Items)
 	}
+	if res.HasMore {
+		t.Errorf("HasMore = true, want false (returned 1 < limit 50)")
+	}
 	if st.selectCuttingRecordsReportFilter.UserID == nil || *st.selectCuttingRecordsReportFilter.UserID != userID {
 		t.Fatalf("filter not forwarded: got %+v", st.selectCuttingRecordsReportFilter)
 	}
+	// Service must over-fetch by 1 so NewCursorResult can detect has_more.
+	if st.selectCuttingRecordsReportLim != 51 {
+		t.Errorf("store called with limit %d, want 51 (params.Limit+1)", st.selectCuttingRecordsReportLim)
+	}
 }
 
-func TestListCuttingRecords_EmptyResult(t *testing.T) {
+func TestListCuttingRecords_OverFetched_TrimsAndSetsCursor(t *testing.T) {
+	now := time.Now().UTC()
+	lastKept := CuttingRecordReport{ID: uuid.New(), SKUCode: "L", CreatedAt: now.Add(-2 * time.Second)}
 	st := &mockStore{
-		selectCuttingRecordsReportResult: []CuttingRecordReport{},
-		selectCuttingRecordsReportTotal:  0,
+		selectCuttingRecordsReportResult: []CuttingRecordReport{
+			{ID: uuid.New(), SKUCode: "A", CreatedAt: now},
+			lastKept,
+			// sentinel — proves there's another page
+			{ID: uuid.New(), SKUCode: "X", CreatedAt: now.Add(-3 * time.Second)},
+		},
 	}
+	svc := NewService(st, nil)
+	res, err := svc.ListCuttingRecords(context.Background(),
+		CuttingRecordFilter{}, httpkit.CursorParams{Limit: 2})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !res.HasMore {
+		t.Errorf("HasMore = false, want true (over-fetched 3 > limit 2)")
+	}
+	if len(res.Items) != 2 {
+		t.Errorf("len(items) = %d, want 2 (sentinel must be trimmed)", len(res.Items))
+	}
+	decoded, err := httpkit.DecodeCursor(res.NextCursor)
+	if err != nil {
+		t.Fatalf("DecodeCursor(NextCursor) = %v", err)
+	}
+	if !decoded.Ts.Equal(lastKept.CreatedAt) || decoded.ID != lastKept.ID {
+		t.Errorf("cursor = %+v, want Ts=%v ID=%v (last kept row, not sentinel)", decoded, lastKept.CreatedAt, lastKept.ID)
+	}
+}
+
+func TestListCuttingRecords_PassesCursorToStore(t *testing.T) {
+	cur := httpkit.Cursor{Ts: time.Now().UTC(), ID: uuid.New()}
+	st := &mockStore{}
+	svc := NewService(st, nil)
+	if _, err := svc.ListCuttingRecords(context.Background(), CuttingRecordFilter{}, httpkit.CursorParams{
+		Cursor: cur.Encode(), Limit: 10,
+	}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !st.selectCuttingRecordsReportCur.Ts.Equal(cur.Ts) || st.selectCuttingRecordsReportCur.ID != cur.ID {
+		t.Errorf("store got cursor %+v, want %+v", st.selectCuttingRecordsReportCur, cur)
+	}
+}
+
+func TestListCuttingRecords_EmptyResult_ReturnsEmptyItemsNotNil(t *testing.T) {
+	st := &mockStore{selectCuttingRecordsReportResult: []CuttingRecordReport{}}
 	svc := NewService(st, nil)
 
 	res, err := svc.ListCuttingRecords(context.Background(),
-		CuttingRecordFilter{}, httpkit.PageParams{Page: 1, Limit: 10},
+		CuttingRecordFilter{}, httpkit.CursorParams{Limit: 50},
 	)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if res.TotalItems != 0 || len(res.Items) != 0 {
-		t.Fatalf("expected empty result, got %+v", res)
+	if res.Items == nil {
+		t.Error("Items is nil; want empty slice so JSON renders [] not null")
+	}
+	if res.HasMore {
+		t.Errorf("HasMore = true, want false")
 	}
 }
 
@@ -4781,10 +4831,24 @@ func TestListCuttingRecords_InvalidDateRange_ReturnsInvalidInput(t *testing.T) {
 
 	_, err := svc.ListCuttingRecords(context.Background(),
 		CuttingRecordFilter{From: from, To: to},
-		httpkit.PageParams{Page: 1, Limit: 10},
+		httpkit.CursorParams{Limit: 50},
 	)
 	if !errors.Is(err, domain.ErrInvalidInput) {
 		t.Fatalf("got %v, want ErrInvalidInput", err)
+	}
+}
+
+func TestListCuttingRecords_InvalidCursor_ReturnsErr(t *testing.T) {
+	st := &mockStore{}
+	svc := NewService(st, nil)
+	_, err := svc.ListCuttingRecords(context.Background(),
+		CuttingRecordFilter{}, httpkit.CursorParams{Cursor: "not!valid!base64!@#", Limit: 10},
+	)
+	if !errors.Is(err, httpkit.ErrInvalidCursor) {
+		t.Errorf("err = %v, want wraps ErrInvalidCursor", err)
+	}
+	if st.selectCuttingRecordsReportLim != 0 {
+		t.Errorf("store should not be called when cursor is invalid")
 	}
 }
 
@@ -4794,7 +4858,7 @@ func TestListCuttingRecords_StoreError_Propagates(t *testing.T) {
 	svc := NewService(st, nil)
 
 	_, err := svc.ListCuttingRecords(context.Background(),
-		CuttingRecordFilter{}, httpkit.PageParams{Page: 1, Limit: 10},
+		CuttingRecordFilter{}, httpkit.CursorParams{Limit: 50},
 	)
 	if err == nil || !errors.Is(err, storeErr) {
 		t.Fatalf("got %v, want %v", err, storeErr)

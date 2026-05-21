@@ -86,6 +86,17 @@ definitions:
       next_cursor:
         type: string
     type: object
+  ? github_com_vmarble_warehouse-management-service_internal_platform_httpkit.CursorResult-internal_module_inventory_CuttingRecordReport
+  : properties:
+      has_more:
+        type: boolean
+      items:
+        items:
+          $ref: '#/definitions/internal_module_inventory.CuttingRecordReport'
+        type: array
+      next_cursor:
+        type: string
+    type: object
   github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_authn_UserDetail:
     properties:
       current_page:
@@ -161,23 +172,6 @@ definitions:
       items:
         items:
           $ref: '#/definitions/internal_module_inventory.BoardSheet'
-        type: array
-      limit:
-        type: integer
-      total_is_estimate:
-        type: boolean
-      total_items:
-        type: integer
-      total_pages:
-        type: integer
-    type: object
-  ? github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_inventory_CuttingRecordReport
-  : properties:
-      current_page:
-        type: integer
-      items:
-        items:
-          $ref: '#/definitions/internal_module_inventory.CuttingRecordReport'
         type: array
       limit:
         type: integer
@@ -2744,9 +2738,10 @@ paths:
       - inventory
   /api/v1/inventory/cutting-records:
     get:
-      description: 'Returns a paginated history of cut events enriched with SKU code/name
-        and the work-order assignee. Ordered by created_at DESC. Optional filters:
-        user_id (maps to work_orders.assigned_to), work_order_id, from/to (RFC3339).'
+      description: 'Returns a keyset-paginated history of cut events enriched with
+        SKU code/name and the work-order assignee. Ordered by created_at DESC. Optional
+        filters: user_id (maps to work_orders.assigned_to), work_order_id, from/to
+        (RFC3339).'
       parameters:
       - description: filter by assigned worker (uuid)
         in: query
@@ -2764,11 +2759,11 @@ paths:
         in: query
         name: to
         type: string
-      - description: page number (default 1)
+      - description: opaque cursor token returned in next_cursor; omit for first page
         in: query
-        name: page
-        type: integer
-      - description: items per page (default 10, max 100)
+        name: cursor
+        type: string
+      - description: page size (default 50, max 200)
         in: query
         name: limit
         type: integer
@@ -2778,7 +2773,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_inventory_CuttingRecordReport'
+            $ref: '#/definitions/github_com_vmarble_warehouse-management-service_internal_platform_httpkit.CursorResult-internal_module_inventory_CuttingRecordReport'
         "400":
           description: Bad Request
           schema:
@@ -2793,7 +2788,7 @@ paths:
             type: object
       security:
       - BearerAuth: []
-      summary: List cutting records (history report)
+      summary: List cutting records (history report, keyset paginated)
       tags:
       - inventory
   /api/v1/inventory/cutting-records/{id}/labels:

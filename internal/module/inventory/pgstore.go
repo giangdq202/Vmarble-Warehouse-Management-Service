@@ -391,16 +391,18 @@ func (s *pgStore) selectCuttingRecordDetails(ctx context.Context, id uuid.UUID) 
 	return d, nil
 }
 
-// selectCuttingRecordsReport returns a paginated, SKU + assignee-enriched view
-// of cutting_records ordered by created_at DESC. Filters are all optional:
-// UserID maps to work_orders.assigned_to (see CuttingRecordFilter.UserID),
-// WorkOrderID and the From/To timestamps narrow the result set.
-func (s *pgStore) selectCuttingRecordsReport(ctx context.Context, f CuttingRecordFilter, p httpkit.PageParams) ([]CuttingRecordReport, int, error) {
+// selectCuttingRecordsReportKeyset returns cutting records strictly before
+// the (created_at, id) cursor, enriched with SKU + assignee data, ordered by
+// created_at DESC, id DESC. Filters are all optional. Callers pass limit+1
+// so the service layer can detect has_more without a follow-up query.
+func (s *pgStore) selectCuttingRecordsReportKeyset(ctx context.Context, f CuttingRecordFilter, cur httpkit.Cursor, limit int) ([]CuttingRecordReport, error) {
 	var (
-		userID    any = nil
-		woID      any = nil
-		fromTime  any = nil
-		toTime    any = nil
+		userID   any = nil
+		woID     any = nil
+		fromTime any = nil
+		toTime   any = nil
+		curTs    any = nil
+		curID    any = nil
 	)
 	if f.UserID != nil {
 		userID = *f.UserID
@@ -414,26 +416,13 @@ func (s *pgStore) selectCuttingRecordsReport(ctx context.Context, f CuttingRecor
 	if !f.To.IsZero() {
 		toTime = f.To
 	}
-
-	whereClause := `
-		WHERE ($1::uuid IS NULL OR wo.assigned_to = $1)
-		  AND ($2::uuid IS NULL OR cr.work_order_id = $2)
-		  AND ($3::timestamptz IS NULL OR cr.created_at >= $3)
-		  AND ($4::timestamptz IS NULL OR cr.created_at <= $4)`
-
-	var total int
-	if err := s.pool.QueryRow(ctx,
-		`SELECT COUNT(*)
-		   FROM cutting_records cr
-		   LEFT JOIN work_orders wo ON wo.id = cr.work_order_id`+whereClause,
-		userID, woID, fromTime, toTime,
-	).Scan(&total); err != nil {
-		return nil, 0, fmt.Errorf("count cutting_records: %w", err)
-	}
-	if total == 0 {
-		return []CuttingRecordReport{}, 0, nil
+	if !cur.IsZero() {
+		curTs = cur.Ts
+		curID = cur.ID
 	}
 
+	// Single SQL shape with NULL-guarded predicates so the planner can pick
+	// idx_cutting_records_created_at_id whether or not a cursor is present.
 	rows, err := s.pool.Query(ctx,
 		`SELECT cr.id, cr.work_order_id, cr.sku_id,
 		        COALESCE(sk.code, ''), COALESCE(sk.name, ''),
@@ -446,17 +435,22 @@ func (s *pgStore) selectCuttingRecordsReport(ctx context.Context, f CuttingRecor
 		   FROM cutting_records cr
 		   LEFT JOIN work_orders wo ON wo.id = cr.work_order_id
 		   LEFT JOIN skus sk        ON sk.id = cr.sku_id
-		   LEFT JOIN users u        ON u.id = wo.assigned_to`+whereClause+`
-		  ORDER BY cr.created_at DESC
-		  LIMIT $5 OFFSET $6`,
-		userID, woID, fromTime, toTime, p.Limit, p.Offset(),
+		   LEFT JOIN users u        ON u.id = wo.assigned_to
+		  WHERE ($1::uuid IS NULL OR wo.assigned_to = $1)
+		    AND ($2::uuid IS NULL OR cr.work_order_id = $2)
+		    AND ($3::timestamptz IS NULL OR cr.created_at >= $3)
+		    AND ($4::timestamptz IS NULL OR cr.created_at <= $4)
+		    AND ($5::timestamptz IS NULL OR (cr.created_at, cr.id) < ($5, $6))
+		  ORDER BY cr.created_at DESC, cr.id DESC
+		  LIMIT $7`,
+		userID, woID, fromTime, toTime, curTs, curID, limit,
 	)
 	if err != nil {
-		return nil, 0, err
+		return nil, err
 	}
 	defer rows.Close()
 
-	out := make([]CuttingRecordReport, 0, p.Limit)
+	out := make([]CuttingRecordReport, 0, limit)
 	for rows.Next() {
 		var (
 			r           CuttingRecordReport
@@ -477,7 +471,7 @@ func (s *pgStore) selectCuttingRecordsReport(ctx context.Context, f CuttingRecor
 			&username, &fullName,
 			&r.CreatedAt,
 		); err != nil {
-			return nil, 0, err
+			return nil, err
 		}
 		r.UsedDimension = domain.Dimension{LengthMM: usedLenMM, WidthMM: usedWidthMM}
 		switch {
@@ -498,7 +492,7 @@ func (s *pgStore) selectCuttingRecordsReport(ctx context.Context, f CuttingRecor
 		}
 		out = append(out, r)
 	}
-	return out, total, rows.Err()
+	return out, rows.Err()
 }
 
 func (s *pgStore) insertRemnant(ctx context.Context, r Remnant) error {
