@@ -6892,6 +6892,9 @@
                 "limit": {
                     "type": "integer"
                 },
+                "total_is_estimate": {
+                    "type": "boolean"
+                },
                 "total_items": {
                     "type": "integer"
                 },
@@ -6914,6 +6917,9 @@
                 },
                 "limit": {
                     "type": "integer"
+                },
+                "total_is_estimate": {
+                    "type": "boolean"
                 },
                 "total_items": {
                     "type": "integer"
@@ -6938,6 +6944,9 @@
                 "limit": {
                     "type": "integer"
                 },
+                "total_is_estimate": {
+                    "type": "boolean"
+                },
                 "total_items": {
                     "type": "integer"
                 },
@@ -6960,6 +6969,9 @@
                 },
                 "limit": {
                     "type": "integer"
+                },
+                "total_is_estimate": {
+                    "type": "boolean"
                 },
                 "total_items": {
                     "type": "integer"
@@ -6984,6 +6996,9 @@
                 "limit": {
                     "type": "integer"
                 },
+                "total_is_estimate": {
+                    "type": "boolean"
+                },
                 "total_items": {
                     "type": "integer"
                 },
@@ -7006,6 +7021,9 @@
                 },
                 "limit": {
                     "type": "integer"
+                },
+                "total_is_estimate": {
+                    "type": "boolean"
                 },
                 "total_items": {
                     "type": "integer"
@@ -7030,6 +7048,9 @@
                 "limit": {
                     "type": "integer"
                 },
+                "total_is_estimate": {
+                    "type": "boolean"
+                },
                 "total_items": {
                     "type": "integer"
                 },
@@ -7052,6 +7073,9 @@
                 },
                 "limit": {
                     "type": "integer"
+                },
+                "total_is_estimate": {
+                    "type": "boolean"
                 },
                 "total_items": {
                     "type": "integer"
@@ -7076,6 +7100,9 @@
                 "limit": {
                     "type": "integer"
                 },
+                "total_is_estimate": {
+                    "type": "boolean"
+                },
                 "total_items": {
                     "type": "integer"
                 },
@@ -7098,6 +7125,9 @@
                 },
                 "limit": {
                     "type": "integer"
+                },
+                "total_is_estimate": {
+                    "type": "boolean"
                 },
                 "total_items": {
                     "type": "integer"
@@ -7122,6 +7152,9 @@
                 "limit": {
                     "type": "integer"
                 },
+                "total_is_estimate": {
+                    "type": "boolean"
+                },
                 "total_items": {
                     "type": "integer"
                 },
@@ -7145,6 +7178,9 @@
                 "limit": {
                     "type": "integer"
                 },
+                "total_is_estimate": {
+                    "type": "boolean"
+                },
                 "total_items": {
                     "type": "integer"
                 },
@@ -7167,6 +7203,9 @@
                 },
                 "limit": {
                     "type": "integer"
+                },
+                "total_is_estimate": {
+                    "type": "boolean"
                 },
                 "total_items": {
                     "type": "integer"
