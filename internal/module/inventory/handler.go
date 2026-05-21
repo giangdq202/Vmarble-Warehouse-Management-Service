@@ -257,18 +257,18 @@ func (h *Handler) recordCut(c *gin.Context) {
 
 // listCuttingRecords godoc
 //
-// @Summary      List cutting records (history report)
-// @Description  Returns a paginated history of cut events enriched with SKU code/name and the work-order assignee. Ordered by created_at DESC. Optional filters: user_id (maps to work_orders.assigned_to), work_order_id, from/to (RFC3339).
+// @Summary      List cutting records (history report, keyset paginated)
+// @Description  Returns a keyset-paginated history of cut events enriched with SKU code/name and the work-order assignee. Ordered by created_at DESC. Optional filters: user_id (maps to work_orders.assigned_to), work_order_id, from/to (RFC3339).
 // @Tags         inventory
 // @Produce      json
 // @Param        user_id         query     string  false  "filter by assigned worker (uuid)"
 // @Param        work_order_id   query     string  false  "filter by work order (uuid)"
 // @Param        from            query     string  false  "start of date range (RFC3339)"
 // @Param        to              query     string  false  "end of date range (RFC3339)"
-// @Param        page            query     int     false  "page number (default 1)"
-// @Param        limit           query     int     false  "items per page (default 10, max 100)"
+// @Param        cursor          query     string  false  "opaque cursor token returned in next_cursor; omit for first page"
+// @Param        limit           query     int     false  "page size (default 50, max 200)"
 // @Security     BearerAuth
-// @Success      200  {object}  httpkit.PagedResult[CuttingRecordReport]
+// @Success      200  {object}  httpkit.CursorResult[inventory.CuttingRecordReport]
 // @Failure      400  {object}  map[string]string
 // @Failure      500  {object}  map[string]string
 // @Router       /api/v1/inventory/cutting-records [get]
@@ -308,8 +308,8 @@ func (h *Handler) listCuttingRecords(c *gin.Context) {
 		f.To = t
 	}
 
-	p := httpkit.BindPageParams(c)
-	result, err := h.svc.ListCuttingRecords(c.Request.Context(), f, p)
+	params := httpkit.BindCursorParams(c)
+	result, err := h.svc.ListCuttingRecords(c.Request.Context(), f, params)
 	if err != nil {
 		httpkit.Error(c, err)
 		return

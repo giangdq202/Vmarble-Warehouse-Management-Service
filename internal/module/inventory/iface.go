@@ -373,10 +373,10 @@ type Service interface {
 	// remnants.
 	GeneratePickSlipPDF(ctx context.Context, workOrderID uuid.UUID) ([]byte, error)
 
-	// ListCuttingRecords returns a paginated history of cutting records,
+	// ListCuttingRecords returns a keyset-paginated history of cutting records,
 	// enriched with SKU code/name and the work-order assignee. The result is
-	// ordered by created_at DESC.
-	ListCuttingRecords(ctx context.Context, f CuttingRecordFilter, p httpkit.PageParams) (httpkit.PagedResult[CuttingRecordReport], error)
+	// ordered by created_at DESC, id DESC.
+	ListCuttingRecords(ctx context.Context, f CuttingRecordFilter, params httpkit.CursorParams) (httpkit.CursorResult[CuttingRecordReport], error)
 }
 
 // PickSlipLine is one row on the pick slip — one allocated remnant.

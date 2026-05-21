@@ -252,8 +252,8 @@ func (s *concurrentMockStore) selectCuttingRecordDetails(_ context.Context, _ uu
 func (s *concurrentMockStore) selectAllocatedRemnantsByWO(_ context.Context, _ uuid.UUID) ([]PickSlipLine, error) {
 	return nil, nil
 }
-func (s *concurrentMockStore) selectCuttingRecordsReport(_ context.Context, _ CuttingRecordFilter, _ httpkit.PageParams) ([]CuttingRecordReport, int, error) {
-	return nil, 0, nil
+func (s *concurrentMockStore) selectCuttingRecordsReportKeyset(_ context.Context, _ CuttingRecordFilter, _ httpkit.Cursor, _ int) ([]CuttingRecordReport, error) {
+	return nil, nil
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────────

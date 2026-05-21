@@ -33,9 +33,10 @@ type store interface {
 	// selectCuttingRecordDetails fetches a single cutting record along with the
 	// SKU details needed to render combined WIP + remnant labels.
 	selectCuttingRecordDetails(ctx context.Context, id uuid.UUID) (CuttingRecordDetails, error)
-	// selectCuttingRecordsReport returns a paginated history of cutting records
-	// joined with the SKU and the assigned worker, ordered by created_at DESC.
-	selectCuttingRecordsReport(ctx context.Context, f CuttingRecordFilter, p httpkit.PageParams) ([]CuttingRecordReport, int, error)
+	// selectCuttingRecordsReportKeyset returns cutting records strictly before
+	// the (created_at, id) cursor, ordered by created_at DESC, id DESC. Callers
+	// pass limit+1 so the service layer can detect has_more.
+	selectCuttingRecordsReportKeyset(ctx context.Context, f CuttingRecordFilter, cur httpkit.Cursor, limit int) ([]CuttingRecordReport, error)
 
 	insertRemnant(ctx context.Context, r Remnant) error
 	selectAvailableRemnantsByMinDimension(ctx context.Context, minDim domain.Dimension) ([]Remnant, error)
