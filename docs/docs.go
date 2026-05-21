@@ -841,12 +841,12 @@ const docTemplate = `{
                 "tags": [
                     "costing"
                 ],
-                "summary": "List costing records",
+                "summary": "List costing records (keyset pagination)",
                 "parameters": [
                     {
-                        "type": "integer",
-                        "description": "page number (default 1)",
-                        "name": "page",
+                        "type": "string",
+                        "description": "opaque keyset cursor from a previous response (omit for first page)",
+                        "name": "cursor",
                         "in": "query"
                     },
                     {
@@ -860,19 +860,22 @@ const docTemplate = `{
                         "description": "filter by finalized: true or false (omit for all)",
                         "name": "finalized",
                         "in": "query"
-                    },
-                    {
-                        "type": "string",
-                        "description": "sort direction: asc, desc (default asc)",
-                        "name": "order",
-                        "in": "query"
                     }
                 ],
                 "responses": {
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_costing_CostingRecord"
+                            "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_platform_httpkit.CursorResult-internal_module_costing_CostingRecord"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
                         }
                     },
                     "401": {
@@ -6868,6 +6871,23 @@ const docTemplate = `{
                 }
             }
         },
+        "github_com_vmarble_warehouse-management-service_internal_platform_httpkit.CursorResult-internal_module_costing_CostingRecord": {
+            "type": "object",
+            "properties": {
+                "has_more": {
+                    "type": "boolean"
+                },
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_module_costing.CostingRecord"
+                    }
+                },
+                "next_cursor": {
+                    "type": "string"
+                }
+            }
+        },
         "github_com_vmarble_warehouse-management-service_internal_platform_httpkit.CursorResult-internal_module_inventory_AuditLogEntry": {
             "type": "object",
             "properties": {
@@ -6941,29 +6961,6 @@ const docTemplate = `{
                     "type": "array",
                     "items": {
                         "$ref": "#/definitions/internal_module_catalog.SKU"
-                    }
-                },
-                "limit": {
-                    "type": "integer"
-                },
-                "total_items": {
-                    "type": "integer"
-                },
-                "total_pages": {
-                    "type": "integer"
-                }
-            }
-        },
-        "github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_costing_CostingRecord": {
-            "type": "object",
-            "properties": {
-                "current_page": {
-                    "type": "integer"
-                },
-                "items": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/internal_module_costing.CostingRecord"
                     }
                 },
                 "limit": {

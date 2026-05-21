@@ -75,6 +75,17 @@ definitions:
       next_cursor:
         type: string
     type: object
+  github_com_vmarble_warehouse-management-service_internal_platform_httpkit.CursorResult-internal_module_costing_CostingRecord:
+    properties:
+      has_more:
+        type: boolean
+      items:
+        items:
+          $ref: '#/definitions/internal_module_costing.CostingRecord'
+        type: array
+      next_cursor:
+        type: string
+    type: object
   github_com_vmarble_warehouse-management-service_internal_platform_httpkit.CursorResult-internal_module_inventory_AuditLogEntry:
     properties:
       has_more:
@@ -123,21 +134,6 @@ definitions:
       items:
         items:
           $ref: '#/definitions/internal_module_catalog.SKU'
-        type: array
-      limit:
-        type: integer
-      total_items:
-        type: integer
-      total_pages:
-        type: integer
-    type: object
-  github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_costing_CostingRecord:
-    properties:
-      current_page:
-        type: integer
-      items:
-        items:
-          $ref: '#/definitions/internal_module_costing.CostingRecord'
         type: array
       limit:
         type: integer
@@ -2146,10 +2142,11 @@ paths:
   /api/v1/costing:
     get:
       parameters:
-      - description: page number (default 1)
+      - description: opaque keyset cursor from a previous response (omit for first
+          page)
         in: query
-        name: page
-        type: integer
+        name: cursor
+        type: string
       - description: items per page (default 10, max 100)
         in: query
         name: limit
@@ -2158,17 +2155,19 @@ paths:
         in: query
         name: finalized
         type: boolean
-      - description: 'sort direction: asc, desc (default asc)'
-        in: query
-        name: order
-        type: string
       produces:
       - application/json
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_costing_CostingRecord'
+            $ref: '#/definitions/github_com_vmarble_warehouse-management-service_internal_platform_httpkit.CursorResult-internal_module_costing_CostingRecord'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
         "401":
           description: Unauthorized
           schema:
@@ -2183,7 +2182,7 @@ paths:
             type: object
       security:
       - BearerAuth: []
-      summary: List costing records
+      summary: List costing records (keyset pagination)
       tags:
       - costing
   /api/v1/costing/{workOrderID}:

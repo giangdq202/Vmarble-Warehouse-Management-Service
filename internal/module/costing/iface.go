@@ -96,7 +96,7 @@ type Service interface {
 	// Used by the accountant adjustment dialog so the FE never has to do
 	// money arithmetic itself.
 	GetCostingRecordDetail(ctx context.Context, workOrderID uuid.UUID) (CostingRecordDetail, error)
-	ListCostingRecords(ctx context.Context, p httpkit.PageParams, finalized *bool) (httpkit.PagedResult[CostingRecord], error)
+	ListCostingRecords(ctx context.Context, params httpkit.CursorParams, finalized *bool) (httpkit.CursorResult[CostingRecord], error)
 	HasCostingRecord(ctx context.Context, workOrderID uuid.UUID) (bool, error)
 	// IsCostingFinalized reports whether the costing record for the work order
 	// is finalized (BR-C04). Returns (false, nil) when no record exists yet.
