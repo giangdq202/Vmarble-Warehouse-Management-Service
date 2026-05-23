@@ -15,6 +15,27 @@
 
 set -euo pipefail
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Guardrail #1: block customer-confidential business docs from being committed.
+# Code is open for reference; business logic / post-demo briefs / customer-facing
+# scripts are NOT pushed (đạo đức kinh doanh, kể cả khi chưa kí NDA).
+# Patterns mirror .gitignore. Override with SKIP_BUSINESS_DOC_GUARD=1 for an
+# explicit, audited exception.
+# ─────────────────────────────────────────────────────────────────────────────
+if [[ "${SKIP_BUSINESS_DOC_GUARD:-0}" != "1" ]]; then
+  blocked=$(git diff --cached --name-only --diff-filter=ACM | grep -E '^docs/(backend-business-logic-.*\.md|.*business-logic.*\.md|post-demo-pivot-brief\.md|.*pivot-brief.*\.md|demo-prototype-script\.md|.*demo-script.*\.md|.*-customer-.*\.md|customer-.*\.md)$' || true)
+  if [[ -n "$blocked" ]]; then
+    echo "pre-commit: BLOCKED — staged customer-confidential business docs:" >&2
+    echo "$blocked" | sed 's/^/  - /' >&2
+    echo >&2
+    echo "These files are local-only per project policy. Unstage with:" >&2
+    echo "$blocked" | sed 's|^|  git restore --staged |' >&2
+    echo >&2
+    echo "If this is genuinely needed, re-run with SKIP_BUSINESS_DOC_GUARD=1." >&2
+    exit 1
+  fi
+fi
+
 if [[ "${SKIP_SWAGGER:-0}" == "1" ]]; then
   exit 0
 fi

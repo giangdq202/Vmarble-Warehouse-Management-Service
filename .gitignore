@@ -25,3 +25,17 @@ loadtest-results/
 
 # Local DB backups (pg_dump output, never share)
 .local-backups/
+
+# Business / customer-confidential docs — local only, never push.
+# Code is open for reference; business logic, post-demo briefs, customer-facing
+# scripts are NOT to be committed (đạo đức kinh doanh, kể cả khi chưa kí NDA).
+# Pre-commit hook also blocks these — see scripts/git-hooks/pre-commit.
+# Override (audited exception): SKIP_BUSINESS_DOC_GUARD=1 git commit ...
+docs/backend-business-logic-*.md
+docs/*business-logic*.md
+docs/post-demo-pivot-brief.md
+docs/*pivot-brief*.md
+docs/demo-prototype-script.md
+docs/*demo-script*.md
+docs/customer-*.md
+docs/*-customer-*.md
