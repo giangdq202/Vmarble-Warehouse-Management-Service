@@ -1,71 +1,68 @@
-# Vmarble Warehouse Management Service
+# Vmarble Warehouse Management Service — Backend
 
 [![CI](https://github.com/giangdq202/Vmarble-Warehouse-Management-Service/actions/workflows/ci.yml/badge.svg)](https://github.com/giangdq202/Vmarble-Warehouse-Management-Service/actions/workflows/ci.yml)
 [![Go](https://img.shields.io/badge/Go-1.24-00ADD8?logo=go)](https://go.dev)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-17-336791?logo=postgresql)](https://www.postgresql.org)
 [![License: PolyForm Noncommercial](https://img.shields.io/badge/License-PolyForm%20Noncommercial-blue.svg)](https://polyformproject.org/licenses/noncommercial/1.0.0/)
 
-Backend service for a furniture workshop's warehouse and production management system.
-Tracks the full lifecycle from Purchase Orders → CNC cutting → Processing → Costing, with remnant optimisation and barcode scan checkpoints.
+> **Production manufacturing execution system (MES) running live at a Vietnam-based stone & wood export factory.**
+> Built end-to-end as the contracted engineer for a real, paying client. Self-funded hosting, real factory staff using it daily, real customer money on the line — not a school project.
 
-## License
+This repo is the backend service. The accompanying [frontend](https://github.com/giangdq202/Vmarble-Warehouse-Management-Client) ships a desktop dashboard (planners, accountants, owner) and a mobile kiosk PWA (shop-floor workers).
 
-This project is licensed under the **PolyForm Noncommercial License 1.0.0**.
-
-**What this means:**
-- ✅ Free for personal use, research, and education
-- ✅ You can fork, modify, and study the code
-- ❌ Commercial use requires a separate commercial license
-
-**For commercial licensing:** Contact giangdq202@gmail.com
-
-See [LICENSE](./LICENSE) for full terms.
+> **Note on what's open vs. closed**
+> The code is open for technical reference (architecture, patterns, testing, CI/CD). The customer-specific business logic, sales scripts, and operational runbooks live outside this repo by contractual courtesy — code stays public, business stays private.
 
 ---
 
-## Architecture
+## Production Snapshot
 
-A **modular monolith** in Go. Nine domain modules live under `internal/module/`, each a self-contained black box with its own `iface.go / service.go / store.go / pgstore.go / handler.go`. Modules never import each other — cross-module calls go through dependency interfaces wired in `cmd/server/main.go`.
+| | |
+|---|---|
+| **Stage** | Live in production with a paying client |
+| **Engagement** | Solo contractor build; full-stack ownership (BE + FE + DB + deploy + on-call) |
+| **Users** | Factory office staff (planners / accountants / owner) + floor workers on kiosk tablets |
+| **Throughput** | Production orders, work orders, cutting records, scan checkpoints, costing reports — all flowing through this service |
+| **Hosting** | Self-funded VPS; Docker compose; Postgres-backed; HTTPS via reverse proxy |
+| **Operations** | Deployed via GitHub Actions (CD on push to `dev`); zero-downtime restarts; rolling migrations |
+| **Reliability** | Row-level locking on critical writes; idempotent migrations; structured slog; CI gates (race detector + lint) |
+
+Demo / staging URL is shared on request — production URL is held private at the customer's request.
+
+---
+
+## What this service does (high level)
+
+A **modular monolith in Go** for a manufacturing workflow:
 
 ```
-HTTP Clients (Web UI / Barcode Scanner)
-          │
-          ▼
- ┌─────────────────────────────────────────────────┐
- │  gin HTTP Router  +  JWT auth middleware         │
- │  internal/platform/httpkit + auth               │
- └────────────────────┬────────────────────────────┘
-                      │
-   ┌──────────────────┼──────────────────┐
-   ▼                  ▼                  ▼
-catalog            order            planning
-SKU/Material/BOM   PO/LineItems     ProductionPlan
-   │                  │                  │
-   └──────────────────┼──────────────────┘
-                      │
-   ┌──────────────────┼──────────────────┐
-   ▼                  ▼                  ▼
-inventory        production          costing
-BoardSheet        WorkOrder         CostingRecord
-Remnant         ConsumptionRecord   area-based
-CuttingRecord   state machine       allocation
-   │                  │                  │
-   └──────────────────┼──────────────────┘
-                      │
-              ┌───────┼───────┐
-              ▼               ▼
-           barcode         authn / dashboard
-           Scan events     JWT + stats
-              │
-              ▼
-       PostgreSQL 17  (pgx/pgxpool)
+Sales Order  →  Production Plan  →  Work Order  →  Cutting / Processing
+                                                            ↓
+                                                       Costing  →  Reports
+                                              ↑                       ↑
+                                          Barcode scan checkpoints
+                                              tracked end-to-end
 ```
 
-Key technical properties:
-- **Row-level locking**: critical writes use `SELECT … FOR UPDATE` inside `pgx.Tx` to prevent inventory oversell and capacity overcommit — see `recordCutAtomically`, `allocateRemnantAtomically`, `assignSlotAtomically`
-- **Domain invariants enforced in service layer**: area conservation (BR-K03), work order state machine (BR-P01-P04), costing immutability (BR-C04)
-- **No ORM**: all SQL written by hand with `pgx/v5`; prepared statements and parameterised queries throughout
-- **32 ordered migrations** managed by goose with idempotent Up/Down
+The service owns the entire backend: order intake, planning, inventory tracking with offcut (remnant) lineage, work-order state machine, area-based costing allocation, barcode scan checkpoints, role-based auth, and aggregated dashboards. The frontend is a thin, typed UI over this contract.
+
+> Specific business rules (validation thresholds, costing formulas, allocation strategies) live in private specs by client agreement. The implementation patterns — how those rules are enforced — are visible throughout `internal/module/*/service.go`.
+
+---
+
+## Why this codebase is interesting (engineer-eye view)
+
+| Concern | Choice | Why it matters |
+|---|---|---|
+| **Architecture** | Modular monolith — domain modules under `internal/module/` are black boxes; cross-module calls go through `deps.go` interfaces wired only in `cmd/server/main.go` | Each module is independently replaceable; no circular imports possible by construction |
+| **Persistence** | `pgx/v5` directly, no ORM | Hand-tuned SQL; prepared statements; explicit transaction boundaries on every multi-write |
+| **Concurrency safety** | `SELECT … FOR UPDATE` inside `pgx.Tx` on every critical write path | Prevents inventory oversell, capacity overcommit, double-allocation under load |
+| **Domain enforcement** | Sentinel errors mapped to HTTP status in `internal/platform/httpkit` | Service layer returns `ErrInvalidTransition` / `ErrInsufficientStock` / `ErrAlreadyFinalized` etc.; HTTP layer does no business logic |
+| **Migrations** | `goose` with idempotent Up/Down, sequenced; never edited after merge | Forward and rollback both work in CI and on prod |
+| **Auth** | HMAC-signed bearer token middleware + role guard at the route level | Tier helpers (`RequireWorkerUp / RequirePlannerUp / RequireAdminOnly`) keep new endpoints honest |
+| **API contract** | OpenAPI generated from handler annotations, regenerated on every commit via pre-commit hook | Frontend regens types from the same spec — no drift |
+| **CI/CD** | GitHub Actions: race-detector test + lint + build on PR; auto-build & push image on `dev` push | Every merge is verifiably testable; deploys are reproducible |
+| **Testing** | Unit tests with store/deps mocked through interfaces; table-driven; deterministic | `go test ./... -race -count=1` is the gate |
 
 ---
 
@@ -83,28 +80,7 @@ make seed
 open http://localhost:8080/swagger/index.html
 ```
 
-> Requires: Docker 24+, Docker Compose v2, `curl`, `jq`.
->
-> `make seed` creates two complete work order lifecycles end-to-end:
-> SKUs → BOM → PO → Approved Plan → Work Orders → Board Sheet stock →
-> CNC Cutting → Processing → Costing → Barcode scans.
-> Demo credentials are printed at the end.
-
----
-
-## Domain Modules
-
-| Module | Entities | Key rules |
-|---|---|---|
-| `catalog` | SKU, Material, BOM | Foundation data; referenced by all modules |
-| `order` | PurchaseOrder, POLineItem | PO lifecycle |
-| `planning` | ProductionPlan, PlanItem | DRAFT → APPROVED → CANCELED |
-| `inventory` | InventoryLot, BoardSheet, Remnant, CuttingRecord | BR-K01–K05: stock, area conservation, remnant lineage, cycle count, bin transfer |
-| `production` | WorkOrder, ConsumptionRecord, Machine, ShiftSlot | BR-P01–P04: state machine, metal check, capacity-aware scheduling |
-| `costing` | CostingRecord | BR-C01–C04: area-based cost allocation, finalisation lock |
-| `barcode` | Barcode, ScanEvent | 3 scan checkpoints with actor identity |
-| `authn` | JWT | Role-based auth (admin, warehouse_staff, cnc_manager, accountant) |
-| `dashboard` | — | Aggregated stats endpoints |
+Requires Docker 24+, Docker Compose v2, `curl`, `jq`. `make seed` walks two complete order lifecycles end-to-end so you can click through the system without configuring anything by hand. Demo credentials print at the end.
 
 ---
 
@@ -119,8 +95,10 @@ open http://localhost:8080/swagger/index.html
 | Migrations | pressly/goose v3 |
 | Config | caarlos0/env v11 (12-factor) |
 | Logging | log/slog (stdlib, structured JSON) |
-| Auth | JWT (HMAC-SHA256) |
+| Auth | HMAC bearer token (JWT-style) |
 | API Docs | swaggo/swag (OpenAPI 2.0) |
+| CI | GitHub Actions — race + lint + build |
+| CD | GitHub Actions — Docker image to GHCR on `dev` push |
 
 ---
 
@@ -134,7 +112,7 @@ open http://localhost:8080/swagger/index.html
 | `make test` | `go test ./... -race -count=1` |
 | `make lint` | golangci-lint |
 | `make seed` | Load end-to-end demo data (requires server running) |
-| `make swagger` | regenerate `docs/` from annotations |
+| `make swagger` | Regenerate `docs/` from handler annotations |
 | `make migrate-up` | goose up |
 | `make migrate-down` | goose down |
 | `make docker-up` | `docker compose up -d` |
@@ -145,26 +123,19 @@ open http://localhost:8080/swagger/index.html
 ## Project Structure
 
 ```
-cmd/server/         Entry point — wires all modules together
+cmd/server/         Entry point — wires every module together
 internal/
-  domain/           Shared value objects: Dimension, Money, status enums, BizError
-  module/
-    catalog/        SKU, Material, BOM
-    order/          Purchase Order, Line Items
-    planning/       Production Plan
-    inventory/      BoardSheet, Remnant, CuttingRecord, cycle count, bin transfer
-    production/     WorkOrder, ConsumptionRecord, machine capacity scheduling
-    costing/        CostingRecord (area-based allocation)
-    barcode/        Barcode/QR, ScanEvent
-    authn/          JWT authentication
-    dashboard/      Stats aggregation
+  domain/           Shared value objects + status enums + BizError sentinel mapping
+  module/<name>/    Domain modules (catalog, order, planning, inventory,
+                    production, costing, barcode, authn, dashboard, …)
   platform/
-    postgres/       pgxpool creation + goose migration runner
-    httpkit/        Router setup, pagination, JSON helpers, error mapping
-    auth/           Auth middleware + context helpers
+    postgres/       pgxpool + goose migration runner
+    httpkit/        Router setup, pagination, JSON/error helpers
+    auth/           HMAC middleware + persona tier helpers
     config/         Env config loader
-migrations/         32 SQL migration files (goose Up/Down)
-docs/               Swagger spec, architecture, business logic spec (Vietnamese)
+migrations/         Sequenced SQL (goose Up/Down)
+docs/               Swagger spec, architecture deep-dive, runbooks (public);
+                    customer-specific business specs are not committed.
 ```
 
 Each module follows the same 5-file layering pattern:
@@ -177,35 +148,30 @@ pgstore.go  → PostgreSQL SQL implementation
 handler.go  → HTTP handlers + route registration
 ```
 
+This is enforced by code review, not by a tool — but the pattern is mechanical enough that drift is obvious.
+
 ---
 
 ## API Documentation
 
 Swagger UI: `http://localhost:8080/swagger/index.html`
 
-Regenerate after changing handler annotations:
+Regenerate after handler annotation changes:
+
 ```bash
 make swagger
 ```
 
----
-
-## Business Logic Spec
-
-Full Vietnamese specification: [`docs/backend-business-logic-vi.md`](docs/backend-business-logic-vi.md)
-
-Architecture deep-dive: [`docs/architecture.md`](docs/architecture.md)
+A pre-commit hook also regenerates and re-stages the spec when Go sources change, so the contract never drifts from the code.
 
 ---
 
 ## CI/CD
 
-- **CI** (Pull Request to `dev`): `go test -race`, `golangci-lint`, `go build` — see `.github/workflows/ci.yml`
-- **CD** (Push to `dev`): builds + pushes Docker image to GitHub Container Registry — see `.github/workflows/cd.yml`
+- **CI** (PR to `dev`): `go test -race`, `golangci-lint`, `go build` — see `.github/workflows/ci.yml`.
+- **CD** (push to `dev`): build & push Docker image to GitHub Container Registry — see `.github/workflows/cd.yml`.
 
----
-
-## Branch Rules
+Branch rules: `main` and `dev` are protected; PRs only.
 
 | Branch | Direct push | PR required | Approvals |
 |---|---|---|---|
@@ -216,41 +182,27 @@ Architecture deep-dive: [`docs/architecture.md`](docs/architecture.md)
 
 ## License
 
-[MIT](LICENSE)
+Licensed under [PolyForm Noncommercial 1.0.0](./LICENSE).
+
+- Free for personal use, research, and education.
+- Free to fork, modify, and study.
+- Commercial use requires a separate license — contact giangdq202@gmail.com.
 
 ---
 
 ## Tài liệu tiếng Việt
 
-Backend cho hệ thống quản lý kho và sản xuất carcass tại xưởng gỗ.
+Backend cho hệ thống MES (Manufacturing Execution System) đang chạy production tại nhà máy xuất khẩu đá & gỗ ở Việt Nam. Build end-to-end với vai trò engineer hợp đồng — code mở để tham khảo kỹ thuật, business logic riêng của khách giữ private theo thỏa thuận.
 
-### Mục tiêu dự án
-
-- Quản lý luồng từ đơn hàng (PO) → kế hoạch sản xuất → cắt CNC → gia công → tính giá thành.
-- Theo dõi remnant (vật tư dư) với lineage đệ quy để tối ưu sử dụng ván ép.
-- Lịch ca sản xuất và phân công máy CNC (capacity-aware scheduling).
-- Cycle count và kiểm kê kho với audit log.
-- Chuẩn hóa dữ liệu để kế toán tính costing chính xác theo diện tích sử dụng (BR-C02/C03).
-
-### Cài đặt & Chạy
+### Cài đặt & Chạy local
 
 ```bash
-# 1. Copy env
 cp .env.example .env
-
-# 2. Khởi động Postgres + app (docker compose tự migrate và start server)
-docker compose up --build
-
-# 3. Load demo data
-make seed
-
-# Hoặc chạy từng bước thủ công:
-make docker-up      # chỉ postgres
-make migrate-up
-make run
-make seed           # sau khi server sẵn sàng
+docker compose up --build      # tự migrate + start server
+make seed                       # load demo data sau khi server sẵn sàng
+open http://localhost:8080/swagger/index.html
 ```
 
 ### Hướng dẫn làm việc với AI Agent
 
-Xem [`CLAUDE.md`](CLAUDE.md) — hướng dẫn workflow và skills cho Claude Code agent.
+Xem [`CLAUDE.md`](CLAUDE.md) — workflow và skills cho Claude Code agent (chỉ commit khi được yêu cầu, branch convention, persona tier RBAC, v.v.).
