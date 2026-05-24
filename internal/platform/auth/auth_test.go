@@ -244,3 +244,105 @@ func TestSignToken_DifferentSecretsDifferentTokens(t *testing.T) {
 		t.Error("tokens signed with different secrets must differ")
 	}
 }
+
+// ── Persona tier tests ──────────────────────────────────────────────────────
+
+func runWithMiddleware(t *testing.T, role Role, mw gin.HandlerFunc) *httptest.ResponseRecorder {
+	t.Helper()
+	r := gin.New()
+	r.Use(func(c *gin.Context) {
+		c.Set(identityKey, Identity{UserID: "u1", Role: role})
+		c.Next()
+	})
+	r.Use(mw)
+	r.GET("/test", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"ok": true}) })
+	req := httptest.NewRequest(http.MethodGet, "/test", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	return w
+}
+
+func TestRequireWorkerUp_AcceptsAllTiers(t *testing.T) {
+	cases := []Role{
+		RoleWarehouse, RoleCNC, RoleCNCManager, RoleForeman,
+		RolePlanner, RoleAccountant, RoleAdmin,
+	}
+	for _, role := range cases {
+		role := role
+		t.Run(string(role), func(t *testing.T) {
+			w := runWithMiddleware(t, role, RequireWorkerUp())
+			if w.Code != http.StatusOK {
+				t.Errorf("status = %d, want 200 for role %s", w.Code, role)
+			}
+		})
+	}
+}
+
+func TestRequirePlannerUp_RejectsWorker_AcceptsPlannerAndAdmin(t *testing.T) {
+	denied := []Role{RoleWarehouse, RoleCNC, RoleCNCManager, RoleForeman}
+	for _, role := range denied {
+		role := role
+		t.Run("deny_"+string(role), func(t *testing.T) {
+			w := runWithMiddleware(t, role, RequirePlannerUp())
+			if w.Code != http.StatusForbidden {
+				t.Errorf("status = %d, want 403 for worker role %s", w.Code, role)
+			}
+		})
+	}
+
+	allowed := []Role{RolePlanner, RoleAccountant, RoleAdmin}
+	for _, role := range allowed {
+		role := role
+		t.Run("allow_"+string(role), func(t *testing.T) {
+			w := runWithMiddleware(t, role, RequirePlannerUp())
+			if w.Code != http.StatusOK {
+				t.Errorf("status = %d, want 200 for role %s", w.Code, role)
+			}
+		})
+	}
+}
+
+func TestRequireAdminOnly_RejectsNonAdmin_AcceptsAdmin(t *testing.T) {
+	denied := []Role{
+		RoleWarehouse, RoleCNC, RoleCNCManager, RoleForeman,
+		RolePlanner, RoleAccountant,
+	}
+	for _, role := range denied {
+		role := role
+		t.Run("deny_"+string(role), func(t *testing.T) {
+			w := runWithMiddleware(t, role, RequireAdminOnly())
+			if w.Code != http.StatusForbidden {
+				t.Errorf("status = %d, want 403 for non-admin role %s", w.Code, role)
+			}
+		})
+	}
+
+	w := runWithMiddleware(t, RoleAdmin, RequireAdminOnly())
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200 for admin", w.Code)
+	}
+}
+
+func TestPersonaOf(t *testing.T) {
+	cases := []struct {
+		role Role
+		want string
+	}{
+		{RoleAdmin, "ADMIN"},
+		{RolePlanner, "PLANNER"},
+		{RoleAccountant, "PLANNER"},
+		{RoleWarehouse, "WORKER"},
+		{RoleCNC, "WORKER"},
+		{RoleCNCManager, "WORKER"},
+		{RoleForeman, "WORKER"},
+		{Role("unknown"), ""},
+	}
+	for _, c := range cases {
+		c := c
+		t.Run(string(c.role), func(t *testing.T) {
+			if got := PersonaOf(c.role); got != c.want {
+				t.Errorf("PersonaOf(%q) = %q, want %q", c.role, got, c.want)
+			}
+		})
+	}
+}

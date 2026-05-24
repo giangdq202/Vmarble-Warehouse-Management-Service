@@ -185,3 +185,66 @@ func RequireRole(roles ...Role) gin.HandlerFunc {
 		c.Next()
 	}
 }
+
+// ── Persona tiers (MVP demo) ─────────────────────────────────────────────────
+//
+// DB keeps the full 7-role taxonomy. For demo purposes the UX collapses them
+// into 3 personas — Worker (floor) / Planner (office) / Admin — so the
+// customer sees clean separation of duties. Mappings below stay declarative;
+// adding a new DB role = add it to the right tier.
+
+// Each tier holds only its own DB roles. Helpers compose tiers when a route
+// allows a higher tier to act on behalf of a lower one.
+var (
+	// workerTier — floor staff: scan kiosks, record cuts, raise defects.
+	workerTier = []Role{RoleWarehouse, RoleCNC, RoleCNCManager, RoleForeman}
+
+	// plannerTier — office staff: approve plans, exceptions, transfers.
+	plannerTier = []Role{RolePlanner, RoleAccountant}
+
+	// adminTier — irreversible actions: force-unseal, cancel APPROVED plan,
+	// finalize costing, user mgmt.
+	adminTier = []Role{RoleAdmin}
+)
+
+// RequireWorkerUp accepts any authenticated tier (worker / planner / admin).
+// Use for endpoints that record floor activity (cuts, packing scans, defects).
+func RequireWorkerUp() gin.HandlerFunc {
+	return RequireRole(concat(workerTier, plannerTier, adminTier)...)
+}
+
+// RequirePlannerUp accepts planner or admin (NOT worker). Use for approval
+// flows (loading_exception approve, container transfer, boost priority,
+// plan approve).
+func RequirePlannerUp() gin.HandlerFunc {
+	return RequireRole(concat(plannerTier, adminTier)...)
+}
+
+// RequireAdminOnly accepts admin only. Use for irreversible / sensitive actions.
+func RequireAdminOnly() gin.HandlerFunc {
+	return RequireRole(adminTier...)
+}
+
+func concat(rs ...[]Role) []Role {
+	out := make([]Role, 0)
+	for _, r := range rs {
+		out = append(out, r...)
+	}
+	return out
+}
+
+// PersonaOf collapses a DB role into its persona tier — useful for FE auth
+// claims and audit logging where the 3-tier label is more meaningful than the
+// raw DB role.
+func PersonaOf(r Role) string {
+	switch r {
+	case RoleAdmin:
+		return "ADMIN"
+	case RolePlanner, RoleAccountant:
+		return "PLANNER"
+	case RoleWarehouse, RoleCNC, RoleCNCManager, RoleForeman:
+		return "WORKER"
+	default:
+		return ""
+	}
+}
