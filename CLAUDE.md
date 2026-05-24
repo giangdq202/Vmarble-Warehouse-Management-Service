@@ -186,6 +186,26 @@ Sentinel errors in `domain/errors.go` map to HTTP status codes in `httpkit.Error
 
 Always wrap with `NewBizError(sentinel, humanMessage)`.
 
+## Persona tiers (RBAC convention)
+
+DB keeps the full 7-role taxonomy (`admin`, `accountant`, `planner`, `warehouse`, `cnc`, `cnc_manager`, `foreman`). For UX and route guards we collapse them into 3 personas via helpers in `internal/platform/auth`:
+
+| Persona | DB roles | When to require |
+|---|---|---|
+| `WORKER` | `warehouse`, `cnc`, `cnc_manager`, `foreman` | Floor activity: cuts, kiosk scans, raise defect/exception |
+| `PLANNER` | `planner`, `accountant` | Approval flows: plan approve, exception approve, transfer reason, boost priority |
+| `ADMIN` | `admin` | Irreversible: force-unseal, cancel APPROVED plan, finalize costing, user mgmt |
+
+Use the helpers — do not inline `RequireRole(...)` for new endpoints:
+
+```go
+inv.POST("/cuts",                       auth.RequireWorkerUp(),  h.recordCut)
+inv.POST("/loading-exceptions/:id/approve", auth.RequirePlannerUp(), h.approve)
+inv.POST("/containers/:id/force-unseal",    auth.RequireAdminOnly(), h.forceUnseal)
+```
+
+`PersonaOf(role)` returns the tier label (`"WORKER"|"PLANNER"|"ADMIN"`) for audit logs and FE claims. Existing endpoints that inline `RequireRole(...)` stay as-is — only new Sprint 7+ endpoints must use the persona helpers.
+
 ## Adding a new module
 
 1. Create `internal/module/<name>/` with the 5-file pattern.
