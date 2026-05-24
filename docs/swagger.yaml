@@ -4007,6 +4007,14 @@ paths:
         in: query
         name: status
         type: string
+      - description: inclusive lower bound on created_at (YYYY-MM-DD)
+        in: query
+        name: from
+        type: string
+      - description: inclusive upper bound on created_at (YYYY-MM-DD)
+        in: query
+        name: to
+        type: string
       - description: 'sort column: created_at, deadline (default created_at)'
         in: query
         name: sort_by
@@ -4022,6 +4030,12 @@ paths:
           description: OK
           schema:
             $ref: '#/definitions/github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_planning_Plan'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
         "401":
           description: Unauthorized
           schema:

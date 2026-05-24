@@ -40,7 +40,7 @@ func (s *pgStore) insertPlan(ctx context.Context, p Plan) error {
 	return err
 }
 
-func (s *pgStore) selectPlansPaged(ctx context.Context, p httpkit.PageParams, status string) ([]Plan, int, error) {
+func (s *pgStore) selectPlansPaged(ctx context.Context, p httpkit.PageParams, status string, createdFrom, createdTo *time.Time) ([]Plan, int, error) {
 	sortCol := "pp.created_at"
 	if p.SortBy == "deadline" {
 		sortCol = "pp.deadline"
@@ -57,8 +57,10 @@ func (s *pgStore) selectPlansPaged(ctx context.Context, p httpkit.PageParams, st
 		   FROM production_plans pp
 		   JOIN purchase_orders po ON po.id = pp.po_id
 		  WHERE ($1::text = '' OR pp.status = $1)
-		    AND ($2::text = '' OR pp.code ILIKE $2 OR po.code ILIKE $2)`,
-		status, search,
+		    AND ($2::text = '' OR pp.code ILIKE $2 OR po.code ILIKE $2)
+		    AND ($3::timestamptz IS NULL OR pp.created_at >= $3)
+		    AND ($4::timestamptz IS NULL OR pp.created_at <= $4)`,
+		status, search, createdFrom, createdTo,
 	).Scan(&total); err != nil {
 		return nil, 0, err
 	}
@@ -70,13 +72,15 @@ func (s *pgStore) selectPlansPaged(ctx context.Context, p httpkit.PageParams, st
 		   JOIN purchase_orders po ON po.id = pp.po_id
 		  WHERE ($1::text = '' OR pp.status = $1)
 		    AND ($2::text = '' OR pp.code ILIKE $2 OR po.code ILIKE $2)
+		    AND ($3::timestamptz IS NULL OR pp.created_at >= $3)
+		    AND ($4::timestamptz IS NULL OR pp.created_at <= $4)
 		  ORDER BY CASE WHEN pp.status = 'APPROVED' THEN 0 ELSE 1 END,
 		           CASE WHEN pp.deadline IS NULL THEN 1 ELSE 0 END,
-		           %s %s
-		 LIMIT $3 OFFSET $4`,
+		           %s %s, pp.id DESC
+		 LIMIT $5 OFFSET $6`,
 		sortCol, orderDir,
 	)
-	rows, err := s.pool.Query(ctx, query, status, search, p.Limit, p.Offset())
+	rows, err := s.pool.Query(ctx, query, status, search, createdFrom, createdTo, p.Limit, p.Offset())
 	if err != nil {
 		return nil, 0, err
 	}

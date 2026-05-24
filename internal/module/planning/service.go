@@ -84,8 +84,11 @@ func (svc *service) GetPlan(ctx context.Context, planID uuid.UUID) (Plan, error)
 	return plan, nil
 }
 
-func (svc *service) ListPlans(ctx context.Context, p httpkit.PageParams, status string) (httpkit.PagedResult[Plan], error) {
-	plans, total, err := svc.s.selectPlansPaged(ctx, p, status)
+func (svc *service) ListPlans(ctx context.Context, p httpkit.PageParams, status string, from, to *time.Time) (httpkit.PagedResult[Plan], error) {
+	if from != nil && to != nil && from.After(*to) {
+		return httpkit.PagedResult[Plan]{}, domain.NewBizError(domain.ErrInvalidInput, "from must not be after to")
+	}
+	plans, total, err := svc.s.selectPlansPaged(ctx, p, status, from, to)
 	if err != nil {
 		return httpkit.PagedResult[Plan]{}, err
 	}
