@@ -3713,6 +3713,18 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
+                        "description": "inclusive lower bound on created_at (YYYY-MM-DD)",
+                        "name": "from",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "inclusive upper bound on created_at (YYYY-MM-DD)",
+                        "name": "to",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
                         "description": "sort column: created_at, deadline (default created_at)",
                         "name": "sort_by",
                         "in": "query"
@@ -3729,6 +3741,15 @@ const docTemplate = `{
                         "description": "OK",
                         "schema": {
                             "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_planning_Plan"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
                         }
                     },
                     "401": {

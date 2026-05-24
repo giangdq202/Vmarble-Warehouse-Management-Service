@@ -62,9 +62,12 @@ func (h *Handler) create(c *gin.Context) {
 // @Param        limit    query     int     false  "items per page (default 10, max 100)"
 // @Param        search   query     string  false  "search by plan code or PO code (ILIKE)"
 // @Param        status   query     string  false  "filter by status: DRAFT, APPROVED, CANCELED"
+// @Param        from     query     string  false  "inclusive lower bound on created_at (YYYY-MM-DD)"
+// @Param        to       query     string  false  "inclusive upper bound on created_at (YYYY-MM-DD)"
 // @Param        sort_by  query     string  false  "sort column: created_at, deadline (default created_at)"
 // @Param        order    query     string  false  "sort direction: asc, desc (default desc)"
 // @Success      200  {object}  httpkit.PagedResult[Plan]
+// @Failure      400  {object}  map[string]string
 // @Failure      500  {object}  map[string]string
 // @Security     BearerAuth
 // @Failure      401  {object}  map[string]string
@@ -72,7 +75,31 @@ func (h *Handler) create(c *gin.Context) {
 func (h *Handler) list(c *gin.Context) {
 	p := httpkit.BindPageParams(c)
 	status := c.Query("status")
-	result, err := h.svc.ListPlans(c.Request.Context(), p, status)
+
+	// Optional date window on pp.created_at. Parsed as YYYY-MM-DD in UTC; the
+	// upper bound is widened to the end of the day so the inclusive contract
+	// matches what the FE sends ("plans created on `to`" should be visible).
+	var from, to *time.Time
+	if s := c.Query("from"); s != "" {
+		t, err := time.Parse(time.DateOnly, s)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid from, use YYYY-MM-DD"})
+			return
+		}
+		from = &t
+	}
+	if s := c.Query("to"); s != "" {
+		t, err := time.Parse(time.DateOnly, s)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid to, use YYYY-MM-DD"})
+			return
+		}
+		// End-of-day so the inclusive contract holds for plans created at any time on `to`.
+		eod := t.Add(24*time.Hour - time.Nanosecond)
+		to = &eod
+	}
+
+	result, err := h.svc.ListPlans(c.Request.Context(), p, status, from, to)
 	if err != nil {
 		httpkit.Error(c, err)
 		return

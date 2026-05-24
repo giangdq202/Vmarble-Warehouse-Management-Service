@@ -74,7 +74,7 @@ type CancelPlanInput struct {
 type Service interface {
 	CreatePlan(ctx context.Context, in CreatePlanInput) (Plan, error)
 	GetPlan(ctx context.Context, planID uuid.UUID) (Plan, error)
-	ListPlans(ctx context.Context, p httpkit.PageParams, status string) (httpkit.PagedResult[Plan], error)
+	ListPlans(ctx context.Context, p httpkit.PageParams, status string, from, to *time.Time) (httpkit.PagedResult[Plan], error)
 	LookupPlans(ctx context.Context, in LookupPlansInput) (httpkit.PagedResult[PlanLookupItem], error)
 	ApprovePlan(ctx context.Context, planID uuid.UUID) error
 	CancelPlan(ctx context.Context, in CancelPlanInput) error

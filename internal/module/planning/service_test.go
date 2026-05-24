@@ -28,6 +28,8 @@ type mockStore struct {
 	selectPlansErr    error
 	selectPlansSearch string
 	selectPlansStatus string
+	selectPlansFrom   *time.Time
+	selectPlansTo     *time.Time
 
 	// selectPlansLookup
 	selectLookupResult       []PlanLookupItem
@@ -78,9 +80,11 @@ func (m *mockStore) insertPlan(_ context.Context, _ Plan) error {
 	return m.insertPlanErr
 }
 
-func (m *mockStore) selectPlansPaged(_ context.Context, p httpkit.PageParams, status string) ([]Plan, int, error) {
+func (m *mockStore) selectPlansPaged(_ context.Context, p httpkit.PageParams, status string, createdFrom, createdTo *time.Time) ([]Plan, int, error) {
 	m.selectPlansSearch = p.Search
 	m.selectPlansStatus = status
+	m.selectPlansFrom = createdFrom
+	m.selectPlansTo = createdTo
 	return m.selectPlansResult, len(m.selectPlansResult), m.selectPlansErr
 }
 
@@ -433,7 +437,7 @@ func TestListPlans_PopulatesItems(t *testing.T) {
 	}
 
 	svc := NewService(st)
-	plans, err := svc.ListPlans(context.Background(), httpkit.PageParams{Page: 1, Limit: 10}, "")
+	plans, err := svc.ListPlans(context.Background(), httpkit.PageParams{Page: 1, Limit: 10}, "", nil, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -452,7 +456,7 @@ func TestListPlans_Empty_ReturnsNil(t *testing.T) {
 	st := &mockStore{selectPlansResult: nil}
 
 	svc := NewService(st)
-	plans, err := svc.ListPlans(context.Background(), httpkit.PageParams{Page: 1, Limit: 10}, "")
+	plans, err := svc.ListPlans(context.Background(), httpkit.PageParams{Page: 1, Limit: 10}, "", nil, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -466,7 +470,7 @@ func TestListPlans_SelectPlansError_Propagates(t *testing.T) {
 	st := &mockStore{selectPlansErr: dbErr}
 
 	svc := NewService(st)
-	_, err := svc.ListPlans(context.Background(), httpkit.PageParams{Page: 1, Limit: 10}, "")
+	_, err := svc.ListPlans(context.Background(), httpkit.PageParams{Page: 1, Limit: 10}, "", nil, nil)
 
 	if !errors.Is(err, dbErr) {
 		t.Errorf("expected selectPlans error to propagate, got %v", err)
@@ -482,7 +486,7 @@ func TestListPlans_SelectItemsError_Propagates(t *testing.T) {
 	}
 
 	svc := NewService(st)
-	_, err := svc.ListPlans(context.Background(), httpkit.PageParams{Page: 1, Limit: 10}, "")
+	_, err := svc.ListPlans(context.Background(), httpkit.PageParams{Page: 1, Limit: 10}, "", nil, nil)
 
 	if !errors.Is(err, dbErr) {
 		t.Errorf("expected selectPlanItemsByPlanID error to propagate in ListPlans, got %v", err)
@@ -896,7 +900,7 @@ func TestListPlans_SearchAndPOCodeContract(t *testing.T) {
 	}
 
 	svc := NewService(st)
-	plans, err := svc.ListPlans(context.Background(), httpkit.PageParams{Page: 1, Limit: 20, Search: "PO-001"}, "APPROVED")
+	plans, err := svc.ListPlans(context.Background(), httpkit.PageParams{Page: 1, Limit: 20, Search: "PO-001"}, "APPROVED", nil, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -914,6 +918,57 @@ func TestListPlans_SearchAndPOCodeContract(t *testing.T) {
 	}
 	if len(plans.Items[0].Items) == 0 {
 		t.Error("Items must still be populated")
+	}
+}
+
+func TestListPlans_DateRange_ForwardedToStore(t *testing.T) {
+	from := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
+	to := time.Date(2026, 5, 31, 23, 59, 59, 0, time.UTC)
+
+	st := &mockStore{selectPlansResult: nil}
+	svc := NewService(st)
+
+	if _, err := svc.ListPlans(
+		context.Background(),
+		httpkit.PageParams{Page: 1, Limit: 10},
+		"",
+		&from,
+		&to,
+	); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if st.selectPlansFrom == nil || !st.selectPlansFrom.Equal(from) {
+		t.Errorf("from forwarded = %v, want %v", st.selectPlansFrom, from)
+	}
+	if st.selectPlansTo == nil || !st.selectPlansTo.Equal(to) {
+		t.Errorf("to forwarded = %v, want %v", st.selectPlansTo, to)
+	}
+}
+
+func TestListPlans_FromAfterTo_Returns400(t *testing.T) {
+	from := time.Date(2026, 5, 31, 0, 0, 0, 0, time.UTC)
+	to := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
+
+	st := &mockStore{}
+	svc := NewService(st)
+
+	_, err := svc.ListPlans(
+		context.Background(),
+		httpkit.PageParams{Page: 1, Limit: 10},
+		"",
+		&from,
+		&to,
+	)
+	if err == nil {
+		t.Fatal("expected error for from > to, got nil")
+	}
+	var bizErr *domain.BizError
+	if !errors.As(err, &bizErr) {
+		t.Fatalf("expected BizError, got %T (%v)", err, err)
+	}
+	if bizErr.Sentinel != domain.ErrInvalidInput {
+		t.Errorf("sentinel = %v, want ErrInvalidInput", bizErr.Sentinel)
 	}
 }
 
