@@ -164,14 +164,19 @@ func validCreateInput(items ...PlanItemInput) CreatePlanInput {
 		}
 	}
 	return CreatePlanInput{
-		POID:  uuid.New(),
+		POID:  newPOID(),
 		Items: items,
 	}
 }
 
 func draftPlan(id uuid.UUID) Plan {
-	return Plan{ID: id, POID: uuid.New(), Status: domain.PlanDraft, CreatedAt: time.Now().UTC()}
+	return Plan{ID: id, POID: newPOID(), Status: domain.PlanDraft, CreatedAt: time.Now().UTC()}
 }
+
+// newPOID returns a fresh *uuid.UUID for tests where exactly one of POID/SOID
+// must be non-nil per chk_plan_root. Inlining `id := uuid.New(); &id` would
+// drown the table-driven tests in noise.
+func newPOID() *uuid.UUID { id := uuid.New(); return &id }
 
 // ── TestCreatePlan ────────────────────────────────────────────────────────────
 
@@ -265,7 +270,7 @@ func TestCreatePlan_MultipleItems_AllLinkedToPlan(t *testing.T) {
 }
 
 func TestCreatePlan_NoItems_ReturnsErrInvalidInput(t *testing.T) {
-	in := CreatePlanInput{POID: uuid.New(), Items: []PlanItemInput{}}
+	in := CreatePlanInput{POID: newPOID(), Items: []PlanItemInput{}}
 
 	svc := NewService(&mockStore{})
 	_, err := svc.CreatePlan(context.Background(), in)
@@ -276,7 +281,7 @@ func TestCreatePlan_NoItems_ReturnsErrInvalidInput(t *testing.T) {
 }
 
 func TestCreatePlan_NilItems_ReturnsErrInvalidInput(t *testing.T) {
-	in := CreatePlanInput{POID: uuid.New(), Items: nil}
+	in := CreatePlanInput{POID: newPOID(), Items: nil}
 
 	svc := NewService(&mockStore{})
 	_, err := svc.CreatePlan(context.Background(), in)
@@ -891,7 +896,7 @@ func TestListPlans_SearchAndPOCodeContract(t *testing.T) {
 		selectPlansResult: []Plan{{
 			ID:        planID,
 			Code:      "KH-2026-001",
-			POID:      uuid.New(),
+			POID:      newPOID(),
 			POCode:    "PO-001",
 			Status:    domain.PlanApproved,
 			CreatedAt: time.Now().UTC(),

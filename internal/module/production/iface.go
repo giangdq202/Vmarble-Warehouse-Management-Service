@@ -22,6 +22,11 @@ type CreateWOInput struct {
 	// claims (not accepted from the request body). Used as the actor for the
 	// REMNANT_BYPASSED audit row.
 	CallerID *uuid.UUID `json:"-"`
+	// SalesOrderLineID, when set, links the WO back to a sales_order_lines row
+	// for traceability. Populated by the sales module's split-to-plan adapter;
+	// nil for legacy/PO-rooted plans. Carry-over WOs (#292) inherit this from
+	// the parent.
+	SalesOrderLineID *uuid.UUID `json:"-"`
 }
 
 type WorkOrder struct {
@@ -37,7 +42,10 @@ type WorkOrder struct {
 	AssignedAt     *time.Time             `json:"assigned_at,omitempty"`
 	EstimatedHours *float64               `json:"estimated_hours,omitempty"`
 	MachineSlotID  *uuid.UUID             `json:"machine_slot_id,omitempty"`
-	CreatedAt      time.Time              `json:"created_at"`
+	// SalesOrderLineID, when set, links the WO back to a sales_order_lines row
+	// (Phase A pivot). Nullable so legacy/PO-rooted WOs read fine without it.
+	SalesOrderLineID *uuid.UUID `json:"sales_order_line_id,omitempty"`
+	CreatedAt        time.Time  `json:"created_at"`
 }
 
 type WorkOrderListFilter struct {

@@ -95,12 +95,13 @@ func (svc *service) CreateWorkOrder(ctx context.Context, in CreateWOInput) (Work
 
 	now := time.Now()
 	wo := WorkOrder{
-		ID:        uuid.New(),
-		PlanID:    in.PlanID,
-		SKUID:     in.SKUID,
-		Quantity:  in.Quantity,
-		Status:    domain.WOPlanned,
-		CreatedAt: now,
+		ID:               uuid.New(),
+		PlanID:           in.PlanID,
+		SKUID:            in.SKUID,
+		Quantity:         in.Quantity,
+		Status:           domain.WOPlanned,
+		SalesOrderLineID: in.SalesOrderLineID,
+		CreatedAt:        now,
 	}
 	if err := svc.s.insertWorkOrder(ctx, wo); err != nil {
 		return WorkOrder{}, err

@@ -9,8 +9,14 @@ import (
 	"github.com/vmarble/warehouse-management-service/internal/platform/httpkit"
 )
 
+// CreatePlanInput requires exactly one of POID or SOID to be non-nil:
+//   - POID set: legacy/internal manufacturing flow (purchase order root).
+//   - SOID set: Demo-2 customer-driven flow (sales order root).
+// The DB enforces this via chk_plan_root; the service rejects with
+// ErrInvalidInput before insert when both or neither are provided.
 type CreatePlanInput struct {
-	POID     uuid.UUID       `json:"po_id"`
+	POID     *uuid.UUID      `json:"po_id,omitempty"`
+	SOID     *uuid.UUID      `json:"sales_order_id,omitempty"`
 	Items    []PlanItemInput `json:"items"`
 	Deadline *time.Time      `json:"deadline,omitempty"`
 }
@@ -23,8 +29,10 @@ type PlanItemInput struct {
 type Plan struct {
 	ID             uuid.UUID         `json:"id"`
 	Code           string            `json:"code"`
-	POID           uuid.UUID         `json:"po_id"`
+	POID           *uuid.UUID        `json:"po_id,omitempty"`
 	POCode         string            `json:"po_code,omitempty"`
+	SOID           *uuid.UUID        `json:"sales_order_id,omitempty"`
+	SOCode         string            `json:"sales_order_code,omitempty"`
 	Status         domain.PlanStatus `json:"status"`
 	Deadline       *time.Time        `json:"deadline,omitempty"`
 	Items          []PlanItem        `json:"items"`
@@ -43,10 +51,12 @@ type PlanItem struct {
 
 // PlanLookupItem is a lightweight projection used by the async combobox lookup.
 // It omits PlanItems to avoid N+1 hydration over large datasets.
+// Exactly one of POCode/SOCode is non-empty per row, mirroring chk_plan_root.
 type PlanLookupItem struct {
 	ID       uuid.UUID         `json:"id"`
 	Code     string            `json:"code"`
 	POCode   string            `json:"po_code,omitempty"`
+	SOCode   string            `json:"sales_order_code,omitempty"`
 	Status   domain.PlanStatus `json:"status"`
 	Deadline *time.Time        `json:"deadline,omitempty"`
 }
