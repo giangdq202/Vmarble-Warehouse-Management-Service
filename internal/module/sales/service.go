@@ -438,11 +438,7 @@ func (svc *service) SplitToPlan(ctx context.Context, in SplitToPlanInput) (Split
 			"split partially applied: plan "+pres.PlanCode+" was created but qty_planned failed to update — manual reconcile required ("+err.Error()+")")
 	}
 
-	return SplitToPlanResult{
-		PlanID:       pres.PlanID,
-		PlanCode:     pres.PlanCode,
-		WorkOrderIDs: pres.WorkOrderIDs,
-	}, nil
+	return SplitToPlanResult(pres), nil
 }
 
 // ── helpers ──────────────────────────────────────────────────────────────────
