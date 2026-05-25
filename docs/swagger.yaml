@@ -295,6 +295,40 @@ definitions:
       total_pages:
         type: integer
     type: object
+  github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_sales_Customer:
+    properties:
+      current_page:
+        type: integer
+      items:
+        items:
+          $ref: '#/definitions/internal_module_sales.Customer'
+        type: array
+      limit:
+        type: integer
+      total_is_estimate:
+        type: boolean
+      total_items:
+        type: integer
+      total_pages:
+        type: integer
+    type: object
+  github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_sales_SalesOrder:
+    properties:
+      current_page:
+        type: integer
+      items:
+        items:
+          $ref: '#/definitions/internal_module_sales.SalesOrder'
+        type: array
+      limit:
+        type: integer
+      total_is_estimate:
+        type: boolean
+      total_items:
+        type: integer
+      total_pages:
+        type: integer
+    type: object
   internal_module_authn.CreateUserInput:
     properties:
       email:
@@ -1299,6 +1333,8 @@ definitions:
         type: array
       po_id:
         type: string
+      sales_order_id:
+        type: string
     type: object
   internal_module_planning.Plan:
     properties:
@@ -1323,6 +1359,10 @@ definitions:
       po_code:
         type: string
       po_id:
+        type: string
+      sales_order_code:
+        type: string
+      sales_order_id:
         type: string
       status:
         $ref: '#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.PlanStatus'
@@ -1354,6 +1394,8 @@ definitions:
       id:
         type: string
       po_code:
+        type: string
+      sales_order_code:
         type: string
       status:
         $ref: '#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.PlanStatus'
@@ -1547,6 +1589,11 @@ definitions:
         type: string
       quantity:
         type: integer
+      sales_order_line_id:
+        description: |-
+          SalesOrderLineID, when set, links the WO back to a sales_order_lines row
+          (Phase A pivot). Nullable so legacy/PO-rooted WOs read fine without it.
+        type: string
       sku_code:
         type: string
       sku_dimensions:
@@ -1636,6 +1683,202 @@ definitions:
       status:
         $ref: '#/definitions/internal_module_purchasing.POStatus'
       supplier:
+        type: string
+    type: object
+  internal_module_sales.CreateCustomerInput:
+    properties:
+      address:
+        type: string
+      code:
+        type: string
+      contact_email:
+        type: string
+      contact_person:
+        type: string
+      contact_phone:
+        type: string
+      country_code:
+        type: string
+      name:
+        type: string
+    type: object
+  internal_module_sales.CreateSOInput:
+    properties:
+      currency:
+        type: string
+      customer_id:
+        type: string
+      expected_ship_date:
+        type: string
+      incoterm:
+        type: string
+      lines:
+        items:
+          $ref: '#/definitions/internal_module_sales.CreateSOLineInput'
+        type: array
+      note:
+        type: string
+      port_of_discharge:
+        type: string
+      port_of_loading:
+        type: string
+    type: object
+  internal_module_sales.CreateSOLineInput:
+    properties:
+      qty_ordered:
+        type: integer
+      sku_id:
+        type: string
+      unit_price:
+        $ref: '#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.Money'
+    type: object
+  internal_module_sales.Customer:
+    properties:
+      address:
+        type: string
+      code:
+        type: string
+      contact_email:
+        type: string
+      contact_person:
+        type: string
+      contact_phone:
+        type: string
+      country_code:
+        type: string
+      created_at:
+        type: string
+      id:
+        type: string
+      is_active:
+        type: boolean
+      name:
+        type: string
+    type: object
+  internal_module_sales.SalesOrder:
+    properties:
+      code:
+        type: string
+      created_at:
+        type: string
+      created_by:
+        type: string
+      currency:
+        type: string
+      customer_code:
+        type: string
+      customer_country_code:
+        type: string
+      customer_id:
+        type: string
+      customer_name:
+        type: string
+      expected_ship_date:
+        type: string
+      id:
+        type: string
+      incoterm:
+        type: string
+      lines:
+        items:
+          $ref: '#/definitions/internal_module_sales.SalesOrderLine'
+        type: array
+      note:
+        type: string
+      port_of_discharge:
+        type: string
+      port_of_loading:
+        type: string
+      status:
+        type: string
+    type: object
+  internal_module_sales.SalesOrderLine:
+    properties:
+      created_at:
+        type: string
+      id:
+        type: string
+      qty_ordered:
+        type: integer
+      qty_planned:
+        type: integer
+      qty_shipped:
+        type: integer
+      sales_order_id:
+        type: string
+      sku_id:
+        type: string
+      unit_price:
+        $ref: '#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.Money'
+    type: object
+  internal_module_sales.SplitAllocation:
+    properties:
+      quantity:
+        type: integer
+      so_line_id:
+        type: string
+    type: object
+  internal_module_sales.SplitToPlanResult:
+    properties:
+      plan_code:
+        type: string
+      plan_id:
+        type: string
+      work_order_ids:
+        items:
+          type: string
+        type: array
+    type: object
+  internal_module_sales.cancelSORequest:
+    properties:
+      reason:
+        type: string
+    type: object
+  internal_module_sales.patchCustomerRequest:
+    properties:
+      address:
+        type: string
+      contact_email:
+        type: string
+      contact_person:
+        type: string
+      contact_phone:
+        type: string
+      country_code:
+        type: string
+      is_active:
+        type: boolean
+      name:
+        type: string
+    type: object
+  internal_module_sales.patchSORequest:
+    properties:
+      clear_expected_ship_date:
+        type: boolean
+      currency:
+        type: string
+      expected_ship_date:
+        type: string
+      incoterm:
+        type: string
+      lines:
+        items:
+          $ref: '#/definitions/internal_module_sales.CreateSOLineInput'
+        type: array
+      note:
+        type: string
+      port_of_discharge:
+        type: string
+      port_of_loading:
+        type: string
+    type: object
+  internal_module_sales.splitToPlanRequest:
+    properties:
+      allocations:
+        items:
+          $ref: '#/definitions/internal_module_sales.SplitAllocation'
+        type: array
+      deadline:
         type: string
     type: object
 info:
@@ -2517,6 +2760,131 @@ paths:
       summary: Per-material waste-cost ledger (BR-C03)
       tags:
       - costing
+  /api/v1/customers:
+    get:
+      parameters:
+      - description: page number (default 1)
+        in: query
+        name: page
+        type: integer
+      - description: items per page (default 10, max 100)
+        in: query
+        name: limit
+        type: integer
+      - description: only active customers (default false)
+        in: query
+        name: active_only
+        type: boolean
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_sales_Customer'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: List customers
+      tags:
+      - sales
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: payload
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_module_sales.CreateCustomerInput'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/internal_module_sales.Customer'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Create customer
+      tags:
+      - sales
+  /api/v1/customers/{id}:
+    patch:
+      consumes:
+      - application/json
+      parameters:
+      - description: customer id (uuid)
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: fields to update
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_module_sales.patchCustomerRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_module_sales.Customer'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Patch customer
+      tags:
+      - sales
   /api/v1/dashboard/board-stock-summary:
     get:
       description: Returns available and allocated whole board sheet counts and total
@@ -4880,6 +5248,336 @@ paths:
       summary: Export work orders to Excel
       tags:
       - reports
+  /api/v1/sales-orders:
+    get:
+      parameters:
+      - description: page number (default 1)
+        in: query
+        name: page
+        type: integer
+      - description: items per page (default 10, max 100)
+        in: query
+        name: limit
+        type: integer
+      - description: filter by status (DRAFT, CONFIRMED, IN_PRODUCTION, PARTIALLY_SHIPPED,
+          SHIPPED, CANCELLED)
+        in: query
+        name: status
+        type: string
+      - description: filter by customer uuid
+        in: query
+        name: customer_id
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_sales_SalesOrder'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: List sales orders
+      tags:
+      - sales
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: payload
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_module_sales.CreateSOInput'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/internal_module_sales.SalesOrder'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Create sales order (DRAFT)
+      tags:
+      - sales
+  /api/v1/sales-orders/{id}:
+    get:
+      parameters:
+      - description: sales order id (uuid)
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_module_sales.SalesOrder'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Get sales order with lines
+      tags:
+      - sales
+    patch:
+      consumes:
+      - application/json
+      parameters:
+      - description: sales order id (uuid)
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: fields to update
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_module_sales.patchSORequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_module_sales.SalesOrder'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "409":
+          description: Conflict
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Patch sales order (DRAFT only)
+      tags:
+      - sales
+  /api/v1/sales-orders/{id}/cancel:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: sales order id (uuid)
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: cancellation reason
+        in: body
+        name: body
+        schema:
+          $ref: '#/definitions/internal_module_sales.cancelSORequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "409":
+          description: Conflict
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Cancel sales order
+      tags:
+      - sales
+  /api/v1/sales-orders/{id}/confirm:
+    post:
+      parameters:
+      - description: sales order id (uuid)
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "409":
+          description: Conflict
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Confirm sales order (DRAFT → CONFIRMED)
+      tags:
+      - sales
+  /api/v1/sales-orders/{id}/split-to-plan:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: sales order id (uuid)
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: allocations + optional deadline
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_module_sales.splitToPlanRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/internal_module_sales.SplitToPlanResult'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "409":
+          description: Conflict
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "412":
+          description: Precondition Failed
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Split sales order lines into a production plan + work orders
+      tags:
+      - sales
   /api/v1/skus:
     get:
       parameters:

@@ -26,6 +26,7 @@ import (
 	"github.com/vmarble/warehouse-management-service/internal/module/production"
 	"github.com/vmarble/warehouse-management-service/internal/module/purchasing"
 	"github.com/vmarble/warehouse-management-service/internal/module/reports"
+	"github.com/vmarble/warehouse-management-service/internal/module/sales"
 	"github.com/vmarble/warehouse-management-service/internal/platform/auth"
 	"github.com/vmarble/warehouse-management-service/internal/platform/config"
 	"github.com/vmarble/warehouse-management-service/internal/platform/events"
@@ -84,6 +85,7 @@ func main() {
 	dashboardStore := dashboard.NewPGStore(pool)
 	barcodeStore := barcode.NewPGStore(pool)
 	purchasingStore := purchasing.NewPGStore(pool)
+	salesStore := sales.NewPGStore(pool)
 
 	// ── Module services ─────────────────────────────────────
 	authnSvc := authn.NewService(authnStore, cfg.AuthSecret)
@@ -161,6 +163,16 @@ func main() {
 		&reportsWasteAdapter{svc: costingSvc},
 	)
 
+	// Sales depends on catalog (SKU existence) + planning + production (split-to-plan).
+	// Constructed last so the splitter adapter can reference both planningSvc
+	// and productionSvc directly without the post-wire trampoline pattern used
+	// for the cyclical adapters above.
+	salesSvc := sales.NewService(
+		salesStore,
+		&salesSKUAdapter{svc: catalogSvc},
+		&salesProductionSplitterAdapter{planSvc: planningSvc, woSvc: productionSvc},
+	)
+
 	// ── Background: auto-release expired remnant allocations ─────────────────
 	// Ticks every cfg.RemnantAllocCheckInterval. Remnants that have been
 	// ALLOCATED for longer than cfg.RemnantAllocTimeout without being consumed
@@ -216,6 +228,7 @@ func main() {
 	events.NewHandler(eventBroker).Register(api)
 	purchasing.NewHandler(purchasingSvc).Register(api)
 	reports.NewHandler(reportsSvc).Register(api)
+	sales.NewHandler(salesSvc).Register(api)
 
 	srv := &http.Server{
 		Addr:         ":" + cfg.Port,
@@ -410,11 +423,18 @@ func (a *cutBarcodeAdapter) GenerateForCut(ctx context.Context, in inventory.Bar
 	if err != nil {
 		return inventory.BarcodeForCutOutput{}, err
 	}
+	// Cutting barcodes carry the originating PO id for traceability. SO-rooted
+	// plans (Phase A pivot) leave it zero — the FG barcode flow (#291) is the
+	// real customer-facing label and will use the SO id directly.
+	var planPOID uuid.UUID
+	if plan.POID != nil {
+		planPOID = *plan.POID
+	}
 
 	wip, err := a.barcodeSvc.GenerateBarcode(ctx, barcode.GenerateBarcodeInput{
 		WorkOrderID:      in.WorkOrderID,
 		SKUID:            wo.SKUID,
-		POID:             plan.POID,
+		POID:             planPOID,
 		ProductionPlanID: wo.PlanID,
 		SKUCode:          sku.Code,
 		SKUName:          sku.Name,
@@ -430,7 +450,7 @@ func (a *cutBarcodeAdapter) GenerateForCut(ctx context.Context, in inventory.Bar
 		remnant, err := a.barcodeSvc.GenerateBarcode(ctx, barcode.GenerateBarcodeInput{
 			WorkOrderID:      in.WorkOrderID,
 			SKUID:            wo.SKUID,
-			POID:             plan.POID,
+			POID:             planPOID,
 			ProductionPlanID: wo.PlanID,
 			SKUCode:          sku.Code,
 			SKUName:          sku.Name + " [REMNANT]",
@@ -804,4 +824,77 @@ func (a *costingAuditAdapter) LogCostingAdjustment(ctx context.Context, in costi
 		in.AdjustmentID, in.ActorID, in.Reason, meta,
 	)
 	return err
+}
+
+// salesSKUAdapter implements sales.SKUChecker by delegating to catalog.GetSKU.
+// Sales only needs existence + a slim projection — not pricing, not BOM —
+// so the adapter trims the catalog SKU down to the three fields the sales
+// service treats as authoritative.
+type salesSKUAdapter struct {
+	svc catalog.Service
+}
+
+func (a *salesSKUAdapter) GetSKU(ctx context.Context, skuID uuid.UUID) (sales.SKUInfo, error) {
+	s, err := a.svc.GetSKU(ctx, skuID)
+	if err != nil {
+		return sales.SKUInfo{}, err
+	}
+	return sales.SKUInfo{ID: s.ID, Code: s.Code, Name: s.Name}, nil
+}
+
+// salesProductionSplitterAdapter implements sales.ProductionSplitter. It
+// composes planning.CreatePlan + production.CreateWorkOrder per item to
+// realize a SplitToPlan request from sales.
+//
+// The plan is created with SOID set (no PO) — supported since the planning
+// refactor that landed alongside #289. Each WO carries SalesOrderLineID so
+// the SO → Plan → WO lineage survives end-to-end.
+//
+// Atomicity caveat (mirrored in sales/deps.go): plan + WOs are inserted
+// across two cross-module calls, not a single pool-level transaction. If a
+// WO insert fails after the plan is created, the plan is left as DRAFT and
+// the orphan is flagged via the returned error. Sales' own qty_planned
+// mutation runs in a third, separate transaction; see service.go SplitToPlan
+// for the full failure mode contract.
+type salesProductionSplitterAdapter struct {
+	planSvc planning.Service
+	woSvc   production.Service
+}
+
+func (a *salesProductionSplitterAdapter) CreatePlanWithWOs(ctx context.Context, in sales.CreatePlanWithWOsRequest) (sales.CreatePlanWithWOsResult, error) {
+	planItems := make([]planning.PlanItemInput, len(in.Items))
+	for i, it := range in.Items {
+		planItems[i] = planning.PlanItemInput{SKUID: it.SKUID, Quantity: it.Quantity}
+	}
+	soID := in.SalesOrderID
+	plan, err := a.planSvc.CreatePlan(ctx, planning.CreatePlanInput{
+		SOID:     &soID,
+		Items:    planItems,
+		Deadline: in.Deadline,
+	})
+	if err != nil {
+		return sales.CreatePlanWithWOsResult{}, err
+	}
+
+	woIDs := make([]uuid.UUID, 0, len(in.Items))
+	for _, it := range in.Items {
+		soLineID := it.SOLineID
+		actorID := in.ActorID
+		wo, err := a.woSvc.CreateWorkOrder(ctx, production.CreateWOInput{
+			PlanID:           plan.ID,
+			SKUID:            it.SKUID,
+			Quantity:         it.Quantity,
+			SalesOrderLineID: &soLineID,
+			CallerID:         &actorID,
+		})
+		if err != nil {
+			return sales.CreatePlanWithWOsResult{}, err
+		}
+		woIDs = append(woIDs, wo.ID)
+	}
+	return sales.CreatePlanWithWOsResult{
+		PlanID:       plan.ID,
+		PlanCode:     plan.Code,
+		WorkOrderIDs: woIDs,
+	}, nil
 }

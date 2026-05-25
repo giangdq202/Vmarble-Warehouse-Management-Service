@@ -24,29 +24,26 @@ func NewPGStore(pool *pgxpool.Pool) store {
 
 func (s *pgStore) insertWorkOrder(ctx context.Context, wo WorkOrder) error {
 	_, err := s.pool.Exec(ctx,
-		`INSERT INTO work_orders (id, plan_id, sku_id, quantity, status, created_at)
-		 VALUES ($1, $2, $3, $4, $5, $6)`,
-		wo.ID, wo.PlanID, wo.SKUID, wo.Quantity, wo.Status, wo.CreatedAt,
+		`INSERT INTO work_orders (id, plan_id, sku_id, quantity, status, sales_order_line_id, created_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+		wo.ID, wo.PlanID, wo.SKUID, wo.Quantity, wo.Status, wo.SalesOrderLineID, wo.CreatedAt,
 	)
 	return err
 }
 
-// scanWorkOrder reads the 14-column projection used by all SELECT queries.
-// Columns: wo.id, wo.plan_id, wo.sku_id, s.code, s.name, s.length_mm, s.width_mm,
-//
-//	wo.quantity, wo.status, wo.assigned_to, wo.assigned_at, wo.created_at,
-//	wo.estimated_hours, wo.machine_slot_id
+// scanWorkOrder reads the standard projection used by all SELECT queries.
+// Columns must match selectWOCols below.
 func scanWorkOrder(row interface {
 	Scan(...any) error
 }) (WorkOrder, error) {
 	var wo WorkOrder
 	var estimatedHours sql.NullFloat64
-	var machineSlotID uuid.NullUUID
+	var machineSlotID, salesOrderLineID uuid.NullUUID
 	err := row.Scan(
 		&wo.ID, &wo.PlanID, &wo.SKUID, &wo.SKUCode, &wo.SKUName,
 		&wo.SKUDimensions.LengthMM, &wo.SKUDimensions.WidthMM,
 		&wo.Quantity, &wo.Status, &wo.AssignedTo, &wo.AssignedAt, &wo.CreatedAt,
-		&estimatedHours, &machineSlotID,
+		&estimatedHours, &machineSlotID, &salesOrderLineID,
 	)
 	if estimatedHours.Valid {
 		wo.EstimatedHours = &estimatedHours.Float64
@@ -54,6 +51,10 @@ func scanWorkOrder(row interface {
 	if machineSlotID.Valid {
 		v := machineSlotID.UUID
 		wo.MachineSlotID = &v
+	}
+	if salesOrderLineID.Valid {
+		v := salesOrderLineID.UUID
+		wo.SalesOrderLineID = &v
 	}
 	return wo, err
 }
@@ -67,7 +68,7 @@ const selectWOCols = `
 	COALESCE(s.length_mm, 0) AS sku_length_mm,
 	COALESCE(s.width_mm, 0)  AS sku_width_mm,
 	wo.quantity, wo.status, wo.assigned_to, wo.assigned_at, wo.created_at,
-	wo.estimated_hours, wo.machine_slot_id
+	wo.estimated_hours, wo.machine_slot_id, wo.sales_order_line_id
 FROM work_orders wo
 LEFT JOIN skus s ON s.id = wo.sku_id`
 

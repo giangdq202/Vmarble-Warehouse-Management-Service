@@ -26,6 +26,12 @@ func NewServiceWithDeps(s store, wo WorkOrderCanceller) Service {
 }
 
 func (svc *service) CreatePlan(ctx context.Context, in CreatePlanInput) (Plan, error) {
+	// Exactly one of POID/SOID must be set — DB enforces via chk_plan_root,
+	// but we reject early so the planner gets a clear ErrInvalidInput rather
+	// than a 23514 from Postgres.
+	if (in.POID == nil) == (in.SOID == nil) {
+		return Plan{}, domain.NewBizError(domain.ErrInvalidInput, "exactly one of po_id or sales_order_id is required")
+	}
 	if len(in.Items) == 0 {
 		return Plan{}, domain.NewBizError(domain.ErrInvalidInput, "at least one item is required")
 	}
@@ -45,6 +51,7 @@ func (svc *service) CreatePlan(ctx context.Context, in CreatePlanInput) (Plan, e
 		ID:        uuid.New(),
 		Code:      code,
 		POID:      in.POID,
+		SOID:      in.SOID,
 		Status:    domain.PlanDraft,
 		Deadline:  in.Deadline,
 		CreatedAt: now,

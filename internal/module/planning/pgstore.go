@@ -33,9 +33,9 @@ func (s *pgStore) nextPlanCode(ctx context.Context, year int) (string, error) {
 
 func (s *pgStore) insertPlan(ctx context.Context, p Plan) error {
 	_, err := s.pool.Exec(ctx,
-		`INSERT INTO production_plans (id, code, po_id, status, deadline, created_at)
-		 VALUES ($1, $2, $3, $4, $5, $6)`,
-		p.ID, p.Code, p.POID, p.Status, p.Deadline, p.CreatedAt,
+		`INSERT INTO production_plans (id, code, po_id, sales_order_id, status, deadline, created_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+		p.ID, p.Code, p.POID, p.SOID, p.Status, p.Deadline, p.CreatedAt,
 	)
 	return err
 }
@@ -51,13 +51,16 @@ func (s *pgStore) selectPlansPaged(ctx context.Context, p httpkit.PageParams, st
 	}
 	search := "%" + p.Search + "%"
 
+	// LEFT JOIN both purchase_orders and sales_orders since a plan is rooted by
+	// exactly one of them (chk_plan_root). Search ILIKE matches either root code.
 	var total int
 	if err := s.pool.QueryRow(ctx,
 		`SELECT COUNT(*)
 		   FROM production_plans pp
-		   JOIN purchase_orders po ON po.id = pp.po_id
+		   LEFT JOIN purchase_orders po ON po.id = pp.po_id
+		   LEFT JOIN sales_orders   so ON so.id = pp.sales_order_id
 		  WHERE ($1::text = '' OR pp.status = $1)
-		    AND ($2::text = '' OR pp.code ILIKE $2 OR po.code ILIKE $2)
+		    AND ($2::text = '' OR pp.code ILIKE $2 OR po.code ILIKE $2 OR so.code ILIKE $2)
 		    AND ($3::timestamptz IS NULL OR pp.created_at >= $3)
 		    AND ($4::timestamptz IS NULL OR pp.created_at <= $4)`,
 		status, search, createdFrom, createdTo,
@@ -66,12 +69,16 @@ func (s *pgStore) selectPlansPaged(ctx context.Context, p httpkit.PageParams, st
 	}
 
 	query := fmt.Sprintf(
-		`SELECT pp.id, pp.code, pp.po_id, po.code AS po_code, pp.status, pp.deadline, pp.created_at,
+		`SELECT pp.id, pp.code,
+		        pp.po_id, po.code AS po_code,
+		        pp.sales_order_id, so.code AS so_code,
+		        pp.status, pp.deadline, pp.created_at,
 		        pp.canceled_reason, pp.canceled_at, pp.canceled_by
 		   FROM production_plans pp
-		   JOIN purchase_orders po ON po.id = pp.po_id
+		   LEFT JOIN purchase_orders po ON po.id = pp.po_id
+		   LEFT JOIN sales_orders   so ON so.id = pp.sales_order_id
 		  WHERE ($1::text = '' OR pp.status = $1)
-		    AND ($2::text = '' OR pp.code ILIKE $2 OR po.code ILIKE $2)
+		    AND ($2::text = '' OR pp.code ILIKE $2 OR po.code ILIKE $2 OR so.code ILIKE $2)
 		    AND ($3::timestamptz IS NULL OR pp.created_at >= $3)
 		    AND ($4::timestamptz IS NULL OR pp.created_at <= $4)
 		  ORDER BY CASE WHEN pp.status = 'APPROVED' THEN 0 ELSE 1 END,
@@ -89,12 +96,21 @@ func (s *pgStore) selectPlansPaged(ctx context.Context, p httpkit.PageParams, st
 	var plans []Plan
 	for rows.Next() {
 		var plan Plan
-		var reason *string
+		var poCode, soCode, reason *string
 		if err := rows.Scan(
-			&plan.ID, &plan.Code, &plan.POID, &plan.POCode, &plan.Status, &plan.Deadline, &plan.CreatedAt,
+			&plan.ID, &plan.Code,
+			&plan.POID, &poCode,
+			&plan.SOID, &soCode,
+			&plan.Status, &plan.Deadline, &plan.CreatedAt,
 			&reason, &plan.CanceledAt, &plan.CanceledBy,
 		); err != nil {
 			return nil, 0, err
+		}
+		if poCode != nil {
+			plan.POCode = *poCode
+		}
+		if soCode != nil {
+			plan.SOCode = *soCode
 		}
 		if reason != nil {
 			plan.CanceledReason = *reason
@@ -106,21 +122,34 @@ func (s *pgStore) selectPlansPaged(ctx context.Context, p httpkit.PageParams, st
 
 func (s *pgStore) selectPlanByID(ctx context.Context, id uuid.UUID) (Plan, error) {
 	var p Plan
-	var reason *string
+	var poCode, soCode, reason *string
 	err := s.pool.QueryRow(ctx,
-		`SELECT pp.id, pp.code, pp.po_id, po.code AS po_code, pp.status, pp.deadline, pp.created_at,
+		`SELECT pp.id, pp.code,
+		        pp.po_id, po.code AS po_code,
+		        pp.sales_order_id, so.code AS so_code,
+		        pp.status, pp.deadline, pp.created_at,
 		        pp.canceled_reason, pp.canceled_at, pp.canceled_by
 		   FROM production_plans pp
-		   JOIN purchase_orders po ON po.id = pp.po_id
+		   LEFT JOIN purchase_orders po ON po.id = pp.po_id
+		   LEFT JOIN sales_orders   so ON so.id = pp.sales_order_id
 		  WHERE pp.id = $1`,
 		id,
-	).Scan(&p.ID, &p.Code, &p.POID, &p.POCode, &p.Status, &p.Deadline, &p.CreatedAt,
+	).Scan(&p.ID, &p.Code,
+		&p.POID, &poCode,
+		&p.SOID, &soCode,
+		&p.Status, &p.Deadline, &p.CreatedAt,
 		&reason, &p.CanceledAt, &p.CanceledBy)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return Plan{}, domain.ErrNotFound
 		}
 		return Plan{}, err
+	}
+	if poCode != nil {
+		p.POCode = *poCode
+	}
+	if soCode != nil {
+		p.SOCode = *soCode
 	}
 	if reason != nil {
 		p.CanceledReason = *reason
@@ -191,6 +220,8 @@ func (s *pgStore) selectPlanItemsByPlanID(ctx context.Context, planID uuid.UUID)
 // selectPlansLookup returns a lightweight slice for the async combobox.
 // Filters are all optional; when nil/empty they are skipped. Ordering favours
 // APPROVED plans and nearest non-null deadline for the combobox default view.
+// LEFT JOINs both root tables so PO-rooted and SO-rooted plans both surface
+// and the search term matches either root code.
 func (s *pgStore) selectPlansLookup(ctx context.Context, search, status string, deadlineFrom, deadlineTo *time.Time, limit, offset int) ([]PlanLookupItem, int, error) {
 	searchPat := "%" + search + "%"
 
@@ -198,9 +229,10 @@ func (s *pgStore) selectPlansLookup(ctx context.Context, search, status string, 
 	if err := s.pool.QueryRow(ctx,
 		`SELECT COUNT(*)
 		   FROM production_plans pp
-		   JOIN purchase_orders po ON po.id = pp.po_id
+		   LEFT JOIN purchase_orders po ON po.id = pp.po_id
+		   LEFT JOIN sales_orders   so ON so.id = pp.sales_order_id
 		  WHERE ($1::text = '' OR pp.status = $1)
-		    AND ($2::text = '' OR pp.code ILIKE $2 OR po.code ILIKE $2)
+		    AND ($2::text = '' OR pp.code ILIKE $2 OR po.code ILIKE $2 OR so.code ILIKE $2)
 		    AND ($3::date IS NULL OR pp.deadline >= $3)
 		    AND ($4::date IS NULL OR pp.deadline <= $4)`,
 		status, searchPat, deadlineFrom, deadlineTo,
@@ -209,11 +241,15 @@ func (s *pgStore) selectPlansLookup(ctx context.Context, search, status string, 
 	}
 
 	rows, err := s.pool.Query(ctx,
-		`SELECT pp.id, pp.code, po.code AS po_code, pp.status, pp.deadline
+		`SELECT pp.id, pp.code,
+		        po.code AS po_code,
+		        so.code AS so_code,
+		        pp.status, pp.deadline
 		   FROM production_plans pp
-		   JOIN purchase_orders po ON po.id = pp.po_id
+		   LEFT JOIN purchase_orders po ON po.id = pp.po_id
+		   LEFT JOIN sales_orders   so ON so.id = pp.sales_order_id
 		  WHERE ($1::text = '' OR pp.status = $1)
-		    AND ($2::text = '' OR pp.code ILIKE $2 OR po.code ILIKE $2)
+		    AND ($2::text = '' OR pp.code ILIKE $2 OR po.code ILIKE $2 OR so.code ILIKE $2)
 		    AND ($3::date IS NULL OR pp.deadline >= $3)
 		    AND ($4::date IS NULL OR pp.deadline <= $4)
 		  ORDER BY
@@ -232,8 +268,15 @@ func (s *pgStore) selectPlansLookup(ctx context.Context, search, status string, 
 	var items []PlanLookupItem
 	for rows.Next() {
 		var item PlanLookupItem
-		if err := rows.Scan(&item.ID, &item.Code, &item.POCode, &item.Status, &item.Deadline); err != nil {
+		var poCode, soCode *string
+		if err := rows.Scan(&item.ID, &item.Code, &poCode, &soCode, &item.Status, &item.Deadline); err != nil {
 			return nil, 0, err
+		}
+		if poCode != nil {
+			item.POCode = *poCode
+		}
+		if soCode != nil {
+			item.SOCode = *soCode
 		}
 		items = append(items, item)
 	}
