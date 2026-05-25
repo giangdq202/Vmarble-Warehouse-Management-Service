@@ -25,6 +25,13 @@ type Config struct {
 	// Configured via REMNANT_OVERFLOW_THRESHOLD_PCT. Values <=0 or >100 are
 	// normalized to module default in inventory.NewServiceWithOverflowThreshold.
 	RemnantOverflowThresholdPct float64 `env:"REMNANT_OVERFLOW_THRESHOLD_PCT" envDefault:"15"`
+
+	// ContainerCBMOverheadPct widens the CBM/weight cap on delivery.AddLine
+	// and TransferLine by this percentage. Real-world container loading rarely
+	// reaches the ISO max so allowing a small overhead keeps the API from
+	// rejecting realistic packing plans. 5% matches the operational tolerance
+	// the warehouse team has been using by hand.
+	ContainerCBMOverheadPct float64 `env:"CONTAINER_CBM_OVERHEAD_PCT" envDefault:"5"`
 }
 
 func Load() (Config, error) {

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/vmarble/warehouse-management-service/internal/domain"
 	"github.com/vmarble/warehouse-management-service/internal/platform/httpkit"
@@ -177,6 +178,14 @@ func (m *mockStore) updateSO(_ context.Context, _ SalesOrder) error {
 func (m *mockStore) updateSOStatus(_ context.Context, _ uuid.UUID, status string) error {
 	m.lastStatusUpdate = status
 	return m.updateSOStatusErr
+}
+
+func (m *mockStore) selectSOLineByID(_ context.Context, _ uuid.UUID) (SalesOrderLine, SalesOrder, error) {
+	return SalesOrderLine{}, SalesOrder{}, nil
+}
+
+func (m *mockStore) recordShipmentTx(_ context.Context, _ pgx.Tx, _ []ShipmentItemInput) error {
+	return nil
 }
 
 func (m *mockStore) withTx(ctx context.Context, fn func(tx txStore) error) error {

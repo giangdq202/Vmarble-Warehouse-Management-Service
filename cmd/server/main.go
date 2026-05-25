@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	swaggerFiles "github.com/swaggo/files"
 	ginSwagger "github.com/swaggo/gin-swagger"
@@ -20,6 +21,7 @@ import (
 	"github.com/vmarble/warehouse-management-service/internal/module/catalog"
 	"github.com/vmarble/warehouse-management-service/internal/module/costing"
 	"github.com/vmarble/warehouse-management-service/internal/module/dashboard"
+	"github.com/vmarble/warehouse-management-service/internal/module/delivery"
 	"github.com/vmarble/warehouse-management-service/internal/module/inventory"
 	"github.com/vmarble/warehouse-management-service/internal/module/order"
 	"github.com/vmarble/warehouse-management-service/internal/module/planning"
@@ -86,6 +88,7 @@ func main() {
 	barcodeStore := barcode.NewPGStore(pool)
 	purchasingStore := purchasing.NewPGStore(pool)
 	salesStore := sales.NewPGStore(pool)
+	deliveryStore := delivery.NewPGStore(pool)
 
 	// ── Module services ─────────────────────────────────────
 	authnSvc := authn.NewService(authnStore, cfg.AuthSecret)
@@ -173,6 +176,18 @@ func main() {
 		&salesProductionSplitterAdapter{planSvc: planningSvc, woSvc: productionSvc},
 	)
 
+	// Delivery depends on catalog (SKU existence) + sales (SO line lookup +
+	// the cross-module Tx hook for shipment recording at seal time). The
+	// salesShipmentAdapter / deliverySOLineAdapter live below; deliverySKUAdapter
+	// trims catalog.SKU down to the slim view delivery cares about.
+	deliverySvc := delivery.NewService(
+		deliveryStore,
+		&deliverySKUAdapter{svc: catalogSvc},
+		&deliverySOLineAdapter{svc: salesSvc},
+		&deliveryShipmentAdapter{svc: salesSvc},
+		cfg.ContainerCBMOverheadPct,
+	)
+
 	// ── Background: auto-release expired remnant allocations ─────────────────
 	// Ticks every cfg.RemnantAllocCheckInterval. Remnants that have been
 	// ALLOCATED for longer than cfg.RemnantAllocTimeout without being consumed
@@ -229,6 +244,7 @@ func main() {
 	purchasing.NewHandler(purchasingSvc).Register(api)
 	reports.NewHandler(reportsSvc).Register(api)
 	sales.NewHandler(salesSvc).Register(api)
+	delivery.NewHandler(deliverySvc).Register(api)
 
 	srv := &http.Server{
 		Addr:         ":" + cfg.Port,
@@ -897,4 +913,57 @@ func (a *salesProductionSplitterAdapter) CreatePlanWithWOs(ctx context.Context, 
 		PlanCode:     plan.Code,
 		WorkOrderIDs: woIDs,
 	}, nil
+}
+
+// deliverySKUAdapter implements delivery.SKUChecker by trimming catalog.SKU
+// down to the slim view delivery.AddLine validates against (existence + the
+// SKU code/name used in audit messages).
+type deliverySKUAdapter struct {
+	svc catalog.Service
+}
+
+func (a *deliverySKUAdapter) GetSKU(ctx context.Context, skuID uuid.UUID) (delivery.SKUInfo, error) {
+	s, err := a.svc.GetSKU(ctx, skuID)
+	if err != nil {
+		return delivery.SKUInfo{}, err
+	}
+	return delivery.SKUInfo{ID: s.ID, Code: s.Code, Name: s.Name}, nil
+}
+
+// deliverySOLineAdapter implements delivery.SOLineChecker by joining
+// sales.GetSOLine's two-tuple result into the slim projection delivery
+// uses for AddLine validation (matching SKU + SO status + qty math).
+type deliverySOLineAdapter struct {
+	svc sales.Service
+}
+
+func (a *deliverySOLineAdapter) GetSOLine(ctx context.Context, soLineID uuid.UUID) (delivery.SOLineInfo, error) {
+	line, so, err := a.svc.GetSOLine(ctx, soLineID)
+	if err != nil {
+		return delivery.SOLineInfo{}, err
+	}
+	return delivery.SOLineInfo{
+		ID:         line.ID,
+		SOID:       so.ID,
+		SOStatus:   so.Status,
+		SKUID:      line.SKUID,
+		QtyPlanned: line.QtyPlanned,
+		QtyShipped: line.QtyShipped,
+	}, nil
+}
+
+// deliveryShipmentAdapter implements delivery.ShipmentRecorder. The Tx the
+// caller hands in is delivery's own transaction — sales runs its qty_shipped
+// bump + SO status recompute inside it so seal is atomic. This is the
+// deliberate cross-module Tx leak documented in delivery/deps.go.
+type deliveryShipmentAdapter struct {
+	svc sales.Service
+}
+
+func (a *deliveryShipmentAdapter) RecordShipmentTx(ctx context.Context, tx pgx.Tx, items []delivery.ShipmentItem) error {
+	out := make([]sales.ShipmentItemInput, len(items))
+	for i, it := range items {
+		out[i] = sales.ShipmentItemInput{SOLineID: it.SOLineID, Qty: it.Qty}
+	}
+	return a.svc.RecordShipmentTx(ctx, tx, out)
 }

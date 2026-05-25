@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/vmarble/warehouse-management-service/internal/domain"
 	"github.com/vmarble/warehouse-management-service/internal/platform/httpkit"
@@ -439,6 +440,23 @@ func (svc *service) SplitToPlan(ctx context.Context, in SplitToPlanInput) (Split
 	}
 
 	return SplitToPlanResult(pres), nil
+}
+
+// ── Cross-module hooks (delivery → sales) ────────────────────────────────────
+
+// GetSOLine returns one line + its parent SO. Used by delivery.AddLine to
+// validate that the line belongs to a shippable SO and that the chosen SKU
+// matches.
+func (svc *service) GetSOLine(ctx context.Context, soLineID uuid.UUID) (SalesOrderLine, SalesOrder, error) {
+	return svc.s.selectSOLineByID(ctx, soLineID)
+}
+
+// RecordShipmentTx delegates to the store's transactional shipment writer.
+// The pgx.Tx is owned by the caller (delivery.Seal) so the entire seal —
+// container.status flip, qty_shipped bump, SO status recompute — runs in a
+// single transaction. See deps.go in delivery for the full contract.
+func (svc *service) RecordShipmentTx(ctx context.Context, tx pgx.Tx, items []ShipmentItemInput) error {
+	return svc.s.recordShipmentTx(ctx, tx, items)
 }
 
 // ── helpers ──────────────────────────────────────────────────────────────────

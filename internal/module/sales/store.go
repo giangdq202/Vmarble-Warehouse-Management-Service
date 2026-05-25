@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/vmarble/warehouse-management-service/internal/platform/httpkit"
 )
@@ -39,6 +40,17 @@ type store interface {
 	selectSOsPaged(ctx context.Context, p httpkit.PageParams, f SOListFilter) ([]SalesOrder, int, error)
 	updateSO(ctx context.Context, so SalesOrder) error
 	updateSOStatus(ctx context.Context, id uuid.UUID, status string) error
+
+	// selectSOLineByID returns one line plus its parent SO in a single
+	// round-trip. Used by GetSOLine to drive cross-module validation in
+	// delivery.AddLine.
+	selectSOLineByID(ctx context.Context, soLineID uuid.UUID) (SalesOrderLine, SalesOrder, error)
+
+	// recordShipmentTx runs the qty_shipped bump + parent-SO status recompute
+	// inside the caller's pgx.Tx — used by delivery.Seal so the entire seal
+	// (container.status flip + qty_shipped move) lives in a single tx. Returns
+	// ErrInvalidInput on CHECK violation (chk_qty_shipped_le_planned).
+	recordShipmentTx(ctx context.Context, tx pgx.Tx, items []ShipmentItemInput) error
 
 	// SplitToPlan support -----------------------------------------------------
 

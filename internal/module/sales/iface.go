@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/vmarble/warehouse-management-service/internal/domain"
 	"github.com/vmarble/warehouse-management-service/internal/platform/httpkit"
@@ -159,6 +160,16 @@ type CancelSOInput struct {
 	ActorID uuid.UUID
 }
 
+// ShipmentItemInput is one entry in a RecordShipmentTx call: bump qty_shipped
+// on the named SO line by Qty units. Used by the delivery module's Seal flow,
+// which runs the entire seal — container.status flip, qty_shipped bump, SO
+// status recompute — inside a single delivery-owned transaction. See
+// Service.RecordShipmentTx for the cross-module Tx contract.
+type ShipmentItemInput struct {
+	SOLineID uuid.UUID
+	Qty      int
+}
+
 type Service interface {
 	CreateCustomer(ctx context.Context, in CreateCustomerInput) (Customer, error)
 	ListCustomers(ctx context.Context, p httpkit.PageParams, activeOnly bool) (httpkit.PagedResult[Customer], error)
@@ -171,4 +182,20 @@ type Service interface {
 	ConfirmSO(ctx context.Context, id uuid.UUID) error
 	CancelSO(ctx context.Context, in CancelSOInput) error
 	SplitToPlan(ctx context.Context, in SplitToPlanInput) (SplitToPlanResult, error)
+
+	// GetSOLine returns one sales_order_line row joined with its parent SO so
+	// callers (delivery.AddLine) can validate qty + SO status in one round-trip.
+	// Returns ErrNotFound when the line does not exist.
+	GetSOLine(ctx context.Context, soLineID uuid.UUID) (SalesOrderLine, SalesOrder, error)
+
+	// RecordShipmentTx bumps qty_shipped on every named line and recomputes
+	// the parent SO's status (PARTIALLY_SHIPPED if any line < ordered, SHIPPED
+	// if every line == ordered) — all inside the caller-supplied transaction.
+	//
+	// This is the deliberate cross-module Tx exception: delivery's Seal flow
+	// flips container.status AND moves qty_shipped in the same delivery-owned
+	// pgx.Tx so the two writes can never disagree. Returns ErrInvalidInput
+	// when any bump would push qty_shipped past qty_planned (the DB CHECK
+	// chk_qty_shipped_le_planned is the authoritative backstop).
+	RecordShipmentTx(ctx context.Context, tx pgx.Tx, items []ShipmentItemInput) error
 }
