@@ -289,12 +289,7 @@ func (svc *service) ResolveDefect(ctx context.Context, in ResolveDefectInput) (F
 		}); err != nil {
 			return err
 		}
-		if err := tx.updateDefectResolution(ctx, updateResolutionInput{
-			DefectID:   in.DefectID,
-			Resolution: in.Resolution,
-			Note:       in.Note,
-			ResolvedBy: in.ResolvedBy,
-		}); err != nil {
+		if err := tx.updateDefectResolution(ctx, updateResolutionInput(in)); err != nil {
 			return err
 		}
 		resolved = d
