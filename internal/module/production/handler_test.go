@@ -36,6 +36,9 @@ func (stubService) ListWorkOrdersByAssignee(context.Context, uuid.UUID) ([]WorkO
 	panic("unexpected call")
 }
 func (stubService) AdvanceStatus(context.Context, uuid.UUID, AdvanceStatusInput) error { return nil }
+func (stubService) PartialComplete(context.Context, PartialCompleteInput) (PartialCompleteResult, error) {
+	panic("unexpected call")
+}
 func (stubService) RecordConsumption(context.Context, RecordConsumptionInput) (ConsumptionRecord, error) {
 	panic("unexpected call")
 }

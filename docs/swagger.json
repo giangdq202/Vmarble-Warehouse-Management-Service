@@ -8270,6 +8270,88 @@
                 }
             }
         },
+        "/api/v1/work-orders/{id}/partial-complete": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Closes the WO with an actual_qty \u003c quantity and optionally\nspawns a carry-over WO for the shortfall (#292). Status flips\nIN_PROCESSING → PARTIAL_COMPLETE; the carry-over (when\nrequested) starts PLANNED with parent_wo_id pointing at the\nparent. Sales-order line, sku, and plan are inherited so SO\ntraceability is preserved.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "production"
+                ],
+                "summary": "Partial-complete a work order",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "work order id (uuid)",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "payload",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_module_production.PartialCompleteInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_module_production.PartialCompleteResult"
+                        }
+                    },
+                    "400": {
+                        "description": "actual_qty out of range or shortfall_reason invalid",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "wo not found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "wo not in IN_PROCESSING",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/work-orders/{id}/suggest-assignment": {
             "post": {
                 "security": [
@@ -8509,6 +8591,7 @@
                 "IN_CUTTING",
                 "IN_PROCESSING",
                 "COMPLETED",
+                "PARTIAL_COMPLETE",
                 "COSTED",
                 "CANCELED"
             ],
@@ -8517,6 +8600,7 @@
                 "WOInCutting",
                 "WOInProcessing",
                 "WOCompleted",
+                "WOPartialComplete",
                 "WOCosted",
                 "WOCanceled"
             ]
@@ -11154,6 +11238,37 @@
                 }
             }
         },
+        "internal_module_production.PartialCompleteInput": {
+            "type": "object",
+            "properties": {
+                "actual_qty": {
+                    "type": "integer"
+                },
+                "carry_over": {
+                    "type": "boolean"
+                },
+                "carry_over_plan_id": {
+                    "type": "string"
+                },
+                "shortfall_detail": {
+                    "type": "string"
+                },
+                "shortfall_reason": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_module_production.PartialCompleteResult": {
+            "type": "object",
+            "properties": {
+                "carry_over_wo": {
+                    "$ref": "#/definitions/internal_module_production.WorkOrder"
+                },
+                "wo_updated": {
+                    "$ref": "#/definitions/internal_module_production.WorkOrder"
+                }
+            }
+        },
         "internal_module_production.RecordConsumptionInput": {
             "type": "object",
             "properties": {
@@ -11227,6 +11342,10 @@
         "internal_module_production.WorkOrder": {
             "type": "object",
             "properties": {
+                "actual_qty": {
+                    "description": "ActualQty is the produced count when status=PARTIAL_COMPLETE (#292).\nNil for any other status. Always \u003c= Quantity (chk_actual_qty).",
+                    "type": "integer"
+                },
                 "assigned_at": {
                     "type": "string"
                 },
@@ -11245,6 +11364,10 @@
                 "machine_slot_id": {
                     "type": "string"
                 },
+                "parent_wo_id": {
+                    "description": "ParentWOID, when set, identifies the WO this one carried over from.\nSet on auto-spawned carry-over WOs; nil otherwise.",
+                    "type": "string"
+                },
                 "plan_id": {
                     "type": "string"
                 },
@@ -11253,6 +11376,10 @@
                 },
                 "sales_order_line_id": {
                     "description": "SalesOrderLineID, when set, links the WO back to a sales_order_lines row\n(Phase A pivot). Nullable so legacy/PO-rooted WOs read fine without it.",
+                    "type": "string"
+                },
+                "shortfall_reason": {
+                    "description": "ShortfallReason explains why the WO came up short. One of\nMATERIAL_SHORTAGE | DEFECT | TIME_SHORTAGE | OTHER. Set together with\nActualQty; both nil for full COMPLETED transitions.",
                     "type": "string"
                 },
                 "sku_code": {

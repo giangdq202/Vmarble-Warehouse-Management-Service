@@ -116,6 +116,7 @@ func (h *Handler) Register(rg *gin.RouterGroup) {
 	rg.GET("/work-orders/mine", auth.RequireRole(auth.RoleCNC), h.listMine)
 	rg.GET("/work-orders/:id", h.get)
 	rg.POST("/work-orders/:id/advance", auth.RequireRole(auth.RoleCNC, auth.RoleCNCManager, auth.RoleWarehouse, auth.RoleForeman, auth.RoleAdmin), h.advance)
+	rg.POST("/work-orders/:id/partial-complete", auth.RequireWorkerUp(), h.partialComplete)
 	rg.POST("/work-orders/:id/consumptions", auth.RequireRole(auth.RoleWarehouse, auth.RoleForeman, auth.RoleAdmin), h.recordConsumption)
 	rg.GET("/work-orders/:id/consumptions", h.listConsumptions)
 	rg.POST("/work-orders/:id/labor-entries", auth.RequireRole(auth.RoleForeman, auth.RoleCNCManager, auth.RoleAdmin), h.recordLaborEntry)
@@ -457,6 +458,51 @@ func (h *Handler) suggestAssignment(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, result)
+}
+
+// partialComplete godoc
+//
+// @Summary      Partial-complete a work order
+// @Description  Closes the WO with an actual_qty < quantity and optionally
+// @Description  spawns a carry-over WO for the shortfall (#292). Status flips
+// @Description  IN_PROCESSING → PARTIAL_COMPLETE; the carry-over (when
+// @Description  requested) starts PLANNED with parent_wo_id pointing at the
+// @Description  parent. Sales-order line, sku, and plan are inherited so SO
+// @Description  traceability is preserved.
+// @Tags         production
+// @Accept       json
+// @Produce      json
+// @Param        id    path      string                  true  "work order id (uuid)"
+// @Param        body  body      PartialCompleteInput    true  "payload"
+// @Success      200   {object}  PartialCompleteResult
+// @Failure      400   {object}  map[string]string  "actual_qty out of range or shortfall_reason invalid"
+// @Failure      404   {object}  map[string]string  "wo not found"
+// @Failure      409   {object}  map[string]string  "wo not in IN_PROCESSING"
+// @Security     BearerAuth
+// @Failure      401  {object}  map[string]string
+// @Router       /api/v1/work-orders/{id}/partial-complete [post]
+func (h *Handler) partialComplete(c *gin.Context) {
+	woID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+	var in PartialCompleteInput
+	if !httpkit.Bind(c, &in) {
+		return
+	}
+	in.WorkOrderID = woID
+	if identity, ok := auth.FromContext(c); ok {
+		if callerID, perr := uuid.Parse(identity.UserID); perr == nil {
+			in.CallerID = &callerID
+		}
+	}
+	out, err := h.svc.PartialComplete(c.Request.Context(), in)
+	if err != nil {
+		httpkit.Error(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, out)
 }
 
 // listMine godoc

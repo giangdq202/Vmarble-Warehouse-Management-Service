@@ -151,9 +151,9 @@ func (svc *service) ScanBarcode(ctx context.Context, barcodeID, _ uuid.UUID) (Sc
 		if err != nil {
 			return ScanResult{}, err
 		}
-		if wo.Status != string(domain.WOCompleted) && wo.Status != string(domain.WOCosted) {
+		if wo.Status != string(domain.WOCompleted) && wo.Status != string(domain.WOPartialComplete) && wo.Status != string(domain.WOCosted) {
 			return ScanResult{}, domain.NewBizError(domain.ErrPreconditionFailed,
-				"work order is "+wo.Status+", scan only valid after COMPLETED")
+				"work order is "+wo.Status+", scan only valid after COMPLETED or PARTIAL_COMPLETE")
 		}
 		var suggestions []ContainerSuggestion
 		if svc.cs != nil && fg.SalesOrderLineID != nil && fg.Status == FGStatusAvailable {

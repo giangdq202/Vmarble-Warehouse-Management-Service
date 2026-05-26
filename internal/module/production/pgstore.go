@@ -24,9 +24,9 @@ func NewPGStore(pool *pgxpool.Pool) store {
 
 func (s *pgStore) insertWorkOrder(ctx context.Context, wo WorkOrder) error {
 	_, err := s.pool.Exec(ctx,
-		`INSERT INTO work_orders (id, plan_id, sku_id, quantity, status, sales_order_line_id, created_at)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-		wo.ID, wo.PlanID, wo.SKUID, wo.Quantity, wo.Status, wo.SalesOrderLineID, wo.CreatedAt,
+		`INSERT INTO work_orders (id, plan_id, sku_id, quantity, status, sales_order_line_id, parent_wo_id, created_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+		wo.ID, wo.PlanID, wo.SKUID, wo.Quantity, wo.Status, wo.SalesOrderLineID, wo.ParentWOID, wo.CreatedAt,
 	)
 	return err
 }
@@ -38,12 +38,15 @@ func scanWorkOrder(row interface {
 }) (WorkOrder, error) {
 	var wo WorkOrder
 	var estimatedHours sql.NullFloat64
-	var machineSlotID, salesOrderLineID uuid.NullUUID
+	var machineSlotID, salesOrderLineID, parentWOID uuid.NullUUID
+	var actualQty sql.NullInt32
+	var shortfallReason sql.NullString
 	err := row.Scan(
 		&wo.ID, &wo.PlanID, &wo.SKUID, &wo.SKUCode, &wo.SKUName,
 		&wo.SKUDimensions.LengthMM, &wo.SKUDimensions.WidthMM,
 		&wo.Quantity, &wo.Status, &wo.AssignedTo, &wo.AssignedAt, &wo.CreatedAt,
 		&estimatedHours, &machineSlotID, &salesOrderLineID,
+		&actualQty, &parentWOID, &shortfallReason,
 	)
 	if estimatedHours.Valid {
 		wo.EstimatedHours = &estimatedHours.Float64
@@ -55,6 +58,18 @@ func scanWorkOrder(row interface {
 	if salesOrderLineID.Valid {
 		v := salesOrderLineID.UUID
 		wo.SalesOrderLineID = &v
+	}
+	if actualQty.Valid {
+		v := int(actualQty.Int32)
+		wo.ActualQty = &v
+	}
+	if parentWOID.Valid {
+		v := parentWOID.UUID
+		wo.ParentWOID = &v
+	}
+	if shortfallReason.Valid {
+		v := shortfallReason.String
+		wo.ShortfallReason = &v
 	}
 	return wo, err
 }
@@ -68,7 +83,8 @@ const selectWOCols = `
 	COALESCE(s.length_mm, 0) AS sku_length_mm,
 	COALESCE(s.width_mm, 0)  AS sku_width_mm,
 	wo.quantity, wo.status, wo.assigned_to, wo.assigned_at, wo.created_at,
-	wo.estimated_hours, wo.machine_slot_id, wo.sales_order_line_id
+	wo.estimated_hours, wo.machine_slot_id, wo.sales_order_line_id,
+	wo.actual_qty, wo.parent_wo_id, wo.shortfall_reason
 FROM work_orders wo
 LEFT JOIN skus s ON s.id = wo.sku_id`
 
@@ -717,4 +733,80 @@ func (s *pgStore) cancelPlannedByPlan(ctx context.Context, planID uuid.UUID) (in
 		return 0, err
 	}
 	return tag.RowsAffected(), nil
+}
+
+// partialCompleteAtomically locks the parent WO row, validates BR-P05 under
+// the lock (status==IN_PROCESSING), flips status to PARTIAL_COMPLETE with
+// actual_qty + shortfall_reason, and (optionally) inserts the carry-over WO
+// — all inside one transaction. Two concurrent callers are serialized by the
+// FOR UPDATE: the first commits, the second observes PARTIAL_COMPLETE and
+// returns ErrInvalidTransition.
+func (s *pgStore) partialCompleteAtomically(ctx context.Context, op partialCompleteOp) (WorkOrder, WorkOrder, error) {
+	var parent, carry WorkOrder
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return parent, carry, fmt.Errorf("begin transaction: %w", err)
+	}
+	defer func() {
+		if err != nil {
+			_ = tx.Rollback(ctx)
+		}
+	}()
+
+	// Lock + read the parent WO. We re-fetch through the standard projection
+	// to keep the post-update WorkOrder shape consistent with selectWorkOrderByID.
+	var status string
+	if lockErr := tx.QueryRow(ctx,
+		`SELECT status FROM work_orders WHERE id = $1 FOR UPDATE`, op.WorkOrderID,
+	).Scan(&status); lockErr != nil {
+		if errors.Is(lockErr, pgx.ErrNoRows) {
+			err = domain.ErrNotFound
+			return parent, carry, err
+		}
+		err = fmt.Errorf("lock work order: %w", lockErr)
+		return parent, carry, err
+	}
+	if status != string(domain.WOInProcessing) {
+		err = domain.NewBizError(domain.ErrInvalidTransition,
+			fmt.Sprintf("partial-complete requires status IN_PROCESSING, current=%s", status))
+		return parent, carry, err
+	}
+
+	if _, execErr := tx.Exec(ctx,
+		`UPDATE work_orders
+		    SET status = $1, actual_qty = $2, shortfall_reason = $3
+		  WHERE id = $4`,
+		string(domain.WOPartialComplete), op.ActualQty, op.ShortfallReason, op.WorkOrderID,
+	); execErr != nil {
+		err = fmt.Errorf("update wo partial-complete: %w", execErr)
+		return parent, carry, err
+	}
+
+	if op.CarryOver {
+		c := op.CarryOverWO
+		if _, insErr := tx.Exec(ctx,
+			`INSERT INTO work_orders (id, plan_id, sku_id, quantity, status, sales_order_line_id, parent_wo_id, created_at)
+			 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+			c.ID, c.PlanID, c.SKUID, c.Quantity, c.Status, c.SalesOrderLineID, c.ParentWOID, c.CreatedAt,
+		); insErr != nil {
+			err = fmt.Errorf("insert carry-over wo: %w", insErr)
+			return parent, carry, err
+		}
+	}
+
+	if err = tx.Commit(ctx); err != nil {
+		return parent, carry, fmt.Errorf("commit: %w", err)
+	}
+
+	parent, err = s.selectWorkOrderByID(ctx, op.WorkOrderID)
+	if err != nil {
+		return parent, carry, err
+	}
+	if op.CarryOver {
+		carry, err = s.selectWorkOrderByID(ctx, op.CarryOverWO.ID)
+		if err != nil {
+			return parent, carry, err
+		}
+	}
+	return parent, carry, nil
 }

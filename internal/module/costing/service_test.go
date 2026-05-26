@@ -256,7 +256,30 @@ func TestComputeCost_CompletedWO_CreatesActualRecord(t *testing.T) {
 	}
 }
 
-// ── Zero-cost guard (issue #255) ─────────────────────────────────────────────
+func TestComputeCost_PartialCompleteWO_CreatesActualRecord(t *testing.T) {
+	// #292 / BR-P10: PARTIAL_COMPLETE work orders must be accepted by
+	// ComputeCost just like COMPLETED ones — same CostingTypeActual gate.
+	woID := uuid.New()
+	skuID := uuid.New()
+	st := notFoundStore()
+	wor := &mockWOR{result: WOInfo{ID: woID, SKUID: skuID, Status: domain.WOPartialComplete}}
+	cdr := &mockCDR{result: []CuttingData{{
+		SheetCost:    domain.Money{Amount: 50_000, Currency: "VND"},
+		SheetAreaMM2: 2_000_000,
+		UsedAreaMM2:  1_600_000, // 8/10 actual_qty cuts → 80% used
+	}}}
+	svc := newSvc(st, wor, cdr, zeroCONR())
+
+	got, err := svc.ComputeCost(context.Background(), woID)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got.CostingType != CostingTypeActual {
+		t.Errorf("CostingType = %v, want ACTUAL for PARTIAL_COMPLETE", got.CostingType)
+	}
+}
+
+
 //
 // For ACTUAL costing on a COMPLETED WO, at least one non-zero cost component
 // (material / auxiliary / labor) must exist. Empty ACTUAL records are almost

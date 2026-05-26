@@ -103,6 +103,13 @@ type mockStore struct {
 	cancelPlannedByPlanCalled bool
 	cancelPlannedByPlanResult int64
 	cancelPlannedByPlanErr    error
+
+	// Partial-complete (#292)
+	partialCompleteCalled bool
+	partialCompleteOp     partialCompleteOp
+	partialCompleteParent WorkOrder
+	partialCompleteCarry  WorkOrder
+	partialCompleteErr    error
 }
 
 func (m *mockStore) insertWorkOrder(_ context.Context, _ WorkOrder) error {
@@ -181,6 +188,14 @@ func (m *mockStore) unassignWOFromSlot(_ context.Context, _ uuid.UUID) error {
 }
 func (m *mockStore) assignSlotAtomically(_ context.Context, _ assignSlotOp) error {
 	return m.assignSlotAtomicallyErr
+}
+func (m *mockStore) partialCompleteAtomically(_ context.Context, op partialCompleteOp) (WorkOrder, WorkOrder, error) {
+	m.partialCompleteCalled = true
+	m.partialCompleteOp = op
+	if m.partialCompleteErr != nil {
+		return WorkOrder{}, WorkOrder{}, m.partialCompleteErr
+	}
+	return m.partialCompleteParent, m.partialCompleteCarry, nil
 }
 func (m *mockStore) insertLaborEntry(_ context.Context, e LaborEntry) error {
 	m.insertLaborEntryCalled = true
@@ -3086,5 +3101,292 @@ func TestAdvanceStatus_InvalidTransition_NotifierNotCalled(t *testing.T) {
 	}
 	if len(notifier.statusCalls) != 0 {
 		t.Errorf("notifier must not fire on invalid transition, got %v", notifier.statusCalls)
+	}
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// PartialComplete (#292)
+// ═════════════════════════════════════════════════════════════════════════════
+
+type mockFGHook struct {
+	called bool
+	got    WOCompletedEvent
+	err    error
+}
+
+func (m *mockFGHook) OnWOCompleted(_ context.Context, e WOCompletedEvent) error {
+	m.called = true
+	m.got = e
+	return m.err
+}
+
+func newSvcWithHook(st *mockStore, hook FinishedGoodsHook) *service {
+	svc := NewService(st, approvedPlan(uuid.New()), skuNoMetal(uuid.New()),
+		&mockUserChecker{}, nil, nil, nil).(*service)
+	if hook != nil {
+		svc.SetFinishedGoodsHook(hook)
+	}
+	return svc
+}
+
+func TestPartialComplete_HappyPath_WithCarryOver(t *testing.T) {
+	woID := uuid.New()
+	planID := uuid.New()
+	skuID := uuid.New()
+	soLineID := uuid.New()
+	soLineIDPtr := &soLineID
+	parent := WorkOrder{
+		ID: woID, PlanID: planID, SKUID: skuID, Quantity: 10,
+		Status: domain.WOInProcessing, SalesOrderLineID: soLineIDPtr,
+	}
+	parentAfter := parent
+	parentAfter.Status = domain.WOPartialComplete
+	a := 8
+	parentAfter.ActualQty = &a
+	r := "MATERIAL_SHORTAGE"
+	parentAfter.ShortfallReason = &r
+	carry := WorkOrder{ID: uuid.New(), PlanID: planID, SKUID: skuID, Quantity: 2,
+		Status: domain.WOPlanned, SalesOrderLineID: soLineIDPtr, ParentWOID: &woID}
+	st := &mockStore{
+		selectWorkOrderByIDResult: parent,
+		partialCompleteParent:     parentAfter,
+		partialCompleteCarry:      carry,
+	}
+	hook := &mockFGHook{}
+	svc := newSvcWithHook(st, hook)
+
+	out, err := svc.PartialComplete(context.Background(), PartialCompleteInput{
+		WorkOrderID:     woID,
+		ActualQty:       8,
+		ShortfallReason: "MATERIAL_SHORTAGE",
+		CarryOver:       true,
+	})
+	if err != nil {
+		t.Fatalf("expected success, got %v", err)
+	}
+	if !st.partialCompleteCalled {
+		t.Fatal("expected store.partialCompleteAtomically to be called")
+	}
+	if st.partialCompleteOp.ActualQty != 8 {
+		t.Errorf("ActualQty=%d, want 8", st.partialCompleteOp.ActualQty)
+	}
+	if !st.partialCompleteOp.CarryOver {
+		t.Error("expected CarryOver=true")
+	}
+	c := st.partialCompleteOp.CarryOverWO
+	if c.Quantity != 2 {
+		t.Errorf("carry-over qty=%d, want 2", c.Quantity)
+	}
+	if c.Status != domain.WOPlanned {
+		t.Errorf("carry-over status=%s, want PLANNED", c.Status)
+	}
+	if c.ParentWOID == nil || *c.ParentWOID != woID {
+		t.Errorf("carry-over parent_wo_id=%v, want %v", c.ParentWOID, woID)
+	}
+	if c.SalesOrderLineID == nil || *c.SalesOrderLineID != soLineID {
+		t.Error("carry-over must inherit sales_order_line_id (BR-P08)")
+	}
+	if c.PlanID != planID {
+		t.Errorf("carry-over plan_id=%v, want %v", c.PlanID, planID)
+	}
+	if !hook.called {
+		t.Fatal("FG hook must fire after PartialComplete")
+	}
+	if hook.got.Quantity != 8 {
+		t.Errorf("FG hook Quantity=%d, want 8 (BR-P09)", hook.got.Quantity)
+	}
+	if out.WOUpdated.Status != domain.WOPartialComplete {
+		t.Errorf("response wo status=%s, want PARTIAL_COMPLETE", out.WOUpdated.Status)
+	}
+	if out.CarryOverWO == nil {
+		t.Fatal("response must include carry-over WO when CarryOver=true")
+	}
+}
+
+func TestPartialComplete_NoCarryOver(t *testing.T) {
+	woID := uuid.New()
+	parent := WorkOrder{ID: woID, PlanID: uuid.New(), SKUID: uuid.New(),
+		Quantity: 10, Status: domain.WOInProcessing}
+	parentAfter := parent
+	parentAfter.Status = domain.WOPartialComplete
+	st := &mockStore{
+		selectWorkOrderByIDResult: parent,
+		partialCompleteParent:     parentAfter,
+	}
+	svc := newSvcWithHook(st, nil)
+
+	out, err := svc.PartialComplete(context.Background(), PartialCompleteInput{
+		WorkOrderID: woID, ActualQty: 7,
+		ShortfallReason: "DEFECT", CarryOver: false,
+	})
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if st.partialCompleteOp.CarryOver {
+		t.Error("CarryOver=false must not request carry-over insert")
+	}
+	if out.CarryOverWO != nil {
+		t.Error("response must not include carry-over WO when CarryOver=false")
+	}
+}
+
+func TestPartialComplete_BR_P05_NotInProcessing(t *testing.T) {
+	cases := []domain.WorkOrderStatus{
+		domain.WOPlanned, domain.WOInCutting,
+		domain.WOCompleted, domain.WOCosted,
+	}
+	for _, st := range cases {
+		t.Run(string(st), func(t *testing.T) {
+			woID := uuid.New()
+			ms := &mockStore{selectWorkOrderByIDResult: WorkOrder{
+				ID: woID, Quantity: 10, Status: st,
+			}}
+			svc := newSvcWithHook(ms, nil)
+			_, err := svc.PartialComplete(context.Background(), PartialCompleteInput{
+				WorkOrderID: woID, ActualQty: 5,
+				ShortfallReason: "OTHER",
+			})
+			if !errors.Is(err, domain.ErrInvalidTransition) {
+				t.Errorf("status %s: want ErrInvalidTransition, got %v", st, err)
+			}
+			if ms.partialCompleteCalled {
+				t.Error("store must not be called when service-level guard rejects")
+			}
+		})
+	}
+}
+
+func TestPartialComplete_BR_P06_ActualQtyOutOfRange(t *testing.T) {
+	cases := []struct {
+		name      string
+		qty       int
+		actualQty int
+	}{
+		{"zero", 10, 0},
+		{"equal_to_quantity", 10, 10},
+		{"greater_than_quantity", 10, 11},
+		{"negative", 10, -1},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			woID := uuid.New()
+			ms := &mockStore{selectWorkOrderByIDResult: WorkOrder{
+				ID: woID, Quantity: tc.qty, Status: domain.WOInProcessing,
+			}}
+			svc := newSvcWithHook(ms, nil)
+			_, err := svc.PartialComplete(context.Background(), PartialCompleteInput{
+				WorkOrderID: woID, ActualQty: tc.actualQty,
+				ShortfallReason: "OTHER",
+			})
+			if !errors.Is(err, domain.ErrInvalidInput) {
+				t.Errorf("actual_qty=%d/%d: want ErrInvalidInput, got %v", tc.actualQty, tc.qty, err)
+			}
+		})
+	}
+}
+
+func TestPartialComplete_InvalidShortfallReason(t *testing.T) {
+	woID := uuid.New()
+	ms := &mockStore{selectWorkOrderByIDResult: WorkOrder{
+		ID: woID, Quantity: 10, Status: domain.WOInProcessing,
+	}}
+	svc := newSvcWithHook(ms, nil)
+	_, err := svc.PartialComplete(context.Background(), PartialCompleteInput{
+		WorkOrderID: woID, ActualQty: 5,
+		ShortfallReason: "MADE_UP_REASON",
+	})
+	if !errors.Is(err, domain.ErrInvalidInput) {
+		t.Errorf("invalid reason must be rejected, got %v", err)
+	}
+}
+
+func TestPartialComplete_HookFailure_DoesNotRollback(t *testing.T) {
+	woID := uuid.New()
+	parent := WorkOrder{ID: woID, Quantity: 10, Status: domain.WOInProcessing}
+	parentAfter := parent
+	parentAfter.Status = domain.WOPartialComplete
+	st := &mockStore{
+		selectWorkOrderByIDResult: parent,
+		partialCompleteParent:     parentAfter,
+	}
+	hook := &mockFGHook{err: errors.New("packing offline")}
+	svc := newSvcWithHook(st, hook)
+
+	out, err := svc.PartialComplete(context.Background(), PartialCompleteInput{
+		WorkOrderID: woID, ActualQty: 8, ShortfallReason: "OTHER",
+	})
+	if err != nil {
+		t.Fatalf("hook failure must be swallowed, got %v", err)
+	}
+	if !hook.called {
+		t.Error("hook should be called")
+	}
+	if out.WOUpdated.Status != domain.WOPartialComplete {
+		t.Error("WO must still flip status when hook fails")
+	}
+}
+
+func TestPartialComplete_StoreErrorPropagates(t *testing.T) {
+	woID := uuid.New()
+	parent := WorkOrder{ID: woID, Quantity: 10, Status: domain.WOInProcessing}
+	st := &mockStore{
+		selectWorkOrderByIDResult: parent,
+		partialCompleteErr:        domain.NewBizError(domain.ErrInvalidTransition, "concurrent partial-complete won the race"),
+	}
+	svc := newSvcWithHook(st, nil)
+
+	_, err := svc.PartialComplete(context.Background(), PartialCompleteInput{
+		WorkOrderID: woID, ActualQty: 5, ShortfallReason: "OTHER",
+	})
+	if !errors.Is(err, domain.ErrInvalidTransition) {
+		t.Errorf("store error must propagate, got %v", err)
+	}
+}
+
+func TestPartialComplete_CarryOverPlanIDOverride(t *testing.T) {
+	woID := uuid.New()
+	originalPlan := uuid.New()
+	overridePlan := uuid.New()
+	parent := WorkOrder{
+		ID: woID, PlanID: originalPlan, SKUID: uuid.New(),
+		Quantity: 10, Status: domain.WOInProcessing,
+	}
+	st := &mockStore{
+		selectWorkOrderByIDResult: parent,
+		partialCompleteParent:     parent,
+	}
+	svc := newSvcWithHook(st, nil)
+	_, err := svc.PartialComplete(context.Background(), PartialCompleteInput{
+		WorkOrderID: woID, ActualQty: 8,
+		ShortfallReason: "OTHER", CarryOver: true,
+		CarryOverPlanID: &overridePlan,
+	})
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if st.partialCompleteOp.CarryOverWO.PlanID != overridePlan {
+		t.Errorf("carry-over plan_id=%v, want override %v",
+			st.partialCompleteOp.CarryOverWO.PlanID, overridePlan)
+	}
+}
+
+// Costing acceptance for PARTIAL_COMPLETE is verified in costing/service_test.go.
+// Full state-machine transition coverage including PARTIAL_COMPLETE → COSTED is
+// in TestWorkOrderStatus_CanTransitionTo above.
+
+func TestWorkOrderStatus_PartialComplete_Transitions(t *testing.T) {
+	// IN_PROCESSING accepts both COMPLETED and PARTIAL_COMPLETE
+	if err := domain.WOInProcessing.CanTransitionTo(domain.WOCompleted); err != nil {
+		t.Errorf("IN_PROCESSING -> COMPLETED must be allowed, got %v", err)
+	}
+	if err := domain.WOInProcessing.CanTransitionTo(domain.WOPartialComplete); err != nil {
+		t.Errorf("IN_PROCESSING -> PARTIAL_COMPLETE must be allowed, got %v", err)
+	}
+	// PARTIAL_COMPLETE -> COSTED only
+	if err := domain.WOPartialComplete.CanTransitionTo(domain.WOCosted); err != nil {
+		t.Errorf("PARTIAL_COMPLETE -> COSTED must be allowed, got %v", err)
+	}
+	if err := domain.WOPartialComplete.CanTransitionTo(domain.WOCompleted); err == nil {
+		t.Error("PARTIAL_COMPLETE -> COMPLETED must be rejected")
 	}
 }
