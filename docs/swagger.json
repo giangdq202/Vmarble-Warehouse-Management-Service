@@ -1494,6 +1494,30 @@
                         "description": "filter by finalized: true or false (omit for all)",
                         "name": "finalized",
                         "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "filter by SKU id (uuid)",
+                        "name": "sku_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "filter created_at \u003e= (Asia/Ho_Chi_Minh, YYYY-MM-DD)",
+                        "name": "from",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "filter created_at \u003c= (Asia/Ho_Chi_Minh, YYYY-MM-DD, inclusive end-of-day)",
+                        "name": "to",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "ILIKE search on sku code or sku name",
+                        "name": "search",
+                        "in": "query"
                     }
                 ],
                 "responses": {

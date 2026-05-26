@@ -345,6 +345,10 @@ func writeWasteReportCSV(c *gin.Context, rows []WasteReportRow) {
 // @Param        cursor     query     string  false  "opaque keyset cursor from a previous response (omit for first page)"
 // @Param        limit      query     int     false  "items per page (default 10, max 100)"
 // @Param        finalized  query     bool    false  "filter by finalized: true or false (omit for all)"
+// @Param        sku_id     query     string  false  "filter by SKU id (uuid)"
+// @Param        from       query     string  false  "filter created_at >= (Asia/Ho_Chi_Minh, YYYY-MM-DD)"
+// @Param        to         query     string  false  "filter created_at <= (Asia/Ho_Chi_Minh, YYYY-MM-DD, inclusive end-of-day)"
+// @Param        search     query     string  false  "ILIKE search on sku code or sku name"
 // @Success      200  {object}  httpkit.CursorResult[CostingRecord]
 // @Failure      400  {object}  map[string]string
 // @Failure      500  {object}  map[string]string
@@ -353,15 +357,71 @@ func writeWasteReportCSV(c *gin.Context, rows []WasteReportRow) {
 // @Router       /api/v1/costing [get]
 func (h *Handler) list(c *gin.Context) {
 	params := httpkit.BindCursorParams(c)
-	var finalized *bool
+	filter := CostingListFilter{
+		Search: c.Query("search"),
+	}
 	if v := c.Query("finalized"); v != "" {
 		b := v == "true"
-		finalized = &b
+		filter.Finalized = &b
 	}
-	result, err := h.svc.ListCostingRecords(c.Request.Context(), params, finalized)
+	if v := c.Query("sku_id"); v != "" {
+		parsed, err := uuid.Parse(v)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid sku_id"})
+			return
+		}
+		filter.SKUID = &parsed
+	}
+	from, to, ok := parseCostingDateRange(c)
+	if !ok {
+		return
+	}
+	filter.From = from
+	filter.To = to
+	result, err := h.svc.ListCostingRecords(c.Request.Context(), params, filter)
 	if err != nil {
 		httpkit.Error(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, result)
+}
+
+// costingListFilterLoc pins the from/to interpretation to Asia/Ho_Chi_Minh so
+// the same date semantics as the rest of the app apply (matches /plans #311).
+var costingListFilterLoc = func() *time.Location {
+	loc, err := time.LoadLocation("Asia/Ho_Chi_Minh")
+	if err != nil {
+		return time.FixedZone("Asia/Ho_Chi_Minh", 7*60*60)
+	}
+	return loc
+}()
+
+// parseCostingDateRange parses ?from / ?to (YYYY-MM-DD) into [from, to)
+// boundaries in Asia/Ho_Chi_Minh. The to bound is moved to start-of-next-day
+// so the SQL `< $to` predicate yields an inclusive end-of-day filter — the
+// same convention used by /plans and /work-orders.
+func parseCostingDateRange(c *gin.Context) (from, to *time.Time, ok bool) {
+	fromStr := c.Query("from")
+	toStr := c.Query("to")
+	if fromStr == "" && toStr == "" {
+		return nil, nil, true
+	}
+	if fromStr != "" {
+		day, err := time.ParseInLocation(time.DateOnly, fromStr, costingListFilterLoc)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid from, use YYYY-MM-DD"})
+			return nil, nil, false
+		}
+		from = &day
+	}
+	if toStr != "" {
+		day, err := time.ParseInLocation(time.DateOnly, toStr, costingListFilterLoc)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid to, use YYYY-MM-DD"})
+			return nil, nil, false
+		}
+		exclusive := day.AddDate(0, 0, 1)
+		to = &exclusive
+	}
+	return from, to, true
 }

@@ -289,12 +289,15 @@ func (s *service) IsCostingFinalized(ctx context.Context, workOrderID uuid.UUID)
 	return record.Finalized, nil
 }
 
-func (s *service) ListCostingRecords(ctx context.Context, params httpkit.CursorParams, finalized *bool) (httpkit.CursorResult[CostingRecord], error) {
+func (s *service) ListCostingRecords(ctx context.Context, params httpkit.CursorParams, filter CostingListFilter) (httpkit.CursorResult[CostingRecord], error) {
+	if filter.From != nil && filter.To != nil && filter.From.After(*filter.To) {
+		return httpkit.CursorResult[CostingRecord]{}, domain.NewBizError(domain.ErrInvalidInput, "from must be before to")
+	}
 	cur, err := params.Decoded()
 	if err != nil {
 		return httpkit.CursorResult[CostingRecord]{}, err
 	}
-	items, err := s.st.selectCostingRecordsKeyset(ctx, finalized, cur, params.Limit+1)
+	items, err := s.st.selectCostingRecordsKeyset(ctx, filter, cur, params.Limit+1)
 	if err != nil {
 		return httpkit.CursorResult[CostingRecord]{}, err
 	}
