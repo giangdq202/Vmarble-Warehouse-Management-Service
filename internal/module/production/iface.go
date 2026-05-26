@@ -45,7 +45,17 @@ type WorkOrder struct {
 	// SalesOrderLineID, when set, links the WO back to a sales_order_lines row
 	// (Phase A pivot). Nullable so legacy/PO-rooted WOs read fine without it.
 	SalesOrderLineID *uuid.UUID `json:"sales_order_line_id,omitempty"`
-	CreatedAt        time.Time  `json:"created_at"`
+	// ActualQty is the produced count when status=PARTIAL_COMPLETE (#292).
+	// Nil for any other status. Always <= Quantity (chk_actual_qty).
+	ActualQty *int `json:"actual_qty,omitempty"`
+	// ParentWOID, when set, identifies the WO this one carried over from.
+	// Set on auto-spawned carry-over WOs; nil otherwise.
+	ParentWOID *uuid.UUID `json:"parent_wo_id,omitempty"`
+	// ShortfallReason explains why the WO came up short. One of
+	// MATERIAL_SHORTAGE | DEFECT | TIME_SHORTAGE | OTHER. Set together with
+	// ActualQty; both nil for full COMPLETED transitions.
+	ShortfallReason *string   `json:"shortfall_reason,omitempty"`
+	CreatedAt       time.Time `json:"created_at"`
 }
 
 type WorkOrderListFilter struct {
@@ -149,10 +159,41 @@ type ConsumptionRecord struct {
 	CreatedAt    time.Time `json:"created_at"`
 }
 
+// PartialCompleteInput is the payload for the partial-complete endpoint
+// (#292). Captured fields are validated by the service:
+//   - ActualQty must be in [1, wo.Quantity-1]; equal-to-quantity should use
+//     normal AdvanceStatus(COMPLETED), zero is treated as "cancel" upstream.
+//   - ShortfallReason must be one of the four enum values; CHECK constraint
+//     on the column is the second line of defence.
+//   - When CarryOver is true, the service spawns a PLANNED WO with
+//     parent_wo_id pointing back at the parent so the chain is traceable.
+//     CarryOverPlanID overrides the inherited plan when set.
+//
+// CallerID is populated by the handler from JWT and used for slog audit
+// only — not persisted (audit table out of scope this PR).
+type PartialCompleteInput struct {
+	WorkOrderID     uuid.UUID  `json:"-"`
+	ActualQty       int        `json:"actual_qty"`
+	ShortfallReason string     `json:"shortfall_reason"`
+	ShortfallDetail string     `json:"shortfall_detail,omitempty"`
+	CarryOver       bool       `json:"carry_over"`
+	CarryOverPlanID *uuid.UUID `json:"carry_over_plan_id,omitempty"`
+	CallerID        *uuid.UUID `json:"-"`
+}
+
+// PartialCompleteResult is the response shape: the parent WO post-update,
+// plus the carry-over WO when one was spawned (nil when CarryOver=false).
+type PartialCompleteResult struct {
+	WOUpdated   WorkOrder  `json:"wo_updated"`
+	CarryOverWO *WorkOrder `json:"carry_over_wo,omitempty"`
+}
+
 type AssignWorkOrderInput struct {
 	WorkOrderID uuid.UUID
 	UserID      uuid.UUID
 }
+
+
 
 // AdvanceStatusInput is the request to advance a work order's status.
 // SheetID is optional — when provided and the target status is IN_CUTTING,
@@ -223,6 +264,11 @@ type Service interface {
 	ListWorkOrdersByPlan(ctx context.Context, planID uuid.UUID) ([]WorkOrder, error)
 	ListWorkOrdersByAssignee(ctx context.Context, userID uuid.UUID) ([]WorkOrder, error)
 	AdvanceStatus(ctx context.Context, woID uuid.UUID, in AdvanceStatusInput) error
+	// PartialComplete transitions IN_PROCESSING → PARTIAL_COMPLETE with an
+	// actual_qty < quantity, optionally spawning a carry-over WO for the
+	// remaining units (#292, BR-P05–P10). All writes happen in a single
+	// SELECT FOR UPDATE transaction so two concurrent calls cannot both win.
+	PartialComplete(ctx context.Context, in PartialCompleteInput) (PartialCompleteResult, error)
 	RecordConsumption(ctx context.Context, in RecordConsumptionInput) (ConsumptionRecord, error)
 	ListConsumptions(ctx context.Context, woID uuid.UUID) ([]ConsumptionRecord, error)
 	AssignWorkOrder(ctx context.Context, in AssignWorkOrderInput) (WorkOrder, error)

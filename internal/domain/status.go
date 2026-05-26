@@ -7,11 +7,12 @@ import "fmt"
 type WorkOrderStatus string
 
 const (
-	WOPlanned      WorkOrderStatus = "PLANNED"
-	WOInCutting    WorkOrderStatus = "IN_CUTTING"
-	WOInProcessing WorkOrderStatus = "IN_PROCESSING"
-	WOCompleted    WorkOrderStatus = "COMPLETED"
-	WOCosted       WorkOrderStatus = "COSTED"
+	WOPlanned         WorkOrderStatus = "PLANNED"
+	WOInCutting       WorkOrderStatus = "IN_CUTTING"
+	WOInProcessing    WorkOrderStatus = "IN_PROCESSING"
+	WOCompleted       WorkOrderStatus = "COMPLETED"
+	WOPartialComplete WorkOrderStatus = "PARTIAL_COMPLETE"
+	WOCosted          WorkOrderStatus = "COSTED"
 	// WOCanceled marks a PLANNED work order that was cascade-cancelled when
 	// its parent plan was cancelled (#249). It is a terminal state with no
 	// forward transitions; AdvanceStatus refuses to leave or enter it. The
@@ -19,24 +20,42 @@ const (
 	WOCanceled WorkOrderStatus = "CANCELED"
 )
 
-var woTransitions = map[WorkOrderStatus]WorkOrderStatus{
-	WOPlanned:      WOInCutting,
-	WOInCutting:    WOInProcessing,
-	WOInProcessing: WOCompleted,
-	WOCompleted:    WOCosted,
+// woTransitions enumerates every valid forward transition. IN_PROCESSING has
+// two outgoing edges (#292): COMPLETED for full production, PARTIAL_COMPLETE
+// for the "8 of 10 made, 2 carry over to tomorrow" path. Both terminate at
+// COSTED. The first entry of each slice is the canonical happy-path next
+// state — Next() returns it for backward compatibility.
+var woTransitions = map[WorkOrderStatus][]WorkOrderStatus{
+	WOPlanned:         {WOInCutting},
+	WOInCutting:       {WOInProcessing},
+	WOInProcessing:    {WOCompleted, WOPartialComplete},
+	WOCompleted:       {WOCosted},
+	WOPartialComplete: {WOCosted},
 }
 
+// Next returns the canonical happy-path successor. When a state has multiple
+// valid next states (IN_PROCESSING), Next returns the first listed in
+// woTransitions (COMPLETED for IN_PROCESSING). Use CanTransitionTo for
+// membership checks.
 func (s WorkOrderStatus) Next() (WorkOrderStatus, bool) {
-	next, ok := woTransitions[s]
-	return next, ok
+	nexts, ok := woTransitions[s]
+	if !ok || len(nexts) == 0 {
+		return "", false
+	}
+	return nexts[0], true
 }
 
 func (s WorkOrderStatus) CanTransitionTo(to WorkOrderStatus) error {
-	next, ok := woTransitions[s]
-	if !ok || next != to {
+	nexts, ok := woTransitions[s]
+	if !ok {
 		return fmt.Errorf("invalid transition %s -> %s", s, to)
 	}
-	return nil
+	for _, n := range nexts {
+		if n == to {
+			return nil
+		}
+	}
+	return fmt.Errorf("invalid transition %s -> %s", s, to)
 }
 
 // ── Remnant status ──────────────────────────────────────────

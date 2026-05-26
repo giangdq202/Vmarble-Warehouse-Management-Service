@@ -47,8 +47,8 @@ func (s *service) ComputeCost(ctx context.Context, workOrderID uuid.UUID) (Costi
 	if err != nil {
 		return CostingRecord{}, err
 	}
-	if wo.Status != domain.WOPlanned && wo.Status != domain.WOCompleted {
-		return CostingRecord{}, domain.NewBizError(domain.ErrPreconditionFailed, "costing can only be computed for PLANNED (estimated) or COMPLETED (actual) work orders")
+	if wo.Status != domain.WOPlanned && wo.Status != domain.WOCompleted && wo.Status != domain.WOPartialComplete {
+		return CostingRecord{}, domain.NewBizError(domain.ErrPreconditionFailed, "costing can only be computed for PLANNED (estimated) or COMPLETED/PARTIAL_COMPLETE (actual) work orders")
 	}
 
 	costingType := CostingTypeActual

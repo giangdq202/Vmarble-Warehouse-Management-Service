@@ -2,6 +2,7 @@ package production
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"strconv"
 	"time"
@@ -707,4 +708,145 @@ func (svc *service) CancelPlannedByPlan(ctx context.Context, planID uuid.UUID) (
 		return 0, domain.NewBizError(domain.ErrInvalidInput, "plan_id is required")
 	}
 	return svc.s.cancelPlannedByPlan(ctx, planID)
+}
+
+// PartialComplete transitions IN_PROCESSING → PARTIAL_COMPLETE with an actual
+// produced quantity less than the planned quantity, and optionally spawns a
+// carry-over WO for the shortfall (#292).
+//
+// Order of operations matters here:
+//  1. Service-level validation (BR-P05/P06 cheap pre-checks against a
+//     non-locked read so callers see fast 409/400 in the common case).
+//  2. partialCompleteAtomically does the real BR-P05 enforcement under
+//     SELECT FOR UPDATE so two concurrent callers cannot both win.
+//  3. Best-effort post-commit hooks (notifier, FG hook, slog) fire after the
+//     transaction commits — failures are logged, never roll back the write.
+func (svc *service) PartialComplete(ctx context.Context, in PartialCompleteInput) (PartialCompleteResult, error) {
+	if in.WorkOrderID == uuid.Nil {
+		return PartialCompleteResult{}, domain.NewBizError(domain.ErrInvalidInput, "work_order_id is required")
+	}
+	if !validShortfallReason(in.ShortfallReason) {
+		return PartialCompleteResult{}, domain.NewBizError(domain.ErrInvalidInput,
+			"shortfall_reason must be one of MATERIAL_SHORTAGE, DEFECT, TIME_SHORTAGE, OTHER")
+	}
+
+	wo, err := svc.s.selectWorkOrderByID(ctx, in.WorkOrderID)
+	if err != nil {
+		return PartialCompleteResult{}, err
+	}
+
+	// BR-P05 pre-check (status==IN_PROCESSING). Re-validated in the store
+	// under FOR UPDATE; this just gives a fast common-case error.
+	if wo.Status != domain.WOInProcessing {
+		return PartialCompleteResult{}, domain.NewBizError(domain.ErrInvalidTransition,
+			"partial-complete requires status IN_PROCESSING, current="+string(wo.Status))
+	}
+
+	// BR-P06: 1 <= actual_qty < quantity. Equal-to-quantity callers should
+	// AdvanceStatus(COMPLETED) instead; zero is "cancel" upstream.
+	if in.ActualQty < 1 || in.ActualQty >= wo.Quantity {
+		return PartialCompleteResult{}, domain.NewBizError(domain.ErrInvalidInput,
+			fmt.Sprintf("actual_qty must be in [1, %d), got %d", wo.Quantity, in.ActualQty))
+	}
+
+	op := partialCompleteOp{
+		WorkOrderID:     wo.ID,
+		ActualQty:       in.ActualQty,
+		ShortfallReason: in.ShortfallReason,
+		CarryOver:       in.CarryOver,
+	}
+	if in.CarryOver {
+		// BR-P07: inherit sku_id, sales_order_line_id, plan_id (overridable);
+		// drop assigned_to, machine_slot_id, estimated_hours so the planner
+		// schedules the carry-over fresh.
+		// BR-P08: sales_order_line_id always inherited so SO traceability is
+		// preserved without re-incrementing qty_planned.
+		planID := wo.PlanID
+		if in.CarryOverPlanID != nil {
+			planID = *in.CarryOverPlanID
+		}
+		parent := wo.ID
+		op.CarryOverWO = WorkOrder{
+			ID:               uuid.New(),
+			PlanID:           planID,
+			SKUID:            wo.SKUID,
+			Quantity:         wo.Quantity - in.ActualQty,
+			Status:           domain.WOPlanned,
+			SalesOrderLineID: wo.SalesOrderLineID,
+			ParentWOID:       &parent,
+			CreatedAt:        time.Now().UTC(),
+		}
+	}
+
+	parentWO, carryWO, err := svc.s.partialCompleteAtomically(ctx, op)
+	if err != nil {
+		return PartialCompleteResult{}, err
+	}
+
+	// Best-effort SSE — never roll back the persisted transition.
+	if svc.notifier != nil {
+		if nerr := svc.notifier.NotifyWOStatusChanged(ctx, parentWO.ID.String(), string(domain.WOPartialComplete)); nerr != nil {
+			slog.Warn("production: notify partial-complete status changed failed", "wo_id", parentWO.ID, "err", nerr)
+		}
+	}
+
+	// BR-P09: FG hook spawns actual_qty rows, not quantity rows. Idempotent on
+	// (wo_id, sku_id) so a transient broker outage can be retried.
+	if svc.fgHook != nil {
+		var actor uuid.UUID
+		if in.CallerID != nil {
+			actor = *in.CallerID
+		} else if parentWO.AssignedTo != nil {
+			actor = *parentWO.AssignedTo
+		}
+		evt := WOCompletedEvent{
+			WorkOrderID:      parentWO.ID,
+			SKUID:            parentWO.SKUID,
+			SKUCode:          parentWO.SKUCode,
+			SKUName:          parentWO.SKUName,
+			Dimensions:       parentWO.SKUDimensions.String(),
+			Quantity:         in.ActualQty,
+			SalesOrderLineID: parentWO.SalesOrderLineID,
+			ProductionPlanID: parentWO.PlanID,
+			QCPassedBy:       actor,
+		}
+		if hookErr := svc.fgHook.OnWOCompleted(ctx, evt); hookErr != nil {
+			slog.Warn("production: FG hook failed on partial-complete", "wo_id", parentWO.ID, "err", hookErr)
+		}
+	}
+
+	// Audit slog (no DB row this PR — see #292 design doc).
+	logArgs := []any{
+		"wo_id", parentWO.ID,
+		"plan_qty", parentWO.Quantity,
+		"actual_qty", in.ActualQty,
+		"reason", in.ShortfallReason,
+		"detail", in.ShortfallDetail,
+		"carry_over", in.CarryOver,
+	}
+	if in.CallerID != nil {
+		logArgs = append(logArgs, "actor_id", *in.CallerID)
+	}
+	if in.CarryOver {
+		logArgs = append(logArgs, "carry_over_wo_id", carryWO.ID)
+	}
+	slog.Info("wo.partial_complete", logArgs...)
+
+	out := PartialCompleteResult{WOUpdated: parentWO}
+	if in.CarryOver {
+		c := carryWO
+		out.CarryOverWO = &c
+	}
+	return out, nil
+}
+
+// validShortfallReason mirrors the chk_shortfall_reason CHECK constraint so
+// the service rejects invalid input with 400 before the DB layer would
+// reject with a constraint violation.
+func validShortfallReason(r string) bool {
+	switch r {
+	case "MATERIAL_SHORTAGE", "DEFECT", "TIME_SHORTAGE", "OTHER":
+		return true
+	}
+	return false
 }

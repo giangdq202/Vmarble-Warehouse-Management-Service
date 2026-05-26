@@ -54,6 +54,7 @@ definitions:
     - IN_CUTTING
     - IN_PROCESSING
     - COMPLETED
+    - PARTIAL_COMPLETE
     - COSTED
     - CANCELED
     type: string
@@ -62,6 +63,7 @@ definitions:
     - WOInCutting
     - WOInProcessing
     - WOCompleted
+    - WOPartialComplete
     - WOCosted
     - WOCanceled
   github_com_vmarble_warehouse-management-service_internal_platform_httpkit.CursorResult-internal_module_barcode_ScanEvent:
@@ -1804,6 +1806,26 @@ definitions:
       shift_name:
         type: string
     type: object
+  internal_module_production.PartialCompleteInput:
+    properties:
+      actual_qty:
+        type: integer
+      carry_over:
+        type: boolean
+      carry_over_plan_id:
+        type: string
+      shortfall_detail:
+        type: string
+      shortfall_reason:
+        type: string
+    type: object
+  internal_module_production.PartialCompleteResult:
+    properties:
+      carry_over_wo:
+        $ref: '#/definitions/internal_module_production.WorkOrder'
+      wo_updated:
+        $ref: '#/definitions/internal_module_production.WorkOrder'
+    type: object
   internal_module_production.RecordConsumptionInput:
     properties:
       material_id:
@@ -1851,6 +1873,11 @@ definitions:
     type: object
   internal_module_production.WorkOrder:
     properties:
+      actual_qty:
+        description: |-
+          ActualQty is the produced count when status=PARTIAL_COMPLETE (#292).
+          Nil for any other status. Always <= Quantity (chk_actual_qty).
+        type: integer
       assigned_at:
         type: string
       assigned_to:
@@ -1863,6 +1890,11 @@ definitions:
         type: string
       machine_slot_id:
         type: string
+      parent_wo_id:
+        description: |-
+          ParentWOID, when set, identifies the WO this one carried over from.
+          Set on auto-spawned carry-over WOs; nil otherwise.
+        type: string
       plan_id:
         type: string
       quantity:
@@ -1871,6 +1903,12 @@ definitions:
         description: |-
           SalesOrderLineID, when set, links the WO back to a sales_order_lines row
           (Phase A pivot). Nullable so legacy/PO-rooted WOs read fine without it.
+        type: string
+      shortfall_reason:
+        description: |-
+          ShortfallReason explains why the WO came up short. One of
+          MATERIAL_SHORTAGE | DEFECT | TIME_SHORTAGE | OTHER. Set together with
+          ActualQty; both nil for full COMPLETED transitions.
         type: string
       sku_code:
         type: string
@@ -7433,6 +7471,65 @@ paths:
       security:
       - BearerAuth: []
       summary: Record a per-stage labor cost entry for a work order
+      tags:
+      - production
+  /api/v1/work-orders/{id}/partial-complete:
+    post:
+      consumes:
+      - application/json
+      description: |-
+        Closes the WO with an actual_qty < quantity and optionally
+        spawns a carry-over WO for the shortfall (#292). Status flips
+        IN_PROCESSING → PARTIAL_COMPLETE; the carry-over (when
+        requested) starts PLANNED with parent_wo_id pointing at the
+        parent. Sales-order line, sku, and plan are inherited so SO
+        traceability is preserved.
+      parameters:
+      - description: work order id (uuid)
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: payload
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_module_production.PartialCompleteInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_module_production.PartialCompleteResult'
+        "400":
+          description: actual_qty out of range or shortfall_reason invalid
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: wo not found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "409":
+          description: wo not in IN_PROCESSING
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Partial-complete a work order
       tags:
       - production
   /api/v1/work-orders/{id}/suggest-assignment:

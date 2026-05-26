@@ -16,6 +16,13 @@ type store interface {
 	selectWorkOrdersByAssignee(ctx context.Context, userID uuid.UUID) ([]WorkOrder, error)
 	updateWorkOrderStatus(ctx context.Context, id uuid.UUID, status string) error
 	updateWorkOrderAssignment(ctx context.Context, woID uuid.UUID, userID uuid.UUID, assignedAt time.Time) error
+	// partialCompleteAtomically performs the entire #292 PartialComplete write
+	// inside a single SELECT FOR UPDATE transaction so two concurrent callers
+	// cannot both win. The store re-reads the WO under the lock, validates
+	// status==IN_PROCESSING, flips status + actual_qty + shortfall_reason, and
+	// optionally inserts a carry-over WO. Returns the post-update parent WO
+	// plus the carry-over WO (zero-value when CarryOver=false).
+	partialCompleteAtomically(ctx context.Context, op partialCompleteOp) (WorkOrder, WorkOrder, error)
 	insertConsumption(ctx context.Context, cr ConsumptionRecord) error
 	selectConsumptionsByWO(ctx context.Context, woID uuid.UUID) ([]ConsumptionRecord, error)
 	hasMetalConsumption(ctx context.Context, woID uuid.UUID) (bool, error)
@@ -70,4 +77,19 @@ type assignSlotOp struct {
 	WorkOrderID    uuid.UUID
 	SlotID         uuid.UUID
 	EstimatedHours float64
+}
+
+// partialCompleteOp carries the pre-validated payload for the atomic
+// PartialComplete write. The service does upstream validation; the store
+// re-reads the WO under SELECT FOR UPDATE so the BR-P05 IN_PROCESSING gate
+// is enforced under the lock (concurrency safety).
+type partialCompleteOp struct {
+	WorkOrderID     uuid.UUID
+	ActualQty       int
+	ShortfallReason string
+	CarryOver       bool
+	// CarryOverWO is fully populated by the service (id, qty, plan_id, sku_id,
+	// sales_order_line_id, parent_wo_id, status=PLANNED, created_at). The store
+	// just inserts it when CarryOver=true.
+	CarryOverWO WorkOrder
 }
