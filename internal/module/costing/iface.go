@@ -87,6 +87,27 @@ type WasteReportRow struct {
 	TotalWasteCost domain.Money `json:"total_waste_cost"`
 }
 
+// CostingListFilter narrows the keyset list endpoint by date range, SKU,
+// finalized flag, and a free-text search (ILIKE on sku.code / sku.name).
+// Mirrors the /plans filter shape (#311) so the FE can drop its defensive
+// client-side filtering against costing/page.tsx.
+//
+// All fields are optional. Empty values are treated as "no filter":
+//   - Finalized = nil → no finalized filter
+//   - SKUID     = nil → no SKU filter
+//   - From / To = nil → no created_at bound on that side
+//   - Search    = "" → no ILIKE filter
+//
+// To is interpreted as inclusive end-of-day in Asia/Ho_Chi_Minh (handler
+// converts YYYY-MM-DD into a half-open [From, To) range).
+type CostingListFilter struct {
+	Finalized *bool
+	SKUID     *uuid.UUID
+	From      *time.Time
+	To        *time.Time
+	Search    string
+}
+
 type Service interface {
 	ComputeCost(ctx context.Context, workOrderID uuid.UUID) (CostingRecord, error)
 	FinalizeCost(ctx context.Context, workOrderID uuid.UUID, actorID uuid.UUID) error
@@ -96,7 +117,7 @@ type Service interface {
 	// Used by the accountant adjustment dialog so the FE never has to do
 	// money arithmetic itself.
 	GetCostingRecordDetail(ctx context.Context, workOrderID uuid.UUID) (CostingRecordDetail, error)
-	ListCostingRecords(ctx context.Context, params httpkit.CursorParams, finalized *bool) (httpkit.CursorResult[CostingRecord], error)
+	ListCostingRecords(ctx context.Context, params httpkit.CursorParams, filter CostingListFilter) (httpkit.CursorResult[CostingRecord], error)
 	HasCostingRecord(ctx context.Context, workOrderID uuid.UUID) (bool, error)
 	// IsCostingFinalized reports whether the costing record for the work order
 	// is finalized (BR-C04). Returns (false, nil) when no record exists yet.

@@ -86,6 +86,16 @@ const selectCostingCols = `id, work_order_id, sku_id, costing_type,
 	total_cost_amount, total_cost_currency,
 	finalized, finalized_at, finalized_by, created_at`
 
+// prefixedCostingCols is selectCostingCols with a `cr.` table alias on every
+// column — used by selectCostingRecordsKeyset which JOINs skus for the
+// search ILIKE filter (#313).
+const prefixedCostingCols = `cr.id, cr.work_order_id, cr.sku_id, cr.costing_type,
+	cr.material_cost_amount, cr.material_cost_currency,
+	cr.auxiliary_cost_amount, cr.auxiliary_cost_currency,
+	cr.labor_cost_amount, cr.labor_cost_currency,
+	cr.total_cost_amount, cr.total_cost_currency,
+	cr.finalized, cr.finalized_at, cr.finalized_by, cr.created_at`
+
 func scanCostingRecord(row interface{ Scan(...any) error }) (CostingRecord, error) {
 	var r CostingRecord
 	var finalizedAt *time.Time
@@ -110,25 +120,38 @@ func scanCostingRecord(row interface{ Scan(...any) error }) (CostingRecord, erro
 // where two rows share the exact same timestamp — without the id tie-break
 // burst writes can either re-emit a row or skip one.
 //
+// Filters (#313): finalized flag, sku_id, created_at range, and ILIKE search
+// across sku code/name. The LEFT JOIN to skus is unconditional so the search
+// predicate can hit even when the caller only filters by date.
+//
 // The cursor predicate is NULL-guarded so the same SQL serves first-page
 // (cur.Ts.IsZero()) and subsequent pages — Postgres can use the
 // (created_at DESC, id DESC) composite index in either case.
-func (s *pgStore) selectCostingRecordsKeyset(ctx context.Context, finalized *bool, cur httpkit.Cursor, limit int) ([]CostingRecord, error) {
+func (s *pgStore) selectCostingRecordsKeyset(ctx context.Context, filter CostingListFilter, cur httpkit.Cursor, limit int) ([]CostingRecord, error) {
 	var curTs any
 	var curID any
 	if !cur.IsZero() {
 		curTs = cur.Ts
 		curID = cur.ID
 	}
+	var search any
+	if filter.Search != "" {
+		search = "%" + filter.Search + "%"
+	}
 
 	rows, err := s.pool.Query(ctx,
-		`SELECT `+selectCostingCols+`
-		 FROM costing_records
-		 WHERE ($1::boolean IS NULL OR finalized = $1)
-		   AND ($2::timestamptz IS NULL OR (created_at, id) < ($2, $3))
-		 ORDER BY created_at DESC, id DESC
-		 LIMIT $4`,
-		finalized, curTs, curID, limit,
+		`SELECT `+prefixedCostingCols+`
+		 FROM costing_records cr
+		 LEFT JOIN skus s ON s.id = cr.sku_id
+		 WHERE ($1::boolean IS NULL OR cr.finalized = $1)
+		   AND ($2::timestamptz IS NULL OR (cr.created_at, cr.id) < ($2, $3))
+		   AND ($4::uuid IS NULL OR cr.sku_id = $4)
+		   AND ($5::timestamptz IS NULL OR cr.created_at >= $5)
+		   AND ($6::timestamptz IS NULL OR cr.created_at < $6)
+		   AND ($7::text IS NULL OR s.code ILIKE $7 OR s.name ILIKE $7)
+		 ORDER BY cr.created_at DESC, cr.id DESC
+		 LIMIT $8`,
+		filter.Finalized, curTs, curID, filter.SKUID, filter.From, filter.To, search, limit,
 	)
 	if err != nil {
 		return nil, err

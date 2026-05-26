@@ -3137,6 +3137,23 @@ paths:
         in: query
         name: finalized
         type: boolean
+      - description: filter by SKU id (uuid)
+        in: query
+        name: sku_id
+        type: string
+      - description: filter created_at >= (Asia/Ho_Chi_Minh, YYYY-MM-DD)
+        in: query
+        name: from
+        type: string
+      - description: filter created_at <= (Asia/Ho_Chi_Minh, YYYY-MM-DD, inclusive
+          end-of-day)
+        in: query
+        name: to
+        type: string
+      - description: ILIKE search on sku code or sku name
+        in: query
+        name: search
+        type: string
       produces:
       - application/json
       responses:
