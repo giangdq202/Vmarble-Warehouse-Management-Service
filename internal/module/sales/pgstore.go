@@ -307,6 +307,129 @@ func (s *pgStore) updateSOStatus(ctx context.Context, id uuid.UUID, status strin
 	return err
 }
 
+// ── Cross-module hooks (delivery → sales) ────────────────────────────────────
+
+func (s *pgStore) selectSOLineByID(ctx context.Context, soLineID uuid.UUID) (SalesOrderLine, SalesOrder, error) {
+	row := s.pool.QueryRow(ctx,
+		`SELECT l.id, l.sales_order_id, l.sku_id, l.qty_ordered, l.qty_planned, l.qty_shipped,
+		        l.unit_price_amount, l.unit_price_currency, l.created_at,
+		        so.id, so.code, so.customer_id, c.code, c.name, c.country_code,
+		        so.incoterm, so.port_of_loading, so.port_of_discharge, so.currency,
+		        so.status, so.expected_ship_date, so.note, so.created_by, so.created_at
+		   FROM sales_order_lines l
+		   JOIN sales_orders so ON so.id = l.sales_order_id
+		   JOIN customers c     ON c.id  = so.customer_id
+		  WHERE l.id = $1`, soLineID)
+	var l SalesOrderLine
+	var so SalesOrder
+	var country, incoterm, portLoad, portDisch, note *string
+	if err := row.Scan(
+		&l.ID, &l.SalesOrderID, &l.SKUID, &l.QtyOrdered, &l.QtyPlanned, &l.QtyShipped,
+		&l.UnitPrice.Amount, &l.UnitPrice.Currency, &l.CreatedAt,
+		&so.ID, &so.Code, &so.CustomerID, &so.CustomerCode, &so.CustomerName, &country,
+		&incoterm, &portLoad, &portDisch, &so.Currency,
+		&so.Status, &so.ExpectedShipDate, &note, &so.CreatedBy, &so.CreatedAt,
+	); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return SalesOrderLine{}, SalesOrder{}, domain.ErrNotFound
+		}
+		return SalesOrderLine{}, SalesOrder{}, err
+	}
+	so.CustomerCountry = stringFromPtr(country)
+	so.Incoterm = stringFromPtr(incoterm)
+	so.PortOfLoading = stringFromPtr(portLoad)
+	so.PortOfDischarge = stringFromPtr(portDisch)
+	so.Note = stringFromPtr(note)
+	return l, so, nil
+}
+
+// recordShipmentTx walks each item, locks the sales_order_lines row FOR
+// UPDATE inside the caller's tx, bumps qty_shipped, and recomputes the
+// parent SO's status when every line of that SO has been satisfied. The
+// chk_qty_shipped_le_planned CHECK is the authoritative backstop; we
+// translate the violation to ErrInvalidInput so the API surface returns 400.
+func (s *pgStore) recordShipmentTx(ctx context.Context, tx pgx.Tx, items []ShipmentItemInput) error {
+	if len(items) == 0 {
+		return nil
+	}
+
+	// Track which SOs we touched so we can recompute their status in one
+	// place after the per-line updates land.
+	soIDs := make(map[uuid.UUID]struct{}, len(items))
+
+	for _, it := range items {
+		if it.Qty <= 0 {
+			return domain.NewBizError(domain.ErrInvalidInput, "shipment qty must be > 0")
+		}
+		var soID uuid.UUID
+		// SELECT FOR UPDATE so two concurrent seals can't race on the same line.
+		if err := tx.QueryRow(ctx,
+			`SELECT sales_order_id FROM sales_order_lines WHERE id = $1 FOR UPDATE`,
+			it.SOLineID).Scan(&soID); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return domain.NewBizError(domain.ErrNotFound,
+					"sales order line not found: "+it.SOLineID.String())
+			}
+			return err
+		}
+
+		if _, err := tx.Exec(ctx,
+			`UPDATE sales_order_lines SET qty_shipped = qty_shipped + $2 WHERE id = $1`,
+			it.SOLineID, it.Qty,
+		); err != nil {
+			if strings.Contains(err.Error(), "chk_qty_shipped_le_planned") {
+				return domain.NewBizError(domain.ErrInvalidInput,
+					"qty_shipped would exceed qty_planned for line "+it.SOLineID.String())
+			}
+			return err
+		}
+		soIDs[soID] = struct{}{}
+	}
+
+	for soID := range soIDs {
+		if err := recomputeSOStatusTx(ctx, tx, soID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// recomputeSOStatusTx flips the parent SO into PARTIALLY_SHIPPED or SHIPPED
+// depending on how qty_shipped now compares to qty_ordered across all of its
+// lines. Status is moved monotonically — we never leave SHIPPED, and we
+// never go backward from PARTIALLY_SHIPPED to IN_PRODUCTION just because no
+// line is fully shipped yet.
+func recomputeSOStatusTx(ctx context.Context, tx pgx.Tx, soID uuid.UUID) error {
+	var anyShipped, allShipped bool
+	if err := tx.QueryRow(ctx,
+		`SELECT
+		   bool_or(qty_shipped > 0),
+		   bool_and(qty_shipped >= qty_ordered)
+		 FROM sales_order_lines WHERE sales_order_id = $1`,
+		soID).Scan(&anyShipped, &allShipped); err != nil {
+		return err
+	}
+	if allShipped {
+		_, err := tx.Exec(ctx,
+			`UPDATE sales_orders SET status = $2 WHERE id = $1 AND status <> $2`,
+			soID, SOStatusShipped)
+		return err
+	}
+	if anyShipped {
+		// Don't downgrade a SHIPPED order; only flip into PARTIALLY_SHIPPED
+		// from earlier statuses.
+		_, err := tx.Exec(ctx,
+			`UPDATE sales_orders
+			    SET status = $2
+			  WHERE id = $1
+			    AND status IN ($3, $4, $5)`,
+			soID, SOStatusPartiallyShipped,
+			SOStatusConfirmed, SOStatusInProduction, SOStatusPartiallyShipped)
+		return err
+	}
+	return nil
+}
+
 // ── Transaction support ──────────────────────────────────────────────────────
 
 func (s *pgStore) withTx(ctx context.Context, fn func(tx txStore) error) error {

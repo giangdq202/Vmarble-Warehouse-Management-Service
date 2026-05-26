@@ -159,6 +159,23 @@ definitions:
       total_pages:
         type: integer
     type: object
+  github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_delivery_Container:
+    properties:
+      current_page:
+        type: integer
+      items:
+        items:
+          $ref: '#/definitions/internal_module_delivery.Container'
+        type: array
+      limit:
+        type: integer
+      total_is_estimate:
+        type: boolean
+      total_items:
+        type: integer
+      total_pages:
+        type: integer
+    type: object
   github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_inventory_BoardSheet:
     properties:
       current_page:
@@ -937,6 +954,141 @@ definitions:
       oldest_started_at:
         type: string
       status:
+        type: string
+    type: object
+  internal_module_delivery.AddLineInput:
+    properties:
+      cbm_total:
+        type: number
+      qty:
+        type: integer
+      sales_order_line_id:
+        type: string
+      sku_id:
+        type: string
+      weight_kg_total:
+        type: number
+    type: object
+  internal_module_delivery.Container:
+    properties:
+      code:
+        type: string
+      container_type:
+        type: string
+      created_at:
+        type: string
+      created_by:
+        type: string
+      fill_pct_cbm:
+        type: number
+      fill_pct_mass:
+        type: number
+      id:
+        type: string
+      lines:
+        description: |-
+          Computed projections — populated by GetContainer; List does not hydrate
+          these to keep the page query a single round-trip.
+        items:
+          $ref: '#/definitions/internal_module_delivery.ContainerLine'
+        type: array
+      max_cbm:
+        type: number
+      max_payload_kg:
+        type: number
+      note:
+        type: string
+      sealed_at:
+        type: string
+      sealed_by:
+        type: string
+      status:
+        type: string
+      used_cbm:
+        type: number
+      used_weight_kg:
+        type: number
+    type: object
+  internal_module_delivery.ContainerLine:
+    properties:
+      added_at:
+        type: string
+      added_by:
+        type: string
+      cbm_total:
+        type: number
+      container_id:
+        type: string
+      id:
+        type: string
+      qty:
+        type: integer
+      sales_order_line_id:
+        type: string
+      sku_code:
+        type: string
+      sku_id:
+        type: string
+      sku_name:
+        type: string
+      weight_kg_total:
+        type: number
+    type: object
+  internal_module_delivery.ContainerStatusLogEntry:
+    properties:
+      actor_id:
+        type: string
+      container_id:
+        type: string
+      created_at:
+        type: string
+      from_status:
+        type: string
+      id:
+        type: string
+      note:
+        type: string
+      to_status:
+        type: string
+    type: object
+  internal_module_delivery.CreateContainerInput:
+    properties:
+      container_type:
+        type: string
+      max_cbm:
+        type: number
+      max_payload_kg:
+        type: number
+      note:
+        type: string
+    type: object
+  internal_module_delivery.TransferLineInput:
+    properties:
+      cbm_total:
+        type: number
+      line_id:
+        type: string
+      qty:
+        type: integer
+      target_container_id:
+        type: string
+      weight_kg_total:
+        type: number
+    type: object
+  internal_module_delivery.TransferLineResult:
+    properties:
+      source_line:
+        allOf:
+        - $ref: '#/definitions/internal_module_delivery.ContainerLine'
+        description: nil when the source line was fully consumed
+      target_line:
+        $ref: '#/definitions/internal_module_delivery.ContainerLine'
+    type: object
+  internal_module_delivery.sealReopenShipRequest:
+    properties:
+      note:
+        type: string
+      reason:
         type: string
     type: object
   internal_module_inventory.AddCountLineInput:
@@ -2400,6 +2552,411 @@ paths:
       summary: Generate printable batch PDF labels
       tags:
       - barcode
+  /api/v1/containers:
+    get:
+      parameters:
+      - description: page (default 1)
+        in: query
+        name: page
+        type: integer
+      - description: limit (default 10, max 100)
+        in: query
+        name: limit
+        type: integer
+      - description: ILIKE on container code
+        in: query
+        name: search
+        type: string
+      - description: filter by status
+        in: query
+        name: status
+        type: string
+      - description: 20GP / 40GP / 40HC
+        in: query
+        name: container_type
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_delivery_Container'
+      security:
+      - BearerAuth: []
+      summary: List containers
+      tags:
+      - delivery
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: payload
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_module_delivery.CreateContainerInput'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/internal_module_delivery.Container'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Create container (OPEN)
+      tags:
+      - delivery
+  /api/v1/containers/{id}:
+    get:
+      parameters:
+      - description: container id (uuid)
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_module_delivery.Container'
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Get container with lines + fill_pct
+      tags:
+      - delivery
+  /api/v1/containers/{id}/cancel:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: container id (uuid)
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: payload
+        in: body
+        name: body
+        schema:
+          $ref: '#/definitions/internal_module_delivery.sealReopenShipRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_module_delivery.Container'
+        "409":
+          description: Conflict
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Cancel an OPEN/LOADING container
+      tags:
+      - delivery
+  /api/v1/containers/{id}/lines:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: container id (uuid)
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: payload
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_module_delivery.AddLineInput'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/internal_module_delivery.ContainerLine'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "409":
+          description: Conflict
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Add a finished-goods line to a container
+      tags:
+      - delivery
+  /api/v1/containers/{id}/lines/{line_id}:
+    delete:
+      parameters:
+      - description: container id (uuid)
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: line id (uuid)
+        in: path
+        name: line_id
+        required: true
+        type: string
+      responses:
+        "204":
+          description: No Content
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "409":
+          description: Conflict
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Remove a line from a container
+      tags:
+      - delivery
+  /api/v1/containers/{id}/reopen:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: container id (uuid)
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: payload (reason required)
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_module_delivery.sealReopenShipRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_module_delivery.Container'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "409":
+          description: Conflict
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Reopen sealed container (admin only, requires reason)
+      tags:
+      - delivery
+  /api/v1/containers/{id}/seal:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: container id (uuid)
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: payload
+        in: body
+        name: body
+        schema:
+          $ref: '#/definitions/internal_module_delivery.sealReopenShipRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_module_delivery.Container'
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "409":
+          description: Conflict
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "412":
+          description: Precondition Failed
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Seal container (atomically bumps qty_shipped on SO lines)
+      tags:
+      - delivery
+  /api/v1/containers/{id}/ship:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: container id (uuid)
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: payload
+        in: body
+        name: body
+        schema:
+          $ref: '#/definitions/internal_module_delivery.sealReopenShipRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_module_delivery.Container'
+        "409":
+          description: Conflict
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Mark container SHIPPED (after seal)
+      tags:
+      - delivery
+  /api/v1/containers/{id}/status-log:
+    get:
+      parameters:
+      - description: container id (uuid)
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/internal_module_delivery.ContainerStatusLogEntry'
+            type: array
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Container status transition history
+      tags:
+      - delivery
+  /api/v1/containers/{id}/transfer-line:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: source container id (uuid)
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: payload
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_module_delivery.TransferLineInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_module_delivery.TransferLineResult'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "409":
+          description: Conflict
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Transfer a line (full or partial) to another container
+      tags:
+      - delivery
   /api/v1/costing:
     get:
       parameters:
