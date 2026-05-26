@@ -2374,6 +2374,110 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/fg-pool": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "packing"
+                ],
+                "summary": "List Finished-Goods pool entries",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "page (default 1)",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "limit (default 10, max 100)",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "AVAILABLE / RESERVED / LOADED / DEFECT / DISPOSED",
+                        "name": "status",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "filter by SKU id (uuid)",
+                        "name": "sku_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "filter by sales order line id (uuid)",
+                        "name": "so_line_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "filter by work order id (uuid)",
+                        "name": "wo_id",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_packing_FGPool"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/fg-pool/{id}": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "packing"
+                ],
+                "summary": "Get one FG pool entry",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "fg id (uuid)",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_module_packing.FGPool"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/inventory/audit-log": {
             "get": {
                 "security": [
@@ -4501,6 +4605,202 @@ const docTemplate = `{
                     },
                     "401": {
                         "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/packing/defect": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Flips fg_pool.status to DEFECT and records reason/photos. If the\nFG was RESERVED, its container_line is auto-removed first (BR-PK03).",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "packing"
+                ],
+                "summary": "Report defect on a finished good",
+                "parameters": [
+                    {
+                        "description": "payload",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_module_packing.ReportDefectInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/internal_module_packing.FGDefect"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/packing/defect/{id}/resolve": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "DISCARD/RETURN_NCC → DISPOSED, REWORK → AVAILABLE so the FG can re-enter the pool.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "packing"
+                ],
+                "summary": "Resolve a reported defect",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "defect id (uuid)",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "payload",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_module_packing.resolveDefectBody"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_module_packing.FGDefect"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/packing/scan": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Resolves the barcode → FG and returns suggested loadable containers.\nReturns 412 when the underlying WO is not yet COMPLETED (BR-PK01).",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "packing"
+                ],
+                "summary": "Scan FG barcode at packing station",
+                "parameters": [
+                    {
+                        "description": "payload",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_module_packing.scanRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_module_packing.ScanResult"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "412": {
+                        "description": "Precondition Failed",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -8505,6 +8805,32 @@ const docTemplate = `{
                 }
             }
         },
+        "github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_packing_FGPool": {
+            "type": "object",
+            "properties": {
+                "current_page": {
+                    "type": "integer"
+                },
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_module_packing.FGPool"
+                    }
+                },
+                "limit": {
+                    "type": "integer"
+                },
+                "total_is_estimate": {
+                    "type": "boolean"
+                },
+                "total_items": {
+                    "type": "integer"
+                },
+                "total_pages": {
+                    "type": "integer"
+                }
+            }
+        },
         "github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_planning_Plan": {
             "type": "object",
             "properties": {
@@ -10359,6 +10685,173 @@ const docTemplate = `{
                 },
                 "total_skus": {
                     "type": "integer"
+                }
+            }
+        },
+        "internal_module_packing.ContainerSuggestion": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "type": "string"
+                },
+                "container_id": {
+                    "type": "string"
+                },
+                "container_type": {
+                    "type": "string"
+                },
+                "fill_pct_cbm": {
+                    "type": "number"
+                },
+                "fill_pct_mass": {
+                    "type": "number"
+                },
+                "status": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_module_packing.FGDefect": {
+            "type": "object",
+            "properties": {
+                "detail": {
+                    "type": "string"
+                },
+                "detected_at": {
+                    "type": "string"
+                },
+                "detected_by": {
+                    "type": "string"
+                },
+                "fg_pool_id": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "note": {
+                    "type": "string"
+                },
+                "photo_urls": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "reason": {
+                    "type": "string"
+                },
+                "resolution": {
+                    "type": "string"
+                },
+                "resolved_at": {
+                    "type": "string"
+                },
+                "resolved_by": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_module_packing.FGPool": {
+            "type": "object",
+            "properties": {
+                "barcode_id": {
+                    "type": "string"
+                },
+                "container_line_id": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "qc_passed_at": {
+                    "type": "string"
+                },
+                "qc_passed_by": {
+                    "type": "string"
+                },
+                "sales_order_line_id": {
+                    "type": "string"
+                },
+                "sku_code": {
+                    "type": "string"
+                },
+                "sku_id": {
+                    "type": "string"
+                },
+                "sku_name": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "work_order_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_module_packing.ReportDefectInput": {
+            "type": "object",
+            "properties": {
+                "barcode_id": {
+                    "type": "string"
+                },
+                "detail": {
+                    "type": "string"
+                },
+                "photo_urls": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "reason": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_module_packing.ScanResult": {
+            "type": "object",
+            "properties": {
+                "fg": {
+                    "$ref": "#/definitions/internal_module_packing.FGPool"
+                },
+                "suggested_containers": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_module_packing.ContainerSuggestion"
+                    }
+                },
+                "wo_status": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_module_packing.resolveDefectBody": {
+            "type": "object",
+            "required": [
+                "resolution"
+            ],
+            "properties": {
+                "note": {
+                    "type": "string"
+                },
+                "resolution": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_module_packing.scanRequest": {
+            "type": "object",
+            "required": [
+                "barcode_id"
+            ],
+            "properties": {
+                "barcode_id": {
+                    "type": "string"
                 }
             }
         },

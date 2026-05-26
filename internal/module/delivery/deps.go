@@ -59,3 +59,26 @@ type ShipmentItem struct {
 	SOLineID uuid.UUID
 	Qty      int
 }
+
+// FGTracker mirrors finished-goods state (#291) onto the packing module.
+// All methods are BEST-EFFORT from delivery's perspective: a non-nil error
+// is logged but never aborts the AddLine/DeleteLine/Seal flow. The packing
+// pool is a soft allocation — if reserve cannot find enough AVAILABLE rows,
+// the warehouse can reconcile manually via the FG list.
+type FGTracker interface {
+	// ReserveOnAdd flips qty AVAILABLE FG rows matching (sku, soLineID) to
+	// RESERVED, stamping container_line_id. Returns the count actually
+	// reserved (may be < qty when the pool is short).
+	ReserveOnAdd(ctx context.Context, in FGReserveRequest) (int, error)
+	// ReleaseOnDelete flips RESERVED FG rows on the deleted line back to AVAILABLE.
+	ReleaseOnDelete(ctx context.Context, containerLineID uuid.UUID) error
+	// MarkLoadedOnSeal flips RESERVED FG rows on the sealed container to LOADED.
+	MarkLoadedOnSeal(ctx context.Context, containerID uuid.UUID) error
+}
+
+type FGReserveRequest struct {
+	SKUID            uuid.UUID
+	SalesOrderLineID uuid.UUID
+	Qty              int
+	ContainerLineID  uuid.UUID
+}

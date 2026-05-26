@@ -244,6 +244,23 @@ definitions:
       total_pages:
         type: integer
     type: object
+  github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_packing_FGPool:
+    properties:
+      current_page:
+        type: integer
+      items:
+        items:
+          $ref: '#/definitions/internal_module_packing.FGPool'
+        type: array
+      limit:
+        type: integer
+      total_is_estimate:
+        type: boolean
+      total_items:
+        type: integer
+      total_pages:
+        type: integer
+    type: object
   github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_planning_Plan:
     properties:
       current_page:
@@ -1474,6 +1491,115 @@ definitions:
         type: integer
       total_skus:
         type: integer
+    type: object
+  internal_module_packing.ContainerSuggestion:
+    properties:
+      code:
+        type: string
+      container_id:
+        type: string
+      container_type:
+        type: string
+      fill_pct_cbm:
+        type: number
+      fill_pct_mass:
+        type: number
+      status:
+        type: string
+    type: object
+  internal_module_packing.FGDefect:
+    properties:
+      detail:
+        type: string
+      detected_at:
+        type: string
+      detected_by:
+        type: string
+      fg_pool_id:
+        type: string
+      id:
+        type: string
+      note:
+        type: string
+      photo_urls:
+        items:
+          type: string
+        type: array
+      reason:
+        type: string
+      resolution:
+        type: string
+      resolved_at:
+        type: string
+      resolved_by:
+        type: string
+    type: object
+  internal_module_packing.FGPool:
+    properties:
+      barcode_id:
+        type: string
+      container_line_id:
+        type: string
+      created_at:
+        type: string
+      id:
+        type: string
+      qc_passed_at:
+        type: string
+      qc_passed_by:
+        type: string
+      sales_order_line_id:
+        type: string
+      sku_code:
+        type: string
+      sku_id:
+        type: string
+      sku_name:
+        type: string
+      status:
+        type: string
+      work_order_id:
+        type: string
+    type: object
+  internal_module_packing.ReportDefectInput:
+    properties:
+      barcode_id:
+        type: string
+      detail:
+        type: string
+      photo_urls:
+        items:
+          type: string
+        type: array
+      reason:
+        type: string
+    type: object
+  internal_module_packing.ScanResult:
+    properties:
+      fg:
+        $ref: '#/definitions/internal_module_packing.FGPool'
+      suggested_containers:
+        items:
+          $ref: '#/definitions/internal_module_packing.ContainerSuggestion'
+        type: array
+      wo_status:
+        type: string
+    type: object
+  internal_module_packing.resolveDefectBody:
+    properties:
+      note:
+        type: string
+      resolution:
+        type: string
+    required:
+    - resolution
+    type: object
+  internal_module_packing.scanRequest:
+    properties:
+      barcode_id:
+        type: string
+    required:
+    - barcode_id
     type: object
   internal_module_planning.CreatePlanInput:
     properties:
@@ -3546,6 +3672,71 @@ paths:
       summary: Get WIP pipeline aggregation per stage
       tags:
       - dashboard
+  /api/v1/fg-pool:
+    get:
+      parameters:
+      - description: page (default 1)
+        in: query
+        name: page
+        type: integer
+      - description: limit (default 10, max 100)
+        in: query
+        name: limit
+        type: integer
+      - description: AVAILABLE / RESERVED / LOADED / DEFECT / DISPOSED
+        in: query
+        name: status
+        type: string
+      - description: filter by SKU id (uuid)
+        in: query
+        name: sku_id
+        type: string
+      - description: filter by sales order line id (uuid)
+        in: query
+        name: so_line_id
+        type: string
+      - description: filter by work order id (uuid)
+        in: query
+        name: wo_id
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_packing_FGPool'
+      security:
+      - BearerAuth: []
+      summary: List Finished-Goods pool entries
+      tags:
+      - packing
+  /api/v1/fg-pool/{id}:
+    get:
+      parameters:
+      - description: fg id (uuid)
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_module_packing.FGPool'
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Get one FG pool entry
+      tags:
+      - packing
   /api/v1/inventory/audit-log:
     get:
       description: |-
@@ -4913,6 +5104,136 @@ paths:
       summary: Subscribe to realtime notifications (SSE)
       tags:
       - events
+  /api/v1/packing/defect:
+    post:
+      consumes:
+      - application/json
+      description: |-
+        Flips fg_pool.status to DEFECT and records reason/photos. If the
+        FG was RESERVED, its container_line is auto-removed first (BR-PK03).
+      parameters:
+      - description: payload
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_module_packing.ReportDefectInput'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/internal_module_packing.FGDefect'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "409":
+          description: Conflict
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Report defect on a finished good
+      tags:
+      - packing
+  /api/v1/packing/defect/{id}/resolve:
+    post:
+      consumes:
+      - application/json
+      description: DISCARD/RETURN_NCC → DISPOSED, REWORK → AVAILABLE so the FG can
+        re-enter the pool.
+      parameters:
+      - description: defect id (uuid)
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: payload
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_module_packing.resolveDefectBody'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_module_packing.FGDefect'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "409":
+          description: Conflict
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Resolve a reported defect
+      tags:
+      - packing
+  /api/v1/packing/scan:
+    post:
+      consumes:
+      - application/json
+      description: |-
+        Resolves the barcode → FG and returns suggested loadable containers.
+        Returns 412 when the underlying WO is not yet COMPLETED (BR-PK01).
+      parameters:
+      - description: payload
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_module_packing.scanRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_module_packing.ScanResult'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "412":
+          description: Precondition Failed
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Scan FG barcode at packing station
+      tags:
+      - packing
   /api/v1/plans:
     get:
       parameters:

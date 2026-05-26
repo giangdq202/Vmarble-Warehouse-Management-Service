@@ -24,6 +24,7 @@ import (
 	"github.com/vmarble/warehouse-management-service/internal/module/delivery"
 	"github.com/vmarble/warehouse-management-service/internal/module/inventory"
 	"github.com/vmarble/warehouse-management-service/internal/module/order"
+	"github.com/vmarble/warehouse-management-service/internal/module/packing"
 	"github.com/vmarble/warehouse-management-service/internal/module/planning"
 	"github.com/vmarble/warehouse-management-service/internal/module/production"
 	"github.com/vmarble/warehouse-management-service/internal/module/purchasing"
@@ -89,6 +90,7 @@ func main() {
 	purchasingStore := purchasing.NewPGStore(pool)
 	salesStore := sales.NewPGStore(pool)
 	deliveryStore := delivery.NewPGStore(pool)
+	packingStore := packing.NewPGStore(pool)
 
 	// ── Module services ─────────────────────────────────────
 	authnSvc := authn.NewService(authnStore, cfg.AuthSecret)
@@ -188,6 +190,34 @@ func main() {
 		cfg.ContainerCBMOverheadPct,
 	)
 
+	// Packing owns the FG pool. Constructed AFTER delivery so its container
+	// suggestions / line-removal hook can reference deliverySvc directly.
+	// Two cycle breaks below: production -> packing (FG hook on COMPLETED)
+	// and delivery -> packing (FG track on AddLine/DeleteLine/Seal) — both
+	// wired post-construction via setters because packing depends on those
+	// modules in the other direction.
+	packingSvc := packing.NewService(
+		packingStore,
+		&packingBarcodeIssuerAdapter{svc: barcodeSvc},
+		&packingBarcodeResolverAdapter{svc: barcodeSvc},
+		&packingWOGatewayAdapter{svc: productionSvc},
+		&packingContainerSuggesterAdapter{svc: deliverySvc},
+		&packingContainerLineRemoverAdapter{svc: deliverySvc},
+		&packingDefectNotifierAdapter{publisher: eventPublisher},
+	)
+
+	// Wire the FG hooks now that all three services exist.
+	if hooked, ok := productionSvc.(interface {
+		SetFinishedGoodsHook(production.FinishedGoodsHook)
+	}); ok {
+		hooked.SetFinishedGoodsHook(&productionFGHookAdapter{svc: packingSvc})
+	}
+	if hooked, ok := deliverySvc.(interface {
+		SetFGTracker(delivery.FGTracker)
+	}); ok {
+		hooked.SetFGTracker(&deliveryFGTrackerAdapter{svc: packingSvc})
+	}
+
 	// ── Background: auto-release expired remnant allocations ─────────────────
 	// Ticks every cfg.RemnantAllocCheckInterval. Remnants that have been
 	// ALLOCATED for longer than cfg.RemnantAllocTimeout without being consumed
@@ -245,6 +275,7 @@ func main() {
 	reports.NewHandler(reportsSvc).Register(api)
 	sales.NewHandler(salesSvc).Register(api)
 	delivery.NewHandler(deliverySvc).Register(api)
+	packing.NewHandler(packingSvc).Register(api)
 
 	srv := &http.Server{
 		Addr:         ":" + cfg.Port,
@@ -966,4 +997,209 @@ func (a *deliveryShipmentAdapter) RecordShipmentTx(ctx context.Context, tx pgx.T
 		out[i] = sales.ShipmentItemInput{SOLineID: it.SOLineID, Qty: it.Qty}
 	}
 	return a.svc.RecordShipmentTx(ctx, tx, out)
+}
+
+// ── Packing adapters (#291) ────────────────────────────────────────────────
+
+// packingBarcodeIssuerAdapter implements packing.BarcodeIssuer by delegating
+// to the existing barcode module. The packing module needs to mint exactly
+// one barcode per FG row when WO advances to COMPLETED.
+type packingBarcodeIssuerAdapter struct {
+	svc barcode.Service
+}
+
+func (a *packingBarcodeIssuerAdapter) GenerateBarcode(ctx context.Context, in packing.BarcodeIssueInput) (packing.BarcodeRef, error) {
+	bc, err := a.svc.GenerateBarcode(ctx, barcode.GenerateBarcodeInput{
+		WorkOrderID:      in.WorkOrderID,
+		SKUID:            in.SKUID,
+		POID:             in.POID,
+		ProductionPlanID: in.ProductionPlanID,
+		SKUCode:          in.SKUCode,
+		SKUName:          in.SKUName,
+		Dimensions:       in.Dimensions,
+		ProducedDate:     in.ProducedDate,
+	})
+	if err != nil {
+		return packing.BarcodeRef{}, err
+	}
+	return packing.BarcodeRef{ID: bc.ID}, nil
+}
+
+// packingBarcodeResolverAdapter implements packing.BarcodeResolver via
+// barcode.LookupBarcode. Used at scan time to validate that the scanned
+// barcode exists before consulting fg_pool.
+type packingBarcodeResolverAdapter struct {
+	svc barcode.Service
+}
+
+func (a *packingBarcodeResolverAdapter) LookupBarcode(ctx context.Context, barcodeID uuid.UUID) (packing.BarcodeLookup, error) {
+	bc, err := a.svc.LookupBarcode(ctx, barcodeID)
+	if err != nil {
+		return packing.BarcodeLookup{}, err
+	}
+	return packing.BarcodeLookup{
+		ID:          bc.ID,
+		WorkOrderID: bc.WorkOrderID,
+		SKUID:       bc.SKUID,
+	}, nil
+}
+
+// packingWOGatewayAdapter implements packing.WorkOrderGateway. ScanBarcode
+// uses it to enforce BR-PK01 (scan only valid after WO COMPLETED).
+type packingWOGatewayAdapter struct {
+	svc production.Service
+}
+
+func (a *packingWOGatewayAdapter) GetWorkOrderStatus(ctx context.Context, woID uuid.UUID) (packing.WorkOrderStatusInfo, error) {
+	wo, err := a.svc.GetWorkOrder(ctx, woID)
+	if err != nil {
+		return packing.WorkOrderStatusInfo{}, err
+	}
+	return packing.WorkOrderStatusInfo{ID: wo.ID, Status: string(wo.Status)}, nil
+}
+
+// packingContainerSuggesterAdapter projects delivery.GetContainer (per-SO-line
+// view) onto the slim suggestion shape packing surfaces at scan time. The
+// kiosk receives OPEN/LOADING containers carrying the same SO line, ordered
+// by fill_pct ascending so the operator picks the most-empty container first.
+type packingContainerSuggesterAdapter struct {
+	svc delivery.Service
+}
+
+func (a *packingContainerSuggesterAdapter) SuggestForSOLine(ctx context.Context, soLineID uuid.UUID) ([]packing.ContainerSuggestion, error) {
+	// Page through containers carrying this SO line via the standard list
+	// endpoint. For v1 we rely on the page filter — when the volume of OPEN
+	// containers grows, a dedicated SuggestForSOLine query in delivery.pgstore
+	// can replace this without touching the packing surface.
+	res, err := a.svc.ListContainers(ctx, httpkit.PageParams{Page: 1, Limit: 50}, delivery.ContainerListFilter{
+		Status: delivery.ContainerStatusLoading,
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]packing.ContainerSuggestion, 0, len(res.Items))
+	for _, c := range res.Items {
+		// Hydrate fill metrics from the Get payload — list response keeps
+		// the page query a single round-trip and skips per-row aggregation.
+		full, err := a.svc.GetContainer(ctx, c.ID)
+		if err != nil {
+			continue
+		}
+		hasLine := false
+		for _, l := range full.Lines {
+			if l.SalesOrderLineID == soLineID {
+				hasLine = true
+				break
+			}
+		}
+		if !hasLine {
+			continue
+		}
+		out = append(out, packing.ContainerSuggestion{
+			ContainerID:   full.ID,
+			Code:          full.Code,
+			Status:        full.Status,
+			FillPctCBM:    full.FillPctCBM,
+			FillPctMass:   full.FillPctMass,
+			ContainerType: full.ContainerType,
+		})
+	}
+	return out, nil
+}
+
+// packingContainerLineRemoverAdapter implements packing.ContainerLineRemover
+// by walking the FG → container_line chain back through delivery.DeleteLine.
+// Needed by ReportDefect when a RESERVED FG is flagged: the line stops
+// counting toward container qty/cbm/weight before the FG flips to DEFECT.
+type packingContainerLineRemoverAdapter struct {
+	svc delivery.Service
+}
+
+func (a *packingContainerLineRemoverAdapter) DeleteLineForDefect(ctx context.Context, containerLineID uuid.UUID, actorID uuid.UUID) error {
+	// Resolve the container_id from the line via a lightweight list scan;
+	// the active-set is small (OPEN/LOADING containers only). For Sprint 8
+	// when the warehouse scales, replace with a dedicated lookup.
+	res, err := a.svc.ListContainers(ctx, httpkit.PageParams{Page: 1, Limit: 200}, delivery.ContainerListFilter{})
+	if err != nil {
+		return err
+	}
+	for _, c := range res.Items {
+		if c.Status != delivery.ContainerStatusOpen && c.Status != delivery.ContainerStatusLoading {
+			continue
+		}
+		full, err := a.svc.GetContainer(ctx, c.ID)
+		if err != nil {
+			continue
+		}
+		for _, l := range full.Lines {
+			if l.ID == containerLineID {
+				return a.svc.DeleteLine(ctx, c.ID, containerLineID, actorID)
+			}
+		}
+	}
+	return nil // line not found in active containers — assume already removed
+}
+
+// packingDefectNotifierAdapter implements packing.DefectNotifier on top of
+// the platform events publisher.
+type packingDefectNotifierAdapter struct {
+	publisher *events.Publisher
+}
+
+func (a *packingDefectNotifierAdapter) NotifyFGDefect(ctx context.Context, fgID uuid.UUID, skuCode, reason string) error {
+	return a.publisher.NotifyFGDefect(ctx, fgID.String(), skuCode, reason)
+}
+
+func (a *packingDefectNotifierAdapter) NotifyFGDefectResolved(ctx context.Context, fgID uuid.UUID, resolution string) error {
+	return a.publisher.NotifyFGDefectResolved(ctx, fgID.String(), resolution)
+}
+
+// productionFGHookAdapter implements production.FinishedGoodsHook by
+// delegating to packing.CreateFromCompletedWO. Wired post-construction
+// because the production -> packing path otherwise cycles with the
+// packing -> production WorkOrderGateway.
+type productionFGHookAdapter struct {
+	svc packing.Service
+}
+
+func (a *productionFGHookAdapter) OnWOCompleted(ctx context.Context, evt production.WOCompletedEvent) error {
+	_, err := a.svc.CreateFromCompletedWO(ctx, packing.CreateFromCompletedWOInput{
+		WorkOrderID:      evt.WorkOrderID,
+		SKUID:            evt.SKUID,
+		SKUCode:          evt.SKUCode,
+		SKUName:          evt.SKUName,
+		Dimensions:       evt.Dimensions,
+		Quantity:         evt.Quantity,
+		SalesOrderLineID: evt.SalesOrderLineID,
+		ProductionPlanID: evt.ProductionPlanID,
+		QCPassedBy:       evt.QCPassedBy,
+		ProducedDate:     time.Now(),
+	})
+	return err
+}
+
+// deliveryFGTrackerAdapter implements delivery.FGTracker by delegating to the
+// packing module. AddLine / DeleteLine / Seal each call into packing as a
+// best-effort hook — packing owns the FG pool, delivery owns the container
+// state, the two stay loosely coupled so neither blocks the other on
+// transient failure.
+type deliveryFGTrackerAdapter struct {
+	svc packing.Service
+}
+
+func (a *deliveryFGTrackerAdapter) ReserveOnAdd(ctx context.Context, in delivery.FGReserveRequest) (int, error) {
+	return a.svc.ReserveOnContainerAdd(ctx, packing.ReserveInput{
+		SKUID:            in.SKUID,
+		SalesOrderLineID: in.SalesOrderLineID,
+		Qty:              in.Qty,
+		ContainerLineID:  in.ContainerLineID,
+	})
+}
+
+func (a *deliveryFGTrackerAdapter) ReleaseOnDelete(ctx context.Context, containerLineID uuid.UUID) error {
+	return a.svc.ReleaseOnContainerDelete(ctx, containerLineID)
+}
+
+func (a *deliveryFGTrackerAdapter) MarkLoadedOnSeal(ctx context.Context, containerID uuid.UUID) error {
+	return a.svc.MarkLoadedOnSeal(ctx, containerID)
 }
