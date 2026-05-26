@@ -135,3 +135,29 @@ type BOMReader interface {
 type SheetRequirement struct {
 	MaterialID uuid.UUID
 }
+
+// FinishedGoodsHook is called after a work order successfully advances to
+// COMPLETED. The packing module's CreateFromCompletedWO is the canonical
+// implementation: it generates a barcode + fg_pool row per produced unit so
+// the warehouse can scan finished goods at the packing kiosk. Best-effort
+// from production's perspective — a non-nil error is logged and the
+// AdvanceStatus call still returns success because the WO transition itself
+// already persisted.
+type FinishedGoodsHook interface {
+	OnWOCompleted(ctx context.Context, in WOCompletedEvent) error
+}
+
+// WOCompletedEvent is the slim projection production hands to the FG hook.
+// Mirrors the fields packing.CreateFromCompletedWOInput needs without
+// pulling the packing types into production's import graph.
+type WOCompletedEvent struct {
+	WorkOrderID      uuid.UUID
+	SKUID            uuid.UUID
+	SKUCode          string
+	SKUName          string
+	Dimensions       string
+	Quantity         int
+	SalesOrderLineID *uuid.UUID
+	ProductionPlanID uuid.UUID
+	QCPassedBy       uuid.UUID
+}

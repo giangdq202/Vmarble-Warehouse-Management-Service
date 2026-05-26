@@ -89,3 +89,32 @@ func (p *Publisher) NotifyCostingComputed(ctx context.Context, woID, costingType
 		Payload: map[string]any{"costing_type": costingType},
 	})
 }
+
+// NotifyFGDefect fires FG_DEFECT_CREATED so planner/foreman dashboards
+// surface defects without polling. Audience matches the manager-tier roles
+// that triage rework / discard decisions.
+func (p *Publisher) NotifyFGDefect(ctx context.Context, fgID, skuCode, reason string) error {
+	return p.publish(ctx, Event{
+		Roles: []string{"planner", "foreman", "accountant", "admin"},
+		Type:  EventTypeFGDefectCreated,
+		Payload: map[string]any{
+			"fg_id":    fgID,
+			"sku_code": skuCode,
+			"reason":   reason,
+		},
+	})
+}
+
+// NotifyFGDefectResolved fires FG_DEFECT_RESOLVED after packing.ResolveDefect
+// closes the defect — same audience as FG_DEFECT_CREATED so the dashboards
+// can clear the open-defect badge in lockstep.
+func (p *Publisher) NotifyFGDefectResolved(ctx context.Context, fgID, resolution string) error {
+	return p.publish(ctx, Event{
+		Roles: []string{"planner", "foreman", "accountant", "admin"},
+		Type:  EventTypeFGDefectResolved,
+		Payload: map[string]any{
+			"fg_id":      fgID,
+			"resolution": resolution,
+		},
+	})
+}

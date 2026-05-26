@@ -23,6 +23,16 @@ type service struct {
 	stk      StockChecker
 	br       BOMReader
 	notifier WorkOrderNotifier
+	fgHook   FinishedGoodsHook
+}
+
+// SetFinishedGoodsHook wires the packing module's WO-COMPLETED hook after
+// construction. Done as a setter rather than a constructor parameter because
+// packing depends on production via WorkOrderGateway, so the two services
+// would otherwise form a construction cycle. main.go calls this once both
+// services exist.
+func (svc *service) SetFinishedGoodsHook(h FinishedGoodsHook) {
+	svc.fgHook = h
 }
 
 func NewService(s store, pc PlanChecker, sc SKUChecker, uc UserChecker, sa SheetAssigner, cc CostingChecker, notifier WorkOrderNotifier) Service {
@@ -257,6 +267,35 @@ func (svc *service) AdvanceStatus(ctx context.Context, woID uuid.UUID, in Advanc
 	if svc.notifier != nil {
 		if err := svc.notifier.NotifyWOStatusChanged(ctx, woID.String(), string(in.To)); err != nil {
 			slog.Warn("production: notify wo status changed failed", "wo_id", woID, "status", in.To, "err", err)
+		}
+	}
+
+	// Fire the packing FG hook after a successful COMPLETED transition. The
+	// transition has already persisted at this point so a hook failure is
+	// logged + swallowed; the warehouse can backfill via packing.CreateFromCompletedWO
+	// idempotently when the broker recovers.
+	if in.To == domain.WOCompleted && svc.fgHook != nil {
+		qcPassedBy := wo.AssignedTo
+		if in.CallerID != nil {
+			qcPassedBy = in.CallerID
+		}
+		var actor uuid.UUID
+		if qcPassedBy != nil {
+			actor = *qcPassedBy
+		}
+		evt := WOCompletedEvent{
+			WorkOrderID:      wo.ID,
+			SKUID:            wo.SKUID,
+			SKUCode:          wo.SKUCode,
+			SKUName:          wo.SKUName,
+			Dimensions:       wo.SKUDimensions.String(),
+			Quantity:         wo.Quantity,
+			SalesOrderLineID: wo.SalesOrderLineID,
+			ProductionPlanID: wo.PlanID,
+			QCPassedBy:       actor,
+		}
+		if err := svc.fgHook.OnWOCompleted(ctx, evt); err != nil {
+			slog.Warn("production: FG hook failed", "wo_id", woID, "err", err)
 		}
 	}
 	return nil

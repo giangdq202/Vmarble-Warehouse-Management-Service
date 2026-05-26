@@ -53,6 +53,15 @@ const (
 	// Routed by Roles: [accountant, admin].
 	EventTypeCostingComputed = "COSTING_COMPUTED"
 
+	// EventTypeFGDefectCreated fires after packing.ReportDefect persists a row.
+	// Routed by Roles: [planner, foreman, accountant, admin] so dashboards
+	// surface defects without polling.
+	EventTypeFGDefectCreated = "FG_DEFECT_CREATED"
+
+	// EventTypeFGDefectResolved fires after packing.ResolveDefect closes the
+	// defect. Same audience as FG_DEFECT_CREATED.
+	EventTypeFGDefectResolved = "FG_DEFECT_RESOLVED"
+
 	// pgChannel is the PostgreSQL LISTEN/NOTIFY channel name.
 	pgChannel = "vwm_events"
 )

@@ -3,6 +3,7 @@ package delivery
 import (
 	"bytes"
 	"context"
+	"log/slog"
 	"time"
 
 	"github.com/google/uuid"
@@ -17,6 +18,7 @@ type service struct {
 	skuChecker     SKUChecker
 	soLineChecker  SOLineChecker
 	shipRecorder   ShipmentRecorder
+	fgTracker      FGTracker
 	cbmOverheadPct float64
 	now            func() time.Time // overridable in tests
 }
@@ -34,6 +36,15 @@ func NewService(s store, sku SKUChecker, soLine SOLineChecker, ship ShipmentReco
 		cbmOverheadPct: cbmOverheadPct,
 		now:            time.Now,
 	}
+}
+
+// SetFGTracker wires the packing FG hooks after construction. Done as a
+// setter (rather than a constructor parameter) because packing depends on
+// delivery via ContainerSuggester / ContainerLineRemover, so the two
+// services would otherwise form a construction cycle. main.go calls this
+// once both services exist; tests leave it nil.
+func (svc *service) SetFGTracker(t FGTracker) {
+	svc.fgTracker = t
 }
 
 // ── Container CRUD ──────────────────────────────────────────────────────────
@@ -221,11 +232,32 @@ func (svc *service) AddLine(ctx context.Context, in AddLineInput) (ContainerLine
 	if err != nil {
 		return ContainerLine{}, err
 	}
+
+	// Best-effort FG reservation: flip qty matching AVAILABLE rows in the
+	// packing pool to RESERVED. Runs OUTSIDE the AddLine tx because packing
+	// owns its own pool — a shortfall is logged but not fatal (manual
+	// reconciliation via the FG list).
+	if svc.fgTracker != nil {
+		req := FGReserveRequest{
+			SKUID:            line.SKUID,
+			SalesOrderLineID: line.SalesOrderLineID,
+			Qty:              line.Qty,
+			ContainerLineID:  line.ID,
+		}
+		reserved, rerr := svc.fgTracker.ReserveOnAdd(ctx, req)
+		if rerr != nil {
+			slog.Warn("delivery: FG reserve failed",
+				"line_id", line.ID, "qty", line.Qty, "err", rerr)
+		} else if reserved < line.Qty {
+			slog.Warn("delivery: FG reserve shortfall",
+				"line_id", line.ID, "wanted", line.Qty, "reserved", reserved)
+		}
+	}
 	return line, nil
 }
 
 func (svc *service) DeleteLine(ctx context.Context, containerID, lineID uuid.UUID, _ uuid.UUID) error {
-	return svc.s.withTx(ctx, func(tx txStore, _ pgx.Tx) error {
+	if err := svc.s.withTx(ctx, func(tx txStore, _ pgx.Tx) error {
 		c, err := tx.lockContainerForUpdate(ctx, containerID)
 		if err != nil {
 			return err
@@ -245,7 +277,17 @@ func (svc *service) DeleteLine(ctx context.Context, containerID, lineID uuid.UUI
 			return domain.NewBizError(domain.ErrInvalidInput, "line does not belong to this container")
 		}
 		return tx.deleteLine(ctx, lineID)
-	})
+	}); err != nil {
+		return err
+	}
+
+	// Best-effort: release any FG that was RESERVED to this line back to AVAILABLE.
+	if svc.fgTracker != nil {
+		if err := svc.fgTracker.ReleaseOnDelete(ctx, lineID); err != nil {
+			slog.Warn("delivery: FG release failed", "line_id", lineID, "err", err)
+		}
+	}
+	return nil
 }
 
 // TransferLine moves part or all of a line into a target container. The
@@ -446,6 +488,14 @@ func (svc *service) Seal(ctx context.Context, in SealInput) (Container, error) {
 	})
 	if err != nil {
 		return Container{}, err
+	}
+
+	// Best-effort FG mark-loaded: flip every RESERVED FG on this container
+	// to LOADED so dashboards stop counting it as in-flight inventory.
+	if svc.fgTracker != nil {
+		if err := svc.fgTracker.MarkLoadedOnSeal(ctx, in.ContainerID); err != nil {
+			slog.Warn("delivery: FG mark-loaded failed", "container_id", in.ContainerID, "err", err)
+		}
 	}
 	return sealed, nil
 }
