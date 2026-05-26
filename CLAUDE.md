@@ -245,8 +245,15 @@ From spec section 8 — confirm before implementing smart algorithms:
 | `integration-architect` | New endpoint, API contract change, new cross-module dependency (`deps.go`) |
 | `deploy` | User says "deploy", "docker", "CI/CD", "go live", "staging", "production", "health check" |
 | `rbac-hardener` | User says "phân quyền", "rbac", "role guard", "access control", "security audit", or before go-live |
+| `golang-patterns` | Inside `senior-workflow` Phase 4 — idiomatic Go (zero-value, error wrapping, context) |
+| `golang-testing` | Inside `senior-workflow` Phase 4-5 — table-driven tests, race detector, mock patterns |
+| `database-migrations` | Adding/modifying `migrations/` files; goose Up/Down discipline |
+| `security-review` | OWASP scan, secret leakage check, before merging changes that touch auth/RBAC/PII |
+| `code-tour` | Onboarding a reviewer to a multi-file PR; walking through unfamiliar module |
+| `parallel-execution-optimizer` | Multiple independent issues queued — split into worktrees / parallel agents |
+| `recursive-decision-ledger` | Repeated decisions across PRs (filter pattern, hook wiring) — capture into `INSTINCTS.md` |
 
-> **Rule**: `business-auditor` and `integration-architect` run *inside* `senior-workflow` — they do not replace it. `senior-workflow` is always the outer shell. `rbac-hardener` should run at least once before first production deploy.
+> **Rule**: `business-auditor` and `integration-architect` run *inside* `senior-workflow` — they do not replace it. `senior-workflow` is always the outer shell. `rbac-hardener` should run at least once before first production deploy. `golang-patterns` / `golang-testing` are reference skills consulted from inside Phase 4 implementation, not separate phases.
 
 ---
 
