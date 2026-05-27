@@ -118,3 +118,22 @@ func (p *Publisher) NotifyFGDefectResolved(ctx context.Context, fgID, resolution
 		},
 	})
 }
+
+// NotifyPlanReload fires PLAN_RELOAD after a v2 supersede wipes
+// container_lines on a container (BR-D13). The audience covers every role
+// that might be looking at that container's kiosk or planning view: line
+// operators (cnc, warehouse) so the kiosk can force-refresh, plus managers
+// and admin for dashboard sync. supersededLines lets the kiosk render
+// "{N} units cleared, scan from zero" without an extra fetch.
+func (p *Publisher) NotifyPlanReload(ctx context.Context, containerID, planID string, version, supersededLines int) error {
+	return p.publish(ctx, Event{
+		Roles: []string{"warehouse", "cnc", "cnc_manager", "planner", "foreman", "accountant", "admin"},
+		Type:  EventTypePlanReload,
+		Payload: map[string]any{
+			"container_id":     containerID,
+			"plan_id":          planID,
+			"version":          version,
+			"superseded_lines": supersededLines,
+		},
+	})
+}

@@ -230,6 +230,14 @@ func main() {
 	}); ok {
 		hooked.SetLoadingPlanAuditor(&deliveryLoadingPlanAuditAdapter{pool: pool})
 	}
+	// Plan reload SSE (BR-D13). Best-effort — a failed publish is logged,
+	// not propagated, because the BE write is the source of truth and the
+	// kiosk's next scan will refresh state regardless.
+	if hooked, ok := deliverySvc.(interface {
+		SetPlanReloadNotifier(delivery.PlanReloadNotifier)
+	}); ok {
+		hooked.SetPlanReloadNotifier(&deliveryPlanReloadAdapter{pub: eventPublisher})
+	}
 
 	// ── Background: auto-release expired remnant allocations ─────────────────
 	// Ticks every cfg.RemnantAllocCheckInterval. Remnants that have been
@@ -1302,4 +1310,19 @@ func (a *deliveryLoadingPlanAuditAdapter) LogLoadingPlan(ctx context.Context, in
 		in.PlanID, string(in.Action), in.ActorID, in.Notes, meta,
 	)
 	return err
+}
+
+// deliveryPlanReloadAdapter bridges delivery.PlanReloadNotifier to the SSE
+// publisher (BR-D13). Inlined here so the delivery module does not depend on
+// the events package. The publish failure mode is best-effort — see
+// delivery.service.ApproveLoadingPlan for the slog.Warn-and-continue path.
+type deliveryPlanReloadAdapter struct{ pub *events.Publisher }
+
+func (a *deliveryPlanReloadAdapter) NotifyPlanReload(ctx context.Context, in delivery.PlanReloadNotice) error {
+	return a.pub.NotifyPlanReload(ctx,
+		in.ContainerID.String(),
+		in.NewPlanID.String(),
+		in.NewVersion,
+		in.SupersededLines,
+	)
 }

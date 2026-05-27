@@ -82,10 +82,10 @@ type ContainerStatusLogEntry struct {
 // caller can override the defaults for a non-standard 20GP / 40GP / 40HC
 // container. When zero, the service substitutes the default for the type.
 type CreateContainerInput struct {
-	ContainerType string  `json:"container_type"`
-	MaxCBM        float64 `json:"max_cbm,omitempty"`
-	MaxPayloadKG  float64 `json:"max_payload_kg,omitempty"`
-	Note          string  `json:"note,omitempty"`
+	ContainerType string    `json:"container_type"`
+	MaxCBM        float64   `json:"max_cbm,omitempty"`
+	MaxPayloadKG  float64   `json:"max_payload_kg,omitempty"`
+	Note          string    `json:"note,omitempty"`
 	CreatedBy     uuid.UUID `json:"-"`
 }
 
@@ -245,6 +245,28 @@ type ApproveLoadingPlanInput struct {
 	PlanID  uuid.UUID
 	ActorID uuid.UUID
 	Notes   string
+	// ConfirmSupersede must be true when the container already has scanned
+	// container_lines that would be wiped by this approve (BR-D11). When the
+	// flag is false and lines exist, ApproveLoadingPlan returns
+	// ErrPreconditionFailed with the affected count so the FE can show the
+	// confirm dialog.
+	ConfirmSupersede bool
+}
+
+// ContainerLineHistoryEntry is one row of container_lines_history (#302). Used
+// by GET /containers/:id/lines-history?plan_id= to surface the audit timeline
+// to packers when their kiosk forces a reload.
+type ContainerLineHistoryEntry struct {
+	ID               uuid.UUID  `json:"id"`
+	OriginalLineID   uuid.UUID  `json:"original_line_id"`
+	ContainerID      uuid.UUID  `json:"container_id"`
+	SKUID            uuid.UUID  `json:"sku_id"`
+	BarcodeID        *uuid.UUID `json:"barcode_id,omitempty"`
+	SupersededAt     time.Time  `json:"superseded_at"`
+	SupersededByPlan uuid.UUID  `json:"superseded_by_plan"`
+	SupersededByUser uuid.UUID  `json:"superseded_by_user"`
+	Reason           string     `json:"reason"`
+	RawSnapshot      []byte     `json:"raw_snapshot,omitempty"`
 }
 
 // LoadingPlanDiff contrasts a new plan against a prior one for the FE to
@@ -307,7 +329,23 @@ type Service interface {
 	// and SUPERSEDED on the previously-active plan for the same container,
 	// in a single tx. Idempotent on a plan already APPROVED — returns the
 	// row unchanged.
+	//
+	// BR-D11: when the container has live container_lines (workers already
+	// scanned units against v1) the call snapshots every row to
+	// container_lines_history, then DELETEs them so packers restart from
+	// zero. The caller MUST set ConfirmSupersede = true; otherwise the call
+	// returns ErrPreconditionFailed with the affected line count so the FE
+	// can render the confirm dialog. Containers with no live lines accept
+	// approve unconditionally.
+	//
+	// BR-D12: refuses approve when the container is SEALED or SHIPPED. The
+	// caller must force-unseal first (admin-only path).
 	ApproveLoadingPlan(ctx context.Context, in ApproveLoadingPlanInput) (LoadingPlan, error)
+
+	// ListContainerLinesHistory returns the audit trail for one container,
+	// optionally filtered by the plan that triggered the supersede. Newest
+	// supersede event first.
+	ListContainerLinesHistory(ctx context.Context, containerID uuid.UUID, planID *uuid.UUID) ([]ContainerLineHistoryEntry, error)
 }
 
 // DefaultCapacityForType returns the ISO defaults for a container type. When

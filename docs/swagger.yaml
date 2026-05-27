@@ -1070,6 +1070,31 @@ definitions:
       weight_kg_total:
         type: number
     type: object
+  internal_module_delivery.ContainerLineHistoryEntry:
+    properties:
+      barcode_id:
+        type: string
+      container_id:
+        type: string
+      id:
+        type: string
+      original_line_id:
+        type: string
+      raw_snapshot:
+        items:
+          type: integer
+        type: array
+      reason:
+        type: string
+      sku_id:
+        type: string
+      superseded_at:
+        type: string
+      superseded_by_plan:
+        type: string
+      superseded_by_user:
+        type: string
+    type: object
   internal_module_delivery.ContainerStatusLogEntry:
     properties:
       actor_id:
@@ -1240,6 +1265,8 @@ definitions:
     type: object
   internal_module_delivery.approveLoadingPlanRequest:
     properties:
+      confirm_supersede:
+        type: boolean
       notes:
         type: string
     type: object
@@ -3085,6 +3112,42 @@ paths:
       security:
       - BearerAuth: []
       summary: Add a finished-goods line to a container
+      tags:
+      - delivery
+  /api/v1/containers/{id}/lines-history:
+    get:
+      description: |-
+        Audit trail of every container_lines row that was wiped by a
+        v2 supersede. Optionally filter by the plan id that triggered
+        the supersede via ?plan_id=<uuid>.
+      parameters:
+      - description: container id
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: loading plan id that supersededthis row
+        in: query
+        name: plan_id
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/internal_module_delivery.ContainerLineHistoryEntry'
+            type: array
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: List container_lines_history for a container (#302)
       tags:
       - delivery
   /api/v1/containers/{id}/lines/{line_id}:
@@ -5333,13 +5396,17 @@ paths:
     post:
       consumes:
       - application/json
+      description: |-
+        When the container already has scanned container_lines, the
+        caller MUST set confirm_supersede=true. Without it the
+        endpoint returns 412 so the FE can render the confirm dialog.
       parameters:
       - description: loading plan id
         in: path
         name: id
         required: true
         type: string
-      - description: optional notes
+      - description: optional notes + confirm_supersede flag
         in: body
         name: body
         schema:
@@ -5359,6 +5426,12 @@ paths:
             type: object
         "409":
           description: Conflict
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "412":
+          description: container has scanned lines; resubmit with confirm_supersede=true
           schema:
             additionalProperties:
               type: string

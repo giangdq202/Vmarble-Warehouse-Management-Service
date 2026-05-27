@@ -120,3 +120,23 @@ type AuditLoadingPlanInput struct {
 	ActorID     uuid.UUID
 	Notes       string
 }
+
+// PlanReloadNotifier fires the SSE PLAN_RELOAD event after a v2 supersede
+// wipes container_lines (BR-D13). Best-effort — a non-nil error is logged but
+// never aborts the supersede write because the user-facing notice is a
+// nice-to-have, not the source of truth (the kiosk's next scan will refresh
+// state regardless).
+//
+// Implementation lives in cmd/server/main.go as a thin adapter over
+// events.Publisher so delivery does not depend on the events package.
+type PlanReloadNotifier interface {
+	NotifyPlanReload(ctx context.Context, in PlanReloadNotice) error
+}
+
+type PlanReloadNotice struct {
+	ContainerID     uuid.UUID
+	NewPlanID       uuid.UUID
+	NewVersion      int
+	SupersededLines int
+	ActorID         uuid.UUID
+}

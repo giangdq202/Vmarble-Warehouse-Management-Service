@@ -57,6 +57,28 @@ type store interface {
 	// Returns the updated plan row. Returns ErrInvalidTransition when the
 	// plan is already SUPERSEDED.
 	approveLoadingPlanTx(ctx context.Context, planID, actorID uuid.UUID, now time.Time) (LoadingPlan, error)
+
+	// supersedeLoadingPlanTx atomically (a) snapshots every container_lines
+	// row to container_lines_history under the named new plan, (b) DELETEs
+	// container_lines for the container, (c) flips the prior active plan to
+	// SUPERSEDED, (d) flips the new plan to APPROVED, and (e) returns the
+	// updated new-plan row plus the count of lines that were wiped.
+	//
+	// Caller MUST have already verified container is not SEALED/SHIPPED
+	// (BR-D12) — this method does not check status. Returns
+	// ErrInvalidTransition when newPlanID is already SUPERSEDED, or
+	// ErrNotFound when newPlanID does not exist.
+	supersedeLoadingPlanTx(ctx context.Context, newPlanID, actorID uuid.UUID, now time.Time) (plan LoadingPlan, supersededCount int, err error)
+
+	// countContainerLines returns the number of live container_lines rows for
+	// one container. Used by the approve guard to decide whether the caller
+	// must pass confirm_supersede=true (BR-D11).
+	countContainerLines(ctx context.Context, containerID uuid.UUID) (int, error)
+
+	// selectContainerLinesHistory returns audit rows for one container,
+	// optionally filtered by the plan that triggered the supersede. Newest
+	// row first.
+	selectContainerLinesHistory(ctx context.Context, containerID uuid.UUID, planID *uuid.UUID) ([]ContainerLineHistoryEntry, error)
 }
 
 // txStore is the subset of operations safe to call from inside a transaction.

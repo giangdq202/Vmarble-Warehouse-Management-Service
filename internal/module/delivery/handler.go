@@ -42,6 +42,7 @@ func (h *Handler) Register(rg *gin.RouterGroup) {
 	// reconciles scans against.
 	rg.POST("/containers/:id/loading-plan", auth.RequirePlannerUp(), h.uploadLoadingPlan)
 	rg.GET("/containers/:id/loading-plan", h.getActiveLoadingPlan)
+	rg.GET("/containers/:id/lines-history", h.listLinesHistory)
 	rg.GET("/loading-plans/:id", h.getLoadingPlan)
 	rg.GET("/loading-plans/:id/diff", h.diffLoadingPlan)
 	rg.POST("/loading-plans/:id/approve", auth.RequireAdminOnly(), h.approveLoadingPlan)
@@ -550,20 +551,25 @@ func (h *Handler) diffLoadingPlan(c *gin.Context) {
 }
 
 type approveLoadingPlanRequest struct {
-	Notes string `json:"notes,omitempty"`
+	Notes            string `json:"notes,omitempty"`
+	ConfirmSupersede bool   `json:"confirm_supersede,omitempty"`
 }
 
 // approveLoadingPlan godoc
 //
 // @Summary      Approve a loading plan (admin) — locks the version
+// @Description  When the container already has scanned container_lines, the
+// @Description  caller MUST set confirm_supersede=true. Without it the
+// @Description  endpoint returns 412 so the FE can render the confirm dialog.
 // @Tags         delivery
 // @Accept       json
 // @Produce      json
 // @Param        id    path      string                      true   "loading plan id"
-// @Param        body  body      approveLoadingPlanRequest   false  "optional notes"
+// @Param        body  body      approveLoadingPlanRequest   false  "optional notes + confirm_supersede flag"
 // @Success      200   {object}  LoadingPlan
 // @Failure      404   {object}  map[string]string
 // @Failure      409   {object}  map[string]string
+// @Failure      412   {object}  map[string]string  "container has scanned lines; resubmit with confirm_supersede=true"
 // @Security     BearerAuth
 // @Router       /api/v1/loading-plans/{id}/approve [post]
 func (h *Handler) approveLoadingPlan(c *gin.Context) {
@@ -580,13 +586,51 @@ func (h *Handler) approveLoadingPlan(c *gin.Context) {
 		}
 	}
 	plan, err := h.svc.ApproveLoadingPlan(c.Request.Context(), ApproveLoadingPlanInput{
-		PlanID:  planID,
-		ActorID: callerID(c),
-		Notes:   req.Notes,
+		PlanID:           planID,
+		ActorID:          callerID(c),
+		Notes:            req.Notes,
+		ConfirmSupersede: req.ConfirmSupersede,
 	})
 	if err != nil {
 		httpkit.Error(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, plan)
+}
+
+// listLinesHistory godoc
+//
+// @Summary      List container_lines_history for a container (#302)
+// @Description  Audit trail of every container_lines row that was wiped by a
+// @Description  v2 supersede. Optionally filter by the plan id that triggered
+// @Description  the supersede via ?plan_id=<uuid>.
+// @Tags         delivery
+// @Produce      json
+// @Param        id        path      string  true   "container id"
+// @Param        plan_id   query     string  false  "loading plan id that supersededthis row"
+// @Success      200       {array}   ContainerLineHistoryEntry
+// @Failure      400       {object}  map[string]string
+// @Security     BearerAuth
+// @Router       /api/v1/containers/{id}/lines-history [get]
+func (h *Handler) listLinesHistory(c *gin.Context) {
+	containerID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid container id"})
+		return
+	}
+	var planFilter *uuid.UUID
+	if raw := c.Query("plan_id"); raw != "" {
+		pid, err := uuid.Parse(raw)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid plan_id"})
+			return
+		}
+		planFilter = &pid
+	}
+	entries, err := h.svc.ListContainerLinesHistory(c.Request.Context(), containerID, planFilter)
+	if err != nil {
+		httpkit.Error(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, entries)
 }
