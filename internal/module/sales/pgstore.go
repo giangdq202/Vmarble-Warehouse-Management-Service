@@ -196,6 +196,58 @@ func (s *pgStore) deleteSOLinesBySO(ctx context.Context, soID uuid.UUID) error {
 	return err
 }
 
+// insertCarryOverSOLine spawns a fresh sales_order_lines row for the parent
+// line's missing qty (BR-D17). Two reads then one insert, all in a single
+// transaction so a concurrent SO mutation cannot race against the carry-over
+// stamp. Returns the new line id.
+func (s *pgStore) insertCarryOverSOLine(ctx context.Context, in CarryOverSOLineInput) (uuid.UUID, error) {
+	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return uuid.Nil, err
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+
+	var (
+		parentSOID uuid.UUID
+		skuID      uuid.UUID
+		amount     int64
+		currency   string
+	)
+	if err := tx.QueryRow(ctx,
+		`SELECT sales_order_id, sku_id, unit_price_amount, unit_price_currency
+		   FROM sales_order_lines
+		  WHERE id = $1
+		  FOR UPDATE`,
+		in.ParentSOLineID,
+	).Scan(&parentSOID, &skuID, &amount, &currency); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return uuid.Nil, domain.NewBizError(domain.ErrNotFound,
+				"parent sales_order_line not found")
+		}
+		return uuid.Nil, err
+	}
+
+	newID := uuid.New()
+	if _, err := tx.Exec(ctx,
+		`INSERT INTO sales_order_lines
+		    (id, sales_order_id, sku_id, qty_ordered, qty_planned, qty_shipped,
+		     unit_price_amount, unit_price_currency, parent_sales_order_line_id, created_at)
+		 VALUES ($1,$2,$3,$4,$4,0,$5,$6,$7,NOW())`,
+		newID, parentSOID, skuID, in.Qty, amount, currency, in.ParentSOLineID,
+	); err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			return uuid.Nil, domain.NewBizError(domain.ErrInvalidInput,
+				"carry-over would duplicate (sales_order_id, sku_id) — merge with existing line manually")
+		}
+		return uuid.Nil, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return uuid.Nil, err
+	}
+	return newID, nil
+}
+
 func (s *pgStore) selectSOByID(ctx context.Context, id uuid.UUID) (SalesOrder, error) {
 	row := s.pool.QueryRow(ctx,
 		`SELECT so.id, so.code, so.customer_id, c.code, c.name, c.country_code,

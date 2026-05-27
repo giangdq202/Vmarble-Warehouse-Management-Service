@@ -470,6 +470,30 @@ func (svc *service) RecordShipmentTx(ctx context.Context, tx pgx.Tx, items []Shi
 	return svc.s.recordShipmentTx(ctx, tx, items)
 }
 
+// CreateCarryOverSOLine spawns a new sales_order_line for the missing qty
+// under the same parent SO (#303 BR-D17). Inherits the parent line's SKU +
+// unit_price; qty_ordered = qty_planned = qty (loading already RESERVED the
+// stock under the parent line so the carry-over enters as already-planned),
+// qty_shipped = 0, parent_sales_order_line_id = ParentSOLineID.
+//
+// Used by the loading_exception module's Approve flow when the admin picks
+// BACKORDER. Returns the new line id.
+func (svc *service) CreateCarryOverSOLine(ctx context.Context, in CarryOverSOLineInput) (uuid.UUID, error) {
+	if in.ParentSOLineID == uuid.Nil {
+		return uuid.Nil, domain.NewBizError(domain.ErrInvalidInput,
+			"parent_so_line_id is required")
+	}
+	if in.Qty <= 0 {
+		return uuid.Nil, domain.NewBizError(domain.ErrInvalidInput,
+			"qty must be greater than 0")
+	}
+	if in.CreatedBy == uuid.Nil {
+		return uuid.Nil, domain.NewBizError(domain.ErrInvalidInput,
+			"created_by is required")
+	}
+	return svc.s.insertCarryOverSOLine(ctx, in)
+}
+
 // ── helpers ──────────────────────────────────────────────────────────────────
 
 func validateLines(lines []CreateSOLineInput) error {

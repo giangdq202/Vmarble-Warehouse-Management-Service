@@ -24,6 +24,8 @@ type service struct {
 	skuResolver    CustomerSKUResolver
 	lpAuditor      LoadingPlanAuditLogger
 	planReloader   PlanReloadNotifier
+	pendingExc     PendingExceptionsChecker
+	shortShipped   ShortShippedAutoCreator
 	cbmOverheadPct float64
 	now            func() time.Time // overridable in tests
 }
@@ -69,6 +71,18 @@ func (svc *service) SetLoadingPlanAuditor(a LoadingPlanAuditLogger) {
 // supersede wipes container_lines (BR-D13). nil leaves notifications off.
 func (svc *service) SetPlanReloadNotifier(n PlanReloadNotifier) {
 	svc.planReloader = n
+}
+
+// SetPendingExceptionsChecker wires the BR-D14 SEAL pre-check (#303). nil
+// disables the guard.
+func (svc *service) SetPendingExceptionsChecker(c PendingExceptionsChecker) {
+	svc.pendingExc = c
+}
+
+// SetShortShippedAutoCreator wires the BR-D15 hook (#303). nil disables
+// SHORT_SHIPPED auto-creation at seal time.
+func (svc *service) SetShortShippedAutoCreator(c ShortShippedAutoCreator) {
+	svc.shortShipped = c
 }
 
 // ── Container CRUD ──────────────────────────────────────────────────────────
@@ -460,10 +474,35 @@ func (svc *service) TransferLine(ctx context.Context, in TransferLineInput) (Tra
 // Seal flips the container to SEALED and atomically bumps qty_shipped on the
 // underlying sales_order_lines via the cross-module ShipmentRecorder, all in
 // the same transaction. BR-D05.
+//
+// BR-D14: refuses with ErrPreconditionFailed when the container has any
+// pending loading_exceptions (#303); the response body lists the blocking
+// ids so the FE can deep-link to the inbox.
+//
+// BR-D15: after a successful seal, auto-creates SHORT_SHIPPED exceptions
+// for every (sku) where actual loaded qty < planned qty in the active
+// loading plan. The auto-create is best-effort — a failure is logged but
+// does not roll back the seal because the bump already committed.
 func (svc *service) Seal(ctx context.Context, in SealInput) (Container, error) {
 	if svc.shipRecorder == nil {
 		return Container{}, domain.NewBizError(domain.ErrPreconditionFailed,
 			"shipment recorder is not configured")
+	}
+	// BR-D14: pre-check pending exceptions. Done outside the tx because the
+	// loading_exception module owns its own pool and the read is cheap.
+	if svc.pendingExc != nil {
+		summary, err := svc.pendingExc.PendingForContainer(ctx, in.ContainerID)
+		if err != nil {
+			return Container{}, err
+		}
+		if summary.Count > 0 {
+			return Container{}, domain.NewBizError(domain.ErrPreconditionFailed,
+				"cannot seal: container has pending loading exceptions").
+				WithDetails(map[string]any{
+					"pending_exception_ids": summary.IDs,
+					"pending_count":         summary.Count,
+				})
+		}
 	}
 	var sealed Container
 	err := svc.s.withTx(ctx, func(tx txStore, raw pgx.Tx) error {
@@ -519,6 +558,33 @@ func (svc *service) Seal(ctx context.Context, in SealInput) (Container, error) {
 	if svc.fgTracker != nil {
 		if err := svc.fgTracker.MarkLoadedOnSeal(ctx, in.ContainerID); err != nil {
 			slog.Warn("delivery: FG mark-loaded failed", "container_id", in.ContainerID, "err", err)
+		}
+	}
+
+	// BR-D15: auto-create SHORT_SHIPPED loading_exceptions when actual loaded
+	// qty is below the active loading plan. Best-effort post-commit because
+	// the seal already happened — a failure here would force the operator to
+	// manually raise the variance, not roll back qty_shipped on the SO lines.
+	if svc.shortShipped != nil {
+		report, err := svc.s.selectShortagesForContainer(ctx, in.ContainerID)
+		if err != nil {
+			slog.Warn("delivery: shortage read failed", "container_id", in.ContainerID, "err", err)
+		} else {
+			for _, item := range report.Items {
+				if item.MissingQty <= 0 {
+					continue
+				}
+				if err := svc.shortShipped.AutoCreateShortShipped(ctx, ShortShippedAutoInput{
+					ContainerID:   in.ContainerID,
+					LoadingPlanID: report.LoadingPlanID,
+					SKUID:         item.SKUID,
+					MissingQty:    item.MissingQty,
+					ActorID:       in.ActorID,
+				}); err != nil {
+					slog.Warn("delivery: SHORT_SHIPPED auto-create failed",
+						"container_id", in.ContainerID, "sku_id", item.SKUID, "err", err)
+				}
+			}
 		}
 	}
 	return sealed, nil

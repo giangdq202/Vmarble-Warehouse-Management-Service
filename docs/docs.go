@@ -1033,6 +1033,119 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/containers/{id}/exceptions": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "loading-exceptions"
+                ],
+                "summary": "List loading exceptions for a container (keyset paginated)",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "container id (uuid)",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "pending | approved | all (default all)",
+                        "name": "status",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "opaque cursor token",
+                        "name": "cursor",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "page size",
+                        "name": "limit",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_platform_httpkit.CursorResult-internal_module_loading_exception_LoadingException"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Status starts pending (approved_by NULL). Type must be one of\nSHORT_SHIPPED / OVER_LOADED / WRONG_SKU / SUBSTITUTION /\nDAMAGED_AT_LOADING / UNPLANNED_UNIT / CUSTOMER_CHANGE.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "loading-exceptions"
+                ],
+                "summary": "Raise a loading exception against a container",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "container id (uuid)",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "payload",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_module_loading_exception.createRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/internal_module_loading_exception.LoadingException"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/containers/{id}/lines": {
             "post": {
                 "security": [
@@ -4583,6 +4696,194 @@ const docTemplate = `{
                     },
                     "404": {
                         "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/loading-exceptions/{id}": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "loading-exceptions"
+                ],
+                "summary": "Get one loading exception by id",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "exception id (uuid)",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_module_loading_exception.LoadingException"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/loading-exceptions/{id}/approve": {
+            "patch": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Resolution must be one of BACKORDER / CANCEL_FROM_SO /\nSUBSTITUTE_ACCEPTED / WRITE_OFF / DEFER_TO_NEXT.\nBR-D17 BACKORDER: parent_so_line_id is required and a\ncarry-over sales_order_lines row is created in the same tx.\nBR-D18 SUBSTITUTE_ACCEPTED: substitute_sku_id is required.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "loading-exceptions"
+                ],
+                "summary": "Approve a pending loading exception",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "exception id (uuid)",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "payload",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_module_loading_exception.approveRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_module_loading_exception.LoadingException"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/loading-exceptions/{id}/reject": {
+            "patch": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Closes the exception without picking a resolution.\nresolution column stays NULL but approved_by/approved_at are stamped\nso the SEAL guard treats it as resolved.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "loading-exceptions"
+                ],
+                "summary": "Reject a pending loading exception",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "exception id (uuid)",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "payload",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_module_loading_exception.rejectRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_module_loading_exception.LoadingException"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -9361,6 +9662,23 @@ const docTemplate = `{
                 }
             }
         },
+        "github_com_vmarble_warehouse-management-service_internal_platform_httpkit.CursorResult-internal_module_loading_exception_LoadingException": {
+            "type": "object",
+            "properties": {
+                "has_more": {
+                    "type": "boolean"
+                },
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_module_loading_exception.LoadingException"
+                    }
+                },
+                "next_cursor": {
+                    "type": "string"
+                }
+            }
+        },
         "github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_authn_UserDetail": {
             "type": "object",
             "properties": {
@@ -11617,6 +11935,126 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "to_location": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_module_loading_exception.LoadingException": {
+            "type": "object",
+            "properties": {
+                "approved_at": {
+                    "type": "string"
+                },
+                "approved_by": {
+                    "type": "string"
+                },
+                "carry_over_so_line_id": {
+                    "type": "string"
+                },
+                "container_id": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "created_by": {
+                    "type": "string"
+                },
+                "exception_type": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "loading_plan_id": {
+                    "type": "string"
+                },
+                "photo_urls": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "qty": {
+                    "type": "integer"
+                },
+                "reason": {
+                    "type": "string"
+                },
+                "resolution": {
+                    "type": "string"
+                },
+                "resolution_notes": {
+                    "type": "string"
+                },
+                "sku_id": {
+                    "type": "string"
+                },
+                "substitute_sku_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_module_loading_exception.approveRequest": {
+            "type": "object",
+            "required": [
+                "resolution"
+            ],
+            "properties": {
+                "parent_so_line_id": {
+                    "type": "string"
+                },
+                "resolution": {
+                    "type": "string"
+                },
+                "resolution_notes": {
+                    "type": "string"
+                },
+                "substitute_sku_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_module_loading_exception.createRequest": {
+            "type": "object",
+            "required": [
+                "exception_type",
+                "reason"
+            ],
+            "properties": {
+                "exception_type": {
+                    "type": "string"
+                },
+                "loading_plan_id": {
+                    "type": "string"
+                },
+                "photo_urls": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "qty": {
+                    "type": "integer"
+                },
+                "reason": {
+                    "type": "string"
+                },
+                "sku_id": {
+                    "type": "string"
+                },
+                "so_line_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_module_loading_exception.rejectRequest": {
+            "type": "object",
+            "required": [
+                "reason"
+            ],
+            "properties": {
+                "reason": {
                     "type": "string"
                 }
             }

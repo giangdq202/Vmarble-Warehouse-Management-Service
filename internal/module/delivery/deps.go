@@ -140,3 +140,48 @@ type PlanReloadNotice struct {
 	SupersededLines int
 	ActorID         uuid.UUID
 }
+
+// PendingExceptionsChecker is the BR-D14 SEAL guard hook (#303). Seal asks
+// the loading_exception module whether any rows on this container still
+// have approved_by IS NULL; if Count > 0 the seal is refused with 412 and
+// the response body lists the blocking ids. Optional — when nil the guard
+// is bypassed (legacy containers / migration window).
+type PendingExceptionsChecker interface {
+	PendingForContainer(ctx context.Context, containerID uuid.UUID) (PendingExceptionsSummary, error)
+}
+
+type PendingExceptionsSummary struct {
+	Count int         `json:"count"`
+	IDs   []uuid.UUID `json:"ids"`
+}
+
+// ShortShippedAutoCreator is the BR-D15 hook (#303). Seal calls this once it
+// knows actual loaded qty per (container, sku) is short of the active loading
+// plan; the implementation raises a SHORT_SHIPPED loading_exception so the
+// admin can choose how to resolve. Optional — nil disables the auto-create.
+type ShortShippedAutoCreator interface {
+	AutoCreateShortShipped(ctx context.Context, in ShortShippedAutoInput) error
+}
+
+type ShortShippedAutoInput struct {
+	ContainerID   uuid.UUID
+	LoadingPlanID *uuid.UUID
+	SKUID         uuid.UUID
+	MissingQty    int
+	ActorID       uuid.UUID
+}
+
+// ShortageReport is what the delivery store returns when joining the active
+// loading_plan_lines against actual container_lines. Used internally by Seal
+// to decide which SHORT_SHIPPED exceptions to auto-raise (BR-D15).
+type ShortageReport struct {
+	LoadingPlanID *uuid.UUID
+	Items         []ShortageItem
+}
+
+type ShortageItem struct {
+	SKUID      uuid.UUID
+	Planned    int
+	Actual     int
+	MissingQty int
+}

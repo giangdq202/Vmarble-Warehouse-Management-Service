@@ -79,6 +79,13 @@ type store interface {
 	// optionally filtered by the plan that triggered the supersede. Newest
 	// row first.
 	selectContainerLinesHistory(ctx context.Context, containerID uuid.UUID, planID *uuid.UUID) ([]ContainerLineHistoryEntry, error)
+
+	// selectShortagesForContainer joins the active loading_plan_lines (planned)
+	// against the current container_lines aggregate (actual loaded) and
+	// returns one row per SKU where planned > actual. Used by Seal to drive
+	// SHORT_SHIPPED auto-creation (BR-D15). Returns an empty report (no
+	// active plan id) when the container has no non-SUPERSEDED plan.
+	selectShortagesForContainer(ctx context.Context, containerID uuid.UUID) (ShortageReport, error)
 }
 
 // txStore is the subset of operations safe to call from inside a transaction.

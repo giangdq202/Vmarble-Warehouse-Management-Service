@@ -768,6 +768,70 @@ func (s *pgStore) countContainerLines(ctx context.Context, containerID uuid.UUID
 	return n, nil
 }
 
+// selectShortagesForContainer joins the active loading plan against actual
+// container_lines totals (per SKU) and returns shortage rows for Seal's
+// BR-D15 auto-create. Implementation:
+//   1. Find the active plan id (latest non-SUPERSEDED).
+//   2. SUM(qty_planned_pieces) per sku from loading_plan_lines under that
+//      plan and SUM(qty) per sku from container_lines on the container.
+//   3. FULL OUTER JOIN by sku and emit rows where planned > actual.
+//
+// Returns ShortageReport with LoadingPlanID nil and Items empty when there
+// is no active plan — Seal logs no warning in that case (containers without
+// loading plans are valid in legacy flows).
+func (s *pgStore) selectShortagesForContainer(ctx context.Context, containerID uuid.UUID) (ShortageReport, error) {
+	var planID uuid.UUID
+	err := s.pool.QueryRow(ctx,
+		`SELECT id FROM loading_plans
+		   WHERE container_id = $1 AND status <> 'SUPERSEDED'
+		   ORDER BY version DESC, created_at DESC
+		   LIMIT 1`,
+		containerID,
+	).Scan(&planID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ShortageReport{}, nil
+		}
+		return ShortageReport{}, err
+	}
+
+	rows, err := s.pool.Query(ctx,
+		`WITH planned AS (
+		     SELECT sku_id, SUM(qty_planned_pieces)::int AS qty
+		       FROM loading_plan_lines
+		      WHERE loading_plan_id = $1
+		      GROUP BY sku_id
+		 ), actual AS (
+		     SELECT sku_id, COALESCE(SUM(qty),0)::int AS qty
+		       FROM container_lines
+		      WHERE container_id = $2
+		      GROUP BY sku_id
+		 )
+		 SELECT p.sku_id,
+		        p.qty,
+		        COALESCE(a.qty, 0),
+		        p.qty - COALESCE(a.qty, 0) AS missing
+		   FROM planned p
+		   LEFT JOIN actual a ON a.sku_id = p.sku_id
+		  WHERE p.qty > COALESCE(a.qty, 0)`,
+		planID, containerID,
+	)
+	if err != nil {
+		return ShortageReport{}, err
+	}
+	defer rows.Close()
+
+	out := ShortageReport{LoadingPlanID: &planID}
+	for rows.Next() {
+		var item ShortageItem
+		if err := rows.Scan(&item.SKUID, &item.Planned, &item.Actual, &item.MissingQty); err != nil {
+			return ShortageReport{}, err
+		}
+		out.Items = append(out.Items, item)
+	}
+	return out, rows.Err()
+}
+
 func (s *pgStore) selectContainerLinesHistory(ctx context.Context, containerID uuid.UUID, planID *uuid.UUID) ([]ContainerLineHistoryEntry, error) {
 	q := `SELECT id, original_line_id, container_id, sku_id, barcode_id,
 	             superseded_at, superseded_by_plan, superseded_by_user,

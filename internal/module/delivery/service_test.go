@@ -206,6 +206,10 @@ func (m *mockStore) selectContainerLinesHistory(_ context.Context, _ uuid.UUID, 
 	return m.linesHistoryResult, m.linesHistoryErr
 }
 
+func (m *mockStore) selectShortagesForContainer(_ context.Context, _ uuid.UUID) (ShortageReport, error) {
+	return ShortageReport{}, nil
+}
+
 func newMockTx() *mockTxStore {
 	return &mockTxStore{
 		containersByID: map[uuid.UUID]Container{},

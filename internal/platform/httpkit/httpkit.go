@@ -260,7 +260,15 @@ func Error(c *gin.Context, err error) {
 	}
 
 	slog.Error("request error", "err", err, "status", status)
-	c.JSON(status, gin.H{"error": err.Error()})
+
+	body := gin.H{"error": err.Error()}
+	var be *domain.BizError
+	if errors.As(err, &be) && len(be.Details) > 0 {
+		for k, v := range be.Details {
+			body[k] = v
+		}
+	}
+	c.JSON(status, body)
 }
 
 // ParseDateRange reads "from" and "to" query parameters as dates (YYYY-MM-DD or RFC3339).
