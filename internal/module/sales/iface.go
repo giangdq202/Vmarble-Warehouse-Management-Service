@@ -165,6 +165,18 @@ type CancelSOInput struct {
 // which runs the entire seal — container.status flip, qty_shipped bump, SO
 // status recompute — inside a single delivery-owned transaction. See
 // Service.RecordShipmentTx for the cross-module Tx contract.
+// CarryOverSOLineInput drives BR-D17 BACKORDER carry-over (#303). Spawns a
+// new sales_order_line for the missing qty under the same parent SO,
+// inheriting the parent line's SKU + currency, and stamps
+// parent_sales_order_line_id with the original line so accountants can
+// trace which line carried over from which exception.
+type CarryOverSOLineInput struct {
+	ParentSOLineID uuid.UUID
+	Qty            int
+	Reason         string
+	CreatedBy      uuid.UUID
+}
+
 type ShipmentItemInput struct {
 	SOLineID uuid.UUID
 	Qty      int
@@ -271,6 +283,15 @@ type Service interface {
 	// when any bump would push qty_shipped past qty_planned (the DB CHECK
 	// chk_qty_shipped_le_planned is the authoritative backstop).
 	RecordShipmentTx(ctx context.Context, tx pgx.Tx, items []ShipmentItemInput) error
+
+	// CreateCarryOverSOLine spawns a new sales_order_line under the same
+	// parent SO with parent_sales_order_line_id stamped with the original
+	// line id (BR-D17, #303). The new line's qty_ordered/planned is set to
+	// the missing qty and qty_shipped starts at 0. Returns the new line id.
+	// Used by the loading_exception module's Approve flow when the admin
+	// picks BACKORDER. Inherits the parent line's SKU + unit_price so the
+	// resulting carry-over preserves the original commercial terms.
+	CreateCarryOverSOLine(ctx context.Context, in CarryOverSOLineInput) (uuid.UUID, error)
 
 	// Customer SKU mappings (#304) ------------------------------------------
 	// Exposed under the sales module because mapping is part of the customer

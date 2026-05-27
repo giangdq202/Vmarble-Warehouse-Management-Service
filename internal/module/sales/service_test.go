@@ -200,6 +200,10 @@ func (m *mockStore) recordShipmentTx(_ context.Context, _ pgx.Tx, _ []ShipmentIt
 	return nil
 }
 
+func (m *mockStore) insertCarryOverSOLine(_ context.Context, _ CarryOverSOLineInput) (uuid.UUID, error) {
+	return uuid.New(), nil
+}
+
 func (m *mockStore) withTx(ctx context.Context, fn func(tx txStore) error) error {
 	if m.withTxErr != nil {
 		return m.withTxErr

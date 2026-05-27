@@ -23,6 +23,7 @@ import (
 	"github.com/vmarble/warehouse-management-service/internal/module/dashboard"
 	"github.com/vmarble/warehouse-management-service/internal/module/delivery"
 	"github.com/vmarble/warehouse-management-service/internal/module/inventory"
+	"github.com/vmarble/warehouse-management-service/internal/module/loading_exception"
 	"github.com/vmarble/warehouse-management-service/internal/module/order"
 	"github.com/vmarble/warehouse-management-service/internal/module/packing"
 	"github.com/vmarble/warehouse-management-service/internal/module/planning"
@@ -91,6 +92,7 @@ func main() {
 	salesStore := sales.NewPGStore(pool)
 	deliveryStore := delivery.NewPGStore(pool)
 	packingStore := packing.NewPGStore(pool)
+	loadingExceptionStore := loading_exception.NewPGStore(pool)
 
 	// ── Module services ─────────────────────────────────────
 	authnSvc := authn.NewService(authnStore, cfg.AuthSecret)
@@ -239,6 +241,27 @@ func main() {
 		hooked.SetPlanReloadNotifier(&deliveryPlanReloadAdapter{pub: eventPublisher})
 	}
 
+	// Loading exceptions (#303). Constructed AFTER sales (carry-over) and
+	// delivery (shortage reader) so the adapters bind cleanly.
+	loadingExceptionSvc := loading_exception.NewService(
+		loadingExceptionStore,
+		&loadingExceptionSKUAdapter{svc: catalogSvc},
+		&loadingExceptionSOLineAdapter{svc: salesSvc},
+		&loadingExceptionCarryOverAdapter{svc: salesSvc},
+		&loadingExceptionAuditAdapter{pool: pool},
+	)
+	// BR-D14 SEAL pre-check + BR-D15 SHORT_SHIPPED auto-create.
+	if hooked, ok := deliverySvc.(interface {
+		SetPendingExceptionsChecker(delivery.PendingExceptionsChecker)
+	}); ok {
+		hooked.SetPendingExceptionsChecker(&deliveryPendingExceptionsAdapter{svc: loadingExceptionSvc})
+	}
+	if hooked, ok := deliverySvc.(interface {
+		SetShortShippedAutoCreator(delivery.ShortShippedAutoCreator)
+	}); ok {
+		hooked.SetShortShippedAutoCreator(&deliveryShortShippedAdapter{svc: loadingExceptionSvc})
+	}
+
 	// ── Background: auto-release expired remnant allocations ─────────────────
 	// Ticks every cfg.RemnantAllocCheckInterval. Remnants that have been
 	// ALLOCATED for longer than cfg.RemnantAllocTimeout without being consumed
@@ -297,6 +320,7 @@ func main() {
 	sales.NewHandler(salesSvc).Register(api)
 	delivery.NewHandler(deliverySvc).Register(api)
 	packing.NewHandler(packingSvc).Register(api)
+	loading_exception.NewHandler(loadingExceptionSvc).Register(api)
 
 	srv := &http.Server{
 		Addr:         ":" + cfg.Port,
@@ -1325,4 +1349,105 @@ func (a *deliveryPlanReloadAdapter) NotifyPlanReload(ctx context.Context, in del
 		in.NewVersion,
 		in.SupersededLines,
 	)
+}
+
+// ── loading_exception adapters (#303) ────────────────────────────────────────
+
+// loadingExceptionSKUAdapter trims catalog.SKU down to the slim view the
+// loading_exception service needs for SKU validation.
+type loadingExceptionSKUAdapter struct{ svc catalog.Service }
+
+func (a *loadingExceptionSKUAdapter) GetSKU(ctx context.Context, skuID uuid.UUID) (loading_exception.SKUInfo, error) {
+	s, err := a.svc.GetSKU(ctx, skuID)
+	if err != nil {
+		return loading_exception.SKUInfo{}, err
+	}
+	return loading_exception.SKUInfo{ID: s.ID, Code: s.Code, Name: s.Name}, nil
+}
+
+// loadingExceptionSOLineAdapter delegates to sales.GetSOLine for SO line
+// existence + qty checks (used by Approve when picking BACKORDER).
+type loadingExceptionSOLineAdapter struct{ svc sales.Service }
+
+func (a *loadingExceptionSOLineAdapter) GetSOLine(ctx context.Context, soLineID uuid.UUID) (loading_exception.SOLineInfo, error) {
+	line, so, err := a.svc.GetSOLine(ctx, soLineID)
+	if err != nil {
+		return loading_exception.SOLineInfo{}, err
+	}
+	return loading_exception.SOLineInfo{
+		ID:         line.ID,
+		SOID:       so.ID,
+		SKUID:      line.SKUID,
+		QtyOrdered: line.QtyOrdered,
+		QtyPlanned: line.QtyPlanned,
+		QtyShipped: line.QtyShipped,
+	}, nil
+}
+
+// loadingExceptionCarryOverAdapter delegates to sales.CreateCarryOverSOLine
+// for BR-D17 BACKORDER resolution.
+type loadingExceptionCarryOverAdapter struct{ svc sales.Service }
+
+func (a *loadingExceptionCarryOverAdapter) CreateCarryOver(ctx context.Context, in loading_exception.CarryOverInput) (uuid.UUID, error) {
+	return a.svc.CreateCarryOverSOLine(ctx, sales.CarryOverSOLineInput{
+		ParentSOLineID: in.ParentSOLineID,
+		Qty:            in.Qty,
+		Reason:         in.Reason,
+		CreatedBy:      in.CreatedBy,
+	})
+}
+
+// loadingExceptionAuditAdapter writes to inventory_audit_log directly via
+// pgxpool. Same pattern as deliveryLoadingPlanAuditAdapter — best-effort,
+// keyed by entity_type="LOADING_EXCEPTION".
+type loadingExceptionAuditAdapter struct{ pool *pgxpool.Pool }
+
+func (a *loadingExceptionAuditAdapter) LogException(ctx context.Context, in loading_exception.AuditInput) error {
+	meta, err := json.Marshal(map[string]any{
+		"container_id":   in.ContainerID,
+		"exception_type": in.ExceptionType,
+		"resolution":     in.Resolution,
+	})
+	if err != nil {
+		return err
+	}
+	_, err = a.pool.Exec(ctx,
+		`INSERT INTO inventory_audit_log
+		    (id, entity_type, entity_id, action, actor_id, reason, metadata, created_at)
+		 VALUES (gen_random_uuid(), 'LOADING_EXCEPTION', $1, $2, $3, $4, $5, NOW())`,
+		in.ExceptionID, string(in.Action), in.ActorID, in.Notes, meta,
+	)
+	return err
+}
+
+// deliveryPendingExceptionsAdapter bridges delivery's BR-D14 SEAL pre-check
+// to loading_exception.PendingForContainer.
+type deliveryPendingExceptionsAdapter struct{ svc loading_exception.Service }
+
+func (a *deliveryPendingExceptionsAdapter) PendingForContainer(ctx context.Context, containerID uuid.UUID) (delivery.PendingExceptionsSummary, error) {
+	s, err := a.svc.PendingForContainer(ctx, containerID)
+	if err != nil {
+		return delivery.PendingExceptionsSummary{}, err
+	}
+	return delivery.PendingExceptionsSummary{Count: s.Count, IDs: s.IDs}, nil
+}
+
+// deliveryShortShippedAdapter bridges delivery's BR-D15 hook to
+// loading_exception.AutoCreate. The SKU id is the only mandatory field; qty
+// is the missing pieces and the actor is the seal caller.
+type deliveryShortShippedAdapter struct{ svc loading_exception.Service }
+
+func (a *deliveryShortShippedAdapter) AutoCreateShortShipped(ctx context.Context, in delivery.ShortShippedAutoInput) error {
+	qty := in.MissingQty
+	skuID := in.SKUID
+	_, err := a.svc.AutoCreate(ctx, loading_exception.AutoCreateInput{
+		ContainerID:   in.ContainerID,
+		LoadingPlanID: in.LoadingPlanID,
+		ExceptionType: loading_exception.TypeShortShipped,
+		SKUID:         &skuID,
+		Qty:           &qty,
+		Reason:        "auto: actual loaded qty is short of plan",
+		CreatedBy:     in.ActorID,
+	})
+	return err
 }

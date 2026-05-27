@@ -110,6 +110,17 @@ definitions:
       next_cursor:
         type: string
     type: object
+  ? github_com_vmarble_warehouse-management-service_internal_platform_httpkit.CursorResult-internal_module_loading_exception_LoadingException
+  : properties:
+      has_more:
+        type: boolean
+      items:
+        items:
+          $ref: '#/definitions/internal_module_loading_exception.LoadingException'
+        type: array
+      next_cursor:
+        type: string
+    type: object
   github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_authn_UserDetail:
     properties:
       current_page:
@@ -1605,6 +1616,85 @@ definitions:
       to_location:
         type: string
     type: object
+  internal_module_loading_exception.LoadingException:
+    properties:
+      approved_at:
+        type: string
+      approved_by:
+        type: string
+      carry_over_so_line_id:
+        type: string
+      container_id:
+        type: string
+      created_at:
+        type: string
+      created_by:
+        type: string
+      exception_type:
+        type: string
+      id:
+        type: string
+      loading_plan_id:
+        type: string
+      photo_urls:
+        items:
+          type: string
+        type: array
+      qty:
+        type: integer
+      reason:
+        type: string
+      resolution:
+        type: string
+      resolution_notes:
+        type: string
+      sku_id:
+        type: string
+      substitute_sku_id:
+        type: string
+    type: object
+  internal_module_loading_exception.approveRequest:
+    properties:
+      parent_so_line_id:
+        type: string
+      resolution:
+        type: string
+      resolution_notes:
+        type: string
+      substitute_sku_id:
+        type: string
+    required:
+    - resolution
+    type: object
+  internal_module_loading_exception.createRequest:
+    properties:
+      exception_type:
+        type: string
+      loading_plan_id:
+        type: string
+      photo_urls:
+        items:
+          type: string
+        type: array
+      qty:
+        type: integer
+      reason:
+        type: string
+      sku_id:
+        type: string
+      so_line_id:
+        type: string
+    required:
+    - exception_type
+    - reason
+    type: object
+  internal_module_loading_exception.rejectRequest:
+    properties:
+      reason:
+        type: string
+    required:
+    - reason
+    type: object
   internal_module_order.CreateLineItemInput:
     properties:
       quantity:
@@ -3068,6 +3158,81 @@ paths:
       summary: Cancel an OPEN/LOADING container
       tags:
       - delivery
+  /api/v1/containers/{id}/exceptions:
+    get:
+      parameters:
+      - description: container id (uuid)
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: pending | approved | all (default all)
+        in: query
+        name: status
+        type: string
+      - description: opaque cursor token
+        in: query
+        name: cursor
+        type: string
+      - description: page size
+        in: query
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_vmarble_warehouse-management-service_internal_platform_httpkit.CursorResult-internal_module_loading_exception_LoadingException'
+      security:
+      - BearerAuth: []
+      summary: List loading exceptions for a container (keyset paginated)
+      tags:
+      - loading-exceptions
+    post:
+      consumes:
+      - application/json
+      description: |-
+        Status starts pending (approved_by NULL). Type must be one of
+        SHORT_SHIPPED / OVER_LOADED / WRONG_SKU / SUBSTITUTION /
+        DAMAGED_AT_LOADING / UNPLANNED_UNIT / CUSTOMER_CHANGE.
+      parameters:
+      - description: container id (uuid)
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: payload
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_module_loading_exception.createRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/internal_module_loading_exception.LoadingException'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Raise a loading exception against a container
+      tags:
+      - loading-exceptions
   /api/v1/containers/{id}/lines:
     post:
       consumes:
@@ -5366,6 +5531,134 @@ paths:
       summary: Generate pick-slip PDF for a work order
       tags:
       - inventory
+  /api/v1/loading-exceptions/{id}:
+    get:
+      parameters:
+      - description: exception id (uuid)
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_module_loading_exception.LoadingException'
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Get one loading exception by id
+      tags:
+      - loading-exceptions
+  /api/v1/loading-exceptions/{id}/approve:
+    patch:
+      consumes:
+      - application/json
+      description: |-
+        Resolution must be one of BACKORDER / CANCEL_FROM_SO /
+        SUBSTITUTE_ACCEPTED / WRITE_OFF / DEFER_TO_NEXT.
+        BR-D17 BACKORDER: parent_so_line_id is required and a
+        carry-over sales_order_lines row is created in the same tx.
+        BR-D18 SUBSTITUTE_ACCEPTED: substitute_sku_id is required.
+      parameters:
+      - description: exception id (uuid)
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: payload
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_module_loading_exception.approveRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_module_loading_exception.LoadingException'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "409":
+          description: Conflict
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Approve a pending loading exception
+      tags:
+      - loading-exceptions
+  /api/v1/loading-exceptions/{id}/reject:
+    patch:
+      consumes:
+      - application/json
+      description: |-
+        Closes the exception without picking a resolution.
+        resolution column stays NULL but approved_by/approved_at are stamped
+        so the SEAL guard treats it as resolved.
+      parameters:
+      - description: exception id (uuid)
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: payload
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_module_loading_exception.rejectRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_module_loading_exception.LoadingException'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "409":
+          description: Conflict
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Reject a pending loading exception
+      tags:
+      - loading-exceptions
   /api/v1/loading-plans/{id}:
     get:
       parameters:

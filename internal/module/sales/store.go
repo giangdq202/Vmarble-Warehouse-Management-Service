@@ -52,6 +52,11 @@ type store interface {
 	// ErrInvalidInput on CHECK violation (chk_qty_shipped_le_planned).
 	recordShipmentTx(ctx context.Context, tx pgx.Tx, items []ShipmentItemInput) error
 
+	// insertCarryOverSOLine inserts a new sales_order_line under the parent
+	// SO, copying SKU + unit_price from the parent line and stamping
+	// parent_sales_order_line_id (BR-D17). Returns the new line id.
+	insertCarryOverSOLine(ctx context.Context, in CarryOverSOLineInput) (uuid.UUID, error)
+
 	// SplitToPlan support -----------------------------------------------------
 
 	// withTx runs fn inside a single transaction. The store handles
