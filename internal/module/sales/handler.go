@@ -1,8 +1,12 @@
 package sales
 
 import (
+	"encoding/csv"
+	"errors"
+	"io"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -35,6 +39,15 @@ func (h *Handler) Register(rg *gin.RouterGroup) {
 	rg.POST("/sales-orders/:id/confirm", auth.RequirePlannerUp(), h.confirmSO)
 	rg.POST("/sales-orders/:id/cancel", auth.RequirePlannerUp(), h.cancelSO)
 	rg.POST("/sales-orders/:id/split-to-plan", auth.RequirePlannerUp(), h.splitToPlan)
+
+	// Customer SKU mappings (#304). Reads stay open like the rest of sales;
+	// writes (including bulk-import) require PLANNER+ which collapses to
+	// planner / accountant / admin per the persona-tier convention.
+	rg.POST("/customer-sku-mappings", auth.RequirePlannerUp(), h.createCustomerSKUMapping)
+	rg.GET("/customer-sku-mappings", h.listCustomerSKUMappings)
+	rg.PATCH("/customer-sku-mappings/:customerID/:code", auth.RequirePlannerUp(), h.patchCustomerSKUMapping)
+	rg.DELETE("/customer-sku-mappings/:customerID/:code", auth.RequirePlannerUp(), h.deleteCustomerSKUMapping)
+	rg.POST("/customer-sku-mappings/bulk-import", auth.RequirePlannerUp(), h.bulkImportCustomerSKUMappings)
 }
 
 // ── Customer endpoints ───────────────────────────────────────────────────────
@@ -452,3 +465,370 @@ func parseFlexibleTimestamp(s string) (time.Time, error) {
 	}
 	return time.Parse(time.RFC3339, s)
 }
+
+// ── Customer SKU mappings (#304) ─────────────────────────────────────────────
+
+type createCustomerSKUMappingRequest struct {
+	CustomerID      string `json:"customer_id" binding:"required"`
+	CustomerSKUCode string `json:"customer_sku_code" binding:"required"`
+	SKUID           string `json:"sku_id" binding:"required"`
+	Notes           string `json:"notes"`
+}
+
+type patchCustomerSKUMappingRequest struct {
+	SKUID *string `json:"sku_id"`
+	Notes *string `json:"notes"`
+}
+
+// createCustomerSKUMapping godoc
+//
+// @Summary      Create customer SKU mapping
+// @Description  Bridges a customer-facing SKU code (as it appears in the customer's packing-list Excel) with the internal catalog SKU id. (#304, BR-CSM02)
+// @Tags         sales
+// @Accept       json
+// @Produce      json
+// @Param        body  body      createCustomerSKUMappingRequest  true  "payload"
+// @Success      201   {object}  CustomerSKUMapping
+// @Failure      400   {object}  map[string]string
+// @Security     BearerAuth
+// @Failure      401  {object}  map[string]string
+// @Router       /api/v1/customer-sku-mappings [post]
+func (h *Handler) createCustomerSKUMapping(c *gin.Context) {
+	var req createCustomerSKUMappingRequest
+	if !httpkit.Bind(c, &req) {
+		return
+	}
+	customerID, err := uuid.Parse(req.CustomerID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid customer_id"})
+		return
+	}
+	skuID, err := uuid.Parse(req.SKUID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid sku_id"})
+		return
+	}
+	m, err := h.svc.CreateCustomerSKUMapping(c.Request.Context(), CreateCustomerSKUMappingInput{
+		CustomerID:      customerID,
+		CustomerSKUCode: req.CustomerSKUCode,
+		SKUID:           skuID,
+		Notes:           req.Notes,
+		ActorID:         callerID(c),
+	})
+	if err != nil {
+		httpkit.Error(c, err)
+		return
+	}
+	c.JSON(http.StatusCreated, m)
+}
+
+// listCustomerSKUMappings godoc
+//
+// @Summary      List customer SKU mappings
+// @Tags         sales
+// @Produce      json
+// @Param        page         query     int     false  "page number (default 1)"
+// @Param        limit        query     int     false  "items per page (default 10, max 100)"
+// @Param        customer_id  query     string  false  "filter by customer id (uuid); omit for all customers"
+// @Success      200  {object}  httpkit.PagedResult[CustomerSKUMapping]
+// @Failure      400  {object}  map[string]string
+// @Security     BearerAuth
+// @Failure      401  {object}  map[string]string
+// @Router       /api/v1/customer-sku-mappings [get]
+func (h *Handler) listCustomerSKUMappings(c *gin.Context) {
+	p := httpkit.BindPageParams(c)
+	var f CustomerSKUMappingFilter
+	if raw := c.Query("customer_id"); raw != "" {
+		id, err := uuid.Parse(raw)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid customer_id"})
+			return
+		}
+		f.CustomerID = &id
+	}
+	res, err := h.svc.ListCustomerSKUMappings(c.Request.Context(), p, f)
+	if err != nil {
+		httpkit.Error(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, res)
+}
+
+// patchCustomerSKUMapping godoc
+//
+// @Summary      Update customer SKU mapping
+// @Description  Partial update; nil fields leave the column untouched. The (customer_id, customer_sku_code) PK is immutable — to rename the customer code, delete and re-create.
+// @Tags         sales
+// @Accept       json
+// @Produce      json
+// @Param        customerID  path      string                          true  "customer id (uuid)"
+// @Param        code        path      string                          true  "customer SKU code (URL-encoded)"
+// @Param        body        body      patchCustomerSKUMappingRequest  true  "patch payload"
+// @Success      200         {object}  CustomerSKUMapping
+// @Failure      400         {object}  map[string]string
+// @Failure      404         {object}  map[string]string
+// @Security     BearerAuth
+// @Failure      401  {object}  map[string]string
+// @Router       /api/v1/customer-sku-mappings/{customerID}/{code} [patch]
+func (h *Handler) patchCustomerSKUMapping(c *gin.Context) {
+	customerID, err := uuid.Parse(c.Param("customerID"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid customerID"})
+		return
+	}
+	code := c.Param("code")
+	var req patchCustomerSKUMappingRequest
+	if !httpkit.Bind(c, &req) {
+		return
+	}
+	in := PatchCustomerSKUMappingInput{
+		CustomerID:      customerID,
+		CustomerSKUCode: code,
+		Notes:           req.Notes,
+		ActorID:         callerID(c),
+	}
+	if req.SKUID != nil {
+		skuID, err := uuid.Parse(*req.SKUID)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid sku_id"})
+			return
+		}
+		in.SKUID = &skuID
+	}
+	m, err := h.svc.PatchCustomerSKUMapping(c.Request.Context(), in)
+	if err != nil {
+		httpkit.Error(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, m)
+}
+
+// deleteCustomerSKUMapping godoc
+//
+// @Summary      Delete customer SKU mapping
+// @Tags         sales
+// @Param        customerID  path  string  true  "customer id (uuid)"
+// @Param        code        path  string  true  "customer SKU code (URL-encoded)"
+// @Success      204
+// @Failure      400  {object}  map[string]string
+// @Failure      404  {object}  map[string]string
+// @Security     BearerAuth
+// @Failure      401  {object}  map[string]string
+// @Router       /api/v1/customer-sku-mappings/{customerID}/{code} [delete]
+func (h *Handler) deleteCustomerSKUMapping(c *gin.Context) {
+	customerID, err := uuid.Parse(c.Param("customerID"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid customerID"})
+		return
+	}
+	code := c.Param("code")
+	if err := h.svc.DeleteCustomerSKUMapping(c.Request.Context(), DeleteCustomerSKUMappingInput{
+		CustomerID:      customerID,
+		CustomerSKUCode: code,
+		ActorID:         callerID(c),
+	}); err != nil {
+		httpkit.Error(c, err)
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
+// bulkImportCustomerSKUMappings godoc
+//
+// @Summary      Bulk-import customer SKU mappings from CSV
+// @Description  Multipart upload with form fields `customer_id` (uuid) and `file` (CSV, UTF-8 with optional BOM). CSV header: `customer_sku_code,sku_id,notes`. Fail-all: any row error rolls the whole batch back and returns 422 with per-row errors.
+// @Tags         sales
+// @Accept       multipart/form-data
+// @Produce      json
+// @Param        customer_id  formData  string  true  "customer id (uuid)"
+// @Param        file         formData  file    true  "CSV file"
+// @Success      200          {object}  BulkImportResult
+// @Failure      400          {object}  map[string]string
+// @Failure      422          {object}  BulkImportResult
+// @Security     BearerAuth
+// @Failure      401  {object}  map[string]string
+// @Router       /api/v1/customer-sku-mappings/bulk-import [post]
+func (h *Handler) bulkImportCustomerSKUMappings(c *gin.Context) {
+	customerID, err := uuid.Parse(c.PostForm("customer_id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid customer_id"})
+		return
+	}
+	fh, err := c.FormFile("file")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "file is required"})
+		return
+	}
+	f, err := fh.Open()
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "could not open uploaded file"})
+		return
+	}
+	defer func() { _ = f.Close() }()
+
+	rows, parseErrs, err := parseCustomerSKUMappingCSV(f)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if len(parseErrs) > 0 {
+		c.JSON(http.StatusUnprocessableEntity, BulkImportResult{Errors: parseErrs})
+		return
+	}
+
+	res, err := h.svc.BulkImportCustomerSKUMappings(c.Request.Context(), BulkImportCustomerSKUMappingsInput{
+		CustomerID: customerID,
+		Rows:       rows,
+		ActorID:    callerID(c),
+	})
+	if err != nil {
+		// Fail-all surface: when row errors are present, return them with 422
+		// so the FE can render per-row toasts. Other errors fall through to
+		// the standard httpkit.Error mapping.
+		if len(res.Errors) > 0 {
+			c.JSON(http.StatusUnprocessableEntity, res)
+			return
+		}
+		httpkit.Error(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, res)
+}
+
+// parseCustomerSKUMappingCSV reads the uploaded file into BulkMappingRow
+// slices. Strips a UTF-8 BOM (Excel VN exports include one) and validates the
+// header row contains the three expected columns in any order.
+//
+// Per-row errors (malformed UUID, wrong column count) are returned via
+// parseErrs without aborting the whole parse — the service layer also
+// validates content (empty code, unknown SKU) and emits its own row errors,
+// so the caller picks fail-all semantics by treating any non-empty error
+// slice as a 422.
+func parseCustomerSKUMappingCSV(r io.Reader) ([]BulkMappingRow, []BulkImportRowError, error) {
+	reader := csv.NewReader(stripBOMReader(r))
+	reader.FieldsPerRecord = -1 // tolerate trailing notes column
+
+	header, err := reader.Read()
+	if err != nil {
+		if errors.Is(err, io.EOF) {
+			return nil, nil, errors.New("empty CSV")
+		}
+		return nil, nil, err
+	}
+	idx, err := mappingHeaderIndex(header)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	var (
+		rows      []BulkMappingRow
+		parseErrs []BulkImportRowError
+	)
+	for line := 2; ; line++ {
+		rec, err := reader.Read()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			parseErrs = append(parseErrs, BulkImportRowError{Row: line, Code: "MALFORMED_ROW", Message: err.Error()})
+			continue
+		}
+		if len(rec) <= idx.skuID {
+			parseErrs = append(parseErrs, BulkImportRowError{Row: line, Code: "MISSING_COLUMNS", Message: "row has fewer columns than the header"})
+			continue
+		}
+		skuRaw := strings.TrimSpace(rec[idx.skuID])
+		skuID, err := uuid.Parse(skuRaw)
+		if err != nil {
+			parseErrs = append(parseErrs, BulkImportRowError{Row: line, Code: "INVALID_SKU_ID", Message: "sku_id is not a valid uuid: " + skuRaw})
+			continue
+		}
+		row := BulkMappingRow{
+			CustomerSKUCode: strings.TrimSpace(rec[idx.code]),
+			SKUID:           skuID,
+		}
+		if idx.notes >= 0 && idx.notes < len(rec) {
+			row.Notes = strings.TrimSpace(rec[idx.notes])
+		}
+		rows = append(rows, row)
+	}
+	return rows, parseErrs, nil
+}
+
+type csvHeaderIdx struct {
+	code  int
+	skuID int
+	notes int
+}
+
+func mappingHeaderIndex(header []string) (csvHeaderIdx, error) {
+	idx := csvHeaderIdx{code: -1, skuID: -1, notes: -1}
+	for i, h := range header {
+		switch strings.ToLower(strings.TrimSpace(h)) {
+		case "customer_sku_code":
+			idx.code = i
+		case "sku_id":
+			idx.skuID = i
+		case "notes":
+			idx.notes = i
+		}
+	}
+	if idx.code < 0 {
+		return idx, errors.New("missing required header: customer_sku_code")
+	}
+	if idx.skuID < 0 {
+		return idx, errors.New("missing required header: sku_id")
+	}
+	return idx, nil
+}
+
+// stripBOMReader returns a reader that drops the UTF-8 byte-order mark if
+// present. Excel for Windows + Vietnamese locale almost always emits one and
+// the CSV parser would otherwise see it as part of the first header field.
+func stripBOMReader(r io.Reader) io.Reader {
+	br, ok := r.(io.ByteReader)
+	if !ok {
+		// Wrap in a buffered reader so we can peek 3 bytes.
+		buffered := &bomStripper{r: r}
+		return buffered
+	}
+	_ = br
+	return &bomStripper{r: r}
+}
+
+// bomStripper drops the first three bytes if they are 0xEF 0xBB 0xBF, then
+// passes the rest through unchanged. Tiny adapter so we do not pull in
+// bufio just for this.
+type bomStripper struct {
+	r       io.Reader
+	checked bool
+	prefix  []byte
+}
+
+func (b *bomStripper) Read(p []byte) (int, error) {
+	if !b.checked {
+		b.checked = true
+		head := make([]byte, 3)
+		n, err := io.ReadFull(b.r, head)
+		if err != nil && !errors.Is(err, io.ErrUnexpectedEOF) && !errors.Is(err, io.EOF) {
+			return 0, err
+		}
+		if n == 3 && head[0] == 0xEF && head[1] == 0xBB && head[2] == 0xBF {
+			// drop the BOM
+			b.prefix = nil
+		} else {
+			b.prefix = head[:n]
+		}
+	}
+	if len(b.prefix) > 0 {
+		k := copy(p, b.prefix)
+		b.prefix = b.prefix[k:]
+		return k, nil
+	}
+	return b.r.Read(p)
+}
+
+// _ keeps strconv referenced if the file ever drops other strconv use; the
+// existing handler still imports strconv so this stays lint-clean. Intentional
+// no-op assignment to silence editors that want to nuke unused imports.
+var _ = strconv.Itoa

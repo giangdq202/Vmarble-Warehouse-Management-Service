@@ -2,6 +2,8 @@ package sales
 
 import (
 	"context"
+	"errors"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -16,6 +18,7 @@ type service struct {
 	s          store
 	skuChecker SKUChecker
 	splitter   ProductionSplitter
+	auditor    CustomerSKUMappingAuditLogger
 	now        func() time.Time // overridable in tests
 }
 
@@ -25,6 +28,14 @@ type service struct {
 // when called without a configured splitter.
 func NewService(s store, skuChecker SKUChecker, splitter ProductionSplitter) Service {
 	return &service{s: s, skuChecker: skuChecker, splitter: splitter, now: time.Now}
+}
+
+// NewServiceWithAudit wires the optional CustomerSKUMappingAuditLogger.
+// Tests construct via NewService and leave auditor nil — production wires
+// the salesMappingAuditAdapter from cmd/server/main.go. Audit failures are
+// best-effort: logged via slog.Warn but never returned.
+func NewServiceWithAudit(s store, skuChecker SKUChecker, splitter ProductionSplitter, auditor CustomerSKUMappingAuditLogger) Service {
+	return &service{s: s, skuChecker: skuChecker, splitter: splitter, auditor: auditor, now: time.Now}
 }
 
 // ── Customer ─────────────────────────────────────────────────────────────────
@@ -527,4 +538,276 @@ func pickSplitDeadline(override time.Time, soShip *time.Time) *time.Time {
 		return &t
 	}
 	return nil
+}
+
+// ── Customer SKU mappings (#304) ─────────────────────────────────────────────
+
+// validateMappingCode normalises the customer-supplied SKU code: trims spaces,
+// rejects empty. Length cap is 256 chars to match a sane Excel cell.
+func validateMappingCode(code string) (string, error) {
+	c := strings.TrimSpace(code)
+	if c == "" {
+		return "", domain.NewBizError(domain.ErrInvalidInput, "customer_sku_code is required")
+	}
+	if len(c) > 256 {
+		return "", domain.NewBizError(domain.ErrInvalidInput, "customer_sku_code must be at most 256 characters")
+	}
+	return c, nil
+}
+
+// requireSKU rejects nil/zero IDs and bounces existence checks through the
+// catalog SKUChecker. SKUChecker also handles the "deactivated" semantics —
+// if the catalog later wants to reject mappings to inactive SKUs, the gate
+// belongs there, not here.
+func (svc *service) requireSKU(ctx context.Context, skuID uuid.UUID) error {
+	if skuID == uuid.Nil {
+		return domain.NewBizError(domain.ErrInvalidInput, "sku_id is required")
+	}
+	if svc.skuChecker == nil {
+		// Test wiring without a SKU checker: defer to the FK constraint at
+		// insert time. Production always wires one in main.go.
+		return nil
+	}
+	if _, err := svc.skuChecker.GetSKU(ctx, skuID); err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			return domain.NewBizError(domain.ErrInvalidInput, "sku_id does not exist")
+		}
+		return err
+	}
+	return nil
+}
+
+func (svc *service) CreateCustomerSKUMapping(ctx context.Context, in CreateCustomerSKUMappingInput) (CustomerSKUMapping, error) {
+	if in.CustomerID == uuid.Nil {
+		return CustomerSKUMapping{}, domain.NewBizError(domain.ErrInvalidInput, "customer_id is required")
+	}
+	code, err := validateMappingCode(in.CustomerSKUCode)
+	if err != nil {
+		return CustomerSKUMapping{}, err
+	}
+	if err := svc.requireSKU(ctx, in.SKUID); err != nil {
+		return CustomerSKUMapping{}, err
+	}
+
+	now := svc.now().UTC()
+	var createdBy *uuid.UUID
+	if in.ActorID != uuid.Nil {
+		id := in.ActorID
+		createdBy = &id
+	}
+
+	m := CustomerSKUMapping{
+		CustomerID:      in.CustomerID,
+		CustomerSKUCode: code,
+		SKUID:           in.SKUID,
+		Notes:           strings.TrimSpace(in.Notes),
+		CreatedBy:       createdBy,
+		CreatedAt:       now,
+		UpdatedAt:       now,
+	}
+	if err := svc.s.insertCustomerSKUMapping(ctx, m); err != nil {
+		return CustomerSKUMapping{}, err
+	}
+	svc.logMappingAudit(ctx, AuditCustomerSKUMappingInput{
+		Action:          AuditCSMActionCreated,
+		CustomerID:      m.CustomerID,
+		CustomerSKUCode: m.CustomerSKUCode,
+		SKUID:           m.SKUID,
+		ActorID:         in.ActorID,
+		Notes:           m.Notes,
+	})
+	return m, nil
+}
+
+func (svc *service) ListCustomerSKUMappings(ctx context.Context, p httpkit.PageParams, f CustomerSKUMappingFilter) (httpkit.PagedResult[CustomerSKUMapping], error) {
+	rows, total, err := svc.s.selectCustomerSKUMappingsPaged(ctx, p, f)
+	if err != nil {
+		return httpkit.PagedResult[CustomerSKUMapping]{}, err
+	}
+	return httpkit.NewPagedResult(rows, total, p), nil
+}
+
+func (svc *service) PatchCustomerSKUMapping(ctx context.Context, in PatchCustomerSKUMappingInput) (CustomerSKUMapping, error) {
+	if in.CustomerID == uuid.Nil {
+		return CustomerSKUMapping{}, domain.NewBizError(domain.ErrInvalidInput, "customer_id is required")
+	}
+	code, err := validateMappingCode(in.CustomerSKUCode)
+	if err != nil {
+		return CustomerSKUMapping{}, err
+	}
+
+	current, err := svc.s.selectCustomerSKUMappingByPK(ctx, in.CustomerID, code)
+	if err != nil {
+		return CustomerSKUMapping{}, err
+	}
+
+	updated := current
+	skuChanged := false
+	if in.SKUID != nil && *in.SKUID != current.SKUID {
+		if err := svc.requireSKU(ctx, *in.SKUID); err != nil {
+			return CustomerSKUMapping{}, err
+		}
+		updated.SKUID = *in.SKUID
+		skuChanged = true
+	}
+	if in.Notes != nil {
+		updated.Notes = strings.TrimSpace(*in.Notes)
+	}
+	updated.UpdatedAt = svc.now().UTC()
+
+	if err := svc.s.updateCustomerSKUMapping(ctx, updated); err != nil {
+		return CustomerSKUMapping{}, err
+	}
+
+	auditInput := AuditCustomerSKUMappingInput{
+		Action:          AuditCSMActionUpdated,
+		CustomerID:      updated.CustomerID,
+		CustomerSKUCode: updated.CustomerSKUCode,
+		SKUID:           updated.SKUID,
+		ActorID:         in.ActorID,
+		Notes:           updated.Notes,
+	}
+	if skuChanged {
+		prev := current.SKUID
+		auditInput.PreviousSKUID = &prev
+	}
+	svc.logMappingAudit(ctx, auditInput)
+	return updated, nil
+}
+
+func (svc *service) DeleteCustomerSKUMapping(ctx context.Context, in DeleteCustomerSKUMappingInput) error {
+	if in.CustomerID == uuid.Nil {
+		return domain.NewBizError(domain.ErrInvalidInput, "customer_id is required")
+	}
+	code, err := validateMappingCode(in.CustomerSKUCode)
+	if err != nil {
+		return err
+	}
+
+	// Capture the SKU id before deletion so the audit row can record what
+	// was removed. ErrNotFound is returned to the caller untouched.
+	current, err := svc.s.selectCustomerSKUMappingByPK(ctx, in.CustomerID, code)
+	if err != nil {
+		return err
+	}
+	if err := svc.s.deleteCustomerSKUMapping(ctx, in.CustomerID, code); err != nil {
+		return err
+	}
+	svc.logMappingAudit(ctx, AuditCustomerSKUMappingInput{
+		Action:          AuditCSMActionDeleted,
+		CustomerID:      current.CustomerID,
+		CustomerSKUCode: current.CustomerSKUCode,
+		SKUID:           current.SKUID,
+		ActorID:         in.ActorID,
+	})
+	return nil
+}
+
+// BulkImportCustomerSKUMappings validates every row first, then persists the
+// batch in a single tx. Any row error aborts the whole import (fail-all,
+// matches BR-D08). The response carries an ordered slice of row errors so
+// the FE can render a per-row toast pointing at the offending CSV line.
+func (svc *service) BulkImportCustomerSKUMappings(ctx context.Context, in BulkImportCustomerSKUMappingsInput) (BulkImportResult, error) {
+	if in.CustomerID == uuid.Nil {
+		return BulkImportResult{}, domain.NewBizError(domain.ErrInvalidInput, "customer_id is required")
+	}
+	if len(in.Rows) == 0 {
+		return BulkImportResult{}, domain.NewBizError(domain.ErrInvalidInput, "at least one row is required")
+	}
+
+	now := svc.now().UTC()
+	var actorID *uuid.UUID
+	if in.ActorID != uuid.Nil {
+		id := in.ActorID
+		actorID = &id
+	}
+
+	var errs []BulkImportRowError
+	seenCodes := make(map[string]int, len(in.Rows))
+	prepared := make([]CustomerSKUMapping, 0, len(in.Rows))
+
+	for i, raw := range in.Rows {
+		rowNum := i + 1
+		code, err := validateMappingCode(raw.CustomerSKUCode)
+		if err != nil {
+			errs = append(errs, BulkImportRowError{Row: rowNum, Code: "INVALID_CODE", Message: err.Error()})
+			continue
+		}
+		if firstSeen, dup := seenCodes[code]; dup {
+			errs = append(errs, BulkImportRowError{
+				Row:     rowNum,
+				Code:    "DUPLICATE_IN_BATCH",
+				Message: "customer_sku_code already appeared at row " + itoa(firstSeen),
+			})
+			continue
+		}
+		seenCodes[code] = rowNum
+		if err := svc.requireSKU(ctx, raw.SKUID); err != nil {
+			errs = append(errs, BulkImportRowError{Row: rowNum, Code: "INVALID_SKU", Message: err.Error()})
+			continue
+		}
+		prepared = append(prepared, CustomerSKUMapping{
+			CustomerID:      in.CustomerID,
+			CustomerSKUCode: code,
+			SKUID:           raw.SKUID,
+			Notes:           strings.TrimSpace(raw.Notes),
+			CreatedBy:       actorID,
+			CreatedAt:       now,
+			UpdatedAt:       now,
+		})
+	}
+
+	if len(errs) > 0 {
+		return BulkImportResult{Errors: errs}, domain.NewBizError(domain.ErrInvalidInput, "bulk import has row errors")
+	}
+
+	if err := svc.s.bulkInsertCustomerSKUMappings(ctx, prepared); err != nil {
+		return BulkImportResult{}, err
+	}
+	svc.logMappingAudit(ctx, AuditCustomerSKUMappingInput{
+		Action:       AuditCSMActionBulkImported,
+		CustomerID:   in.CustomerID,
+		RowsImported: len(prepared),
+		ActorID:      in.ActorID,
+	})
+	return BulkImportResult{Inserted: len(prepared)}, nil
+}
+
+func (svc *service) logMappingAudit(ctx context.Context, in AuditCustomerSKUMappingInput) {
+	if svc.auditor == nil {
+		return
+	}
+	if err := svc.auditor.LogCustomerSKUMapping(ctx, in); err != nil {
+		slog.Warn("audit log for customer_sku_mapping failed",
+			"action", in.Action,
+			"customer_id", in.CustomerID,
+			"customer_sku_code", in.CustomerSKUCode,
+			"err", err,
+		)
+	}
+}
+
+// itoa wraps strconv.Itoa without taking a strconv import — kept tiny because
+// the bulk path is the only caller and we want to avoid a new import line in
+// service.go.
+func itoa(i int) string {
+	if i == 0 {
+		return "0"
+	}
+	negative := i < 0
+	if negative {
+		i = -i
+	}
+	digits := make([]byte, 0, 12)
+	for i > 0 {
+		digits = append(digits, byte('0'+i%10))
+		i /= 10
+	}
+	if negative {
+		digits = append(digits, '-')
+	}
+	for l, r := 0, len(digits)-1; l < r; l, r = l+1, r-1 {
+		digits[l], digits[r] = digits[r], digits[l]
+	}
+	return string(digits)
 }

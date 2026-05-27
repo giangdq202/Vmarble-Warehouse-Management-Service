@@ -61,3 +61,39 @@ type CreatePlanWithWOsResult struct {
 	PlanCode     string
 	WorkOrderIDs []uuid.UUID
 }
+
+// CustomerSKUMappingAuditLogger writes a row to the shared inventory_audit_log
+// after every customer_sku_mappings mutation. Implementation lives in
+// cmd/server/main.go as salesMappingAuditAdapter to keep sales free of any
+// inventory module dependency — the audit table is a cross-module ledger
+// keyed by entity_type='CUSTOMER_SKU_MAPPING'. Calls are best-effort: a
+// non-nil error is logged via slog.Warn but never propagates so a transient
+// audit-write failure does not roll back the mapping mutation itself.
+type CustomerSKUMappingAuditLogger interface {
+	LogCustomerSKUMapping(ctx context.Context, in AuditCustomerSKUMappingInput) error
+}
+
+// AuditCustomerSKUMappingAction enumerates the mutations worth recording.
+type AuditCustomerSKUMappingAction string
+
+const (
+	AuditCSMActionCreated      AuditCustomerSKUMappingAction = "CSM_CREATED"
+	AuditCSMActionUpdated      AuditCustomerSKUMappingAction = "CSM_UPDATED"
+	AuditCSMActionDeleted      AuditCustomerSKUMappingAction = "CSM_DELETED"
+	AuditCSMActionBulkImported AuditCustomerSKUMappingAction = "CSM_BULK_IMPORTED"
+)
+
+// AuditCustomerSKUMappingInput is the payload the adapter persists. Metadata
+// fields (PreviousSKUID, NewSKUID, RowsImported) are optional and rendered as
+// JSON keys when non-zero so accountants can reconstruct the change without
+// joining other tables.
+type AuditCustomerSKUMappingInput struct {
+	Action          AuditCustomerSKUMappingAction
+	CustomerID      uuid.UUID
+	CustomerSKUCode string
+	SKUID           uuid.UUID  // current value after the mutation; zero on delete-only
+	PreviousSKUID   *uuid.UUID // only set when an UPDATE actually moved sku_id
+	RowsImported    int        // only set for BULK_IMPORTED
+	ActorID         uuid.UUID
+	Notes           string
+}

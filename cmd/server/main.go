@@ -172,10 +172,11 @@ func main() {
 	// Constructed last so the splitter adapter can reference both planningSvc
 	// and productionSvc directly without the post-wire trampoline pattern used
 	// for the cyclical adapters above.
-	salesSvc := sales.NewService(
+	salesSvc := sales.NewServiceWithAudit(
 		salesStore,
 		&salesSKUAdapter{svc: catalogSvc},
 		&salesProductionSplitterAdapter{planSvc: planningSvc, woSvc: productionSvc},
+		&salesMappingAuditAdapter{pool: pool},
 	)
 
 	// Delivery depends on catalog (SKU existence) + sales (SO line lookup +
@@ -869,6 +870,49 @@ func (a *costingAuditAdapter) LogCostingAdjustment(ctx context.Context, in costi
 		    (id, entity_type, entity_id, action, actor_id, reason, metadata, created_at)
 		 VALUES (gen_random_uuid(), 'COSTING_ADJUSTMENT', $1, 'COSTING_ADJUSTED', $2, $3, $4, NOW())`,
 		in.AdjustmentID, in.ActorID, in.Reason, meta,
+	)
+	return err
+}
+
+// salesMappingAuditAdapter implements sales.CustomerSKUMappingAuditLogger by
+// writing directly to inventory_audit_log via pgxpool. Inlined here (instead of
+// going through inventory.Service) so sales does not depend on the inventory
+// module — the audit table is a shared cross-module ledger keyed by
+// entity_type. Errors are swallowed by the service (best-effort): a transient
+// audit-write failure must never roll back the mapping mutation itself.
+//
+// CSM_* rows carry entity_type="CUSTOMER_SKU_MAPPING". The composite PK
+// (customer_id, customer_sku_code) is not a UUID, so entity_id is a fresh
+// gen_random_uuid() and the real key lands in the metadata JSON alongside any
+// previous_sku_id (UPDATEs that moved sku_id) or rows_imported (bulk).
+type salesMappingAuditAdapter struct{ pool *pgxpool.Pool }
+
+func (a *salesMappingAuditAdapter) LogCustomerSKUMapping(ctx context.Context, in sales.AuditCustomerSKUMappingInput) error {
+	meta := map[string]any{
+		"customer_id":       in.CustomerID,
+		"customer_sku_code": in.CustomerSKUCode,
+	}
+	if in.SKUID != uuid.Nil {
+		meta["sku_id"] = in.SKUID
+	}
+	if in.PreviousSKUID != nil {
+		meta["previous_sku_id"] = *in.PreviousSKUID
+	}
+	if in.RowsImported > 0 {
+		meta["rows_imported"] = in.RowsImported
+	}
+	if in.Notes != "" {
+		meta["notes"] = in.Notes
+	}
+	metaJSON, err := json.Marshal(meta)
+	if err != nil {
+		return err
+	}
+	_, err = a.pool.Exec(ctx,
+		`INSERT INTO inventory_audit_log
+		    (id, entity_type, entity_id, action, actor_id, reason, metadata, created_at)
+		 VALUES (gen_random_uuid(), 'CUSTOMER_SKU_MAPPING', gen_random_uuid(), $1, $2, $3, $4, NOW())`,
+		string(in.Action), in.ActorID, in.Notes, metaJSON,
 	)
 	return err
 }

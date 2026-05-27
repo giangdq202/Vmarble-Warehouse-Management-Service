@@ -57,6 +57,31 @@ type store interface {
 	// withTx runs fn inside a single transaction. The store handles
 	// pgxpool.BeginTx/Commit/Rollback so the service stays SQL-free.
 	withTx(ctx context.Context, fn func(tx txStore) error) error
+
+	// Customer SKU mappings (#304) -------------------------------------------
+
+	// insertCustomerSKUMapping returns ErrInvalidInput on PK collision (BR-CSM02)
+	// or FK violation (unknown customer / SKU). The store maps the underlying
+	// pgx errors to sentinel errors so the service stays driver-agnostic.
+	insertCustomerSKUMapping(ctx context.Context, m CustomerSKUMapping) error
+
+	// selectCustomerSKUMappingsPaged supports an optional customer_id filter.
+	// Pass filter with nil CustomerID to list everything (admin only).
+	selectCustomerSKUMappingsPaged(ctx context.Context, p httpkit.PageParams, f CustomerSKUMappingFilter) ([]CustomerSKUMapping, int, error)
+
+	selectCustomerSKUMappingByPK(ctx context.Context, customerID uuid.UUID, code string) (CustomerSKUMapping, error)
+
+	// updateCustomerSKUMapping refreshes sku_id and/or notes plus updated_at.
+	// Returns ErrNotFound when the row does not exist; ErrInvalidInput on FK
+	// violation (unknown SKU).
+	updateCustomerSKUMapping(ctx context.Context, m CustomerSKUMapping) error
+
+	deleteCustomerSKUMapping(ctx context.Context, customerID uuid.UUID, code string) error
+
+	// bulkInsertCustomerSKUMappings inserts every row inside a single tx.
+	// Any PK or FK violation rolls the whole batch back so the service can
+	// surface fail-all semantics (BR-D08 mirror).
+	bulkInsertCustomerSKUMappings(ctx context.Context, rows []CustomerSKUMapping) error
 }
 
 // txStore is the subset of store operations safe to call from inside a

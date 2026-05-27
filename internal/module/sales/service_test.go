@@ -79,6 +79,18 @@ type mockStore struct {
 	// to withTx so tests can inject "third-tx-fails-after-second-succeeds".
 	tx        *mockTxStore
 	withTxErr error
+
+	// Customer SKU mappings (#304)
+	insertCSMErr           error
+	insertedCSM            *CustomerSKUMapping
+	selectCSMByPKResult    CustomerSKUMapping
+	selectCSMByPKErr       error
+	selectCSMPagedResult   []CustomerSKUMapping
+	selectCSMPagedErr      error
+	updateCSMErr           error
+	deleteCSMErr           error
+	bulkInsertCSMErr       error
+	bulkInsertCSMRows      []CustomerSKUMapping
 }
 
 type mockTxStore struct {
@@ -196,6 +208,38 @@ func (m *mockStore) withTx(ctx context.Context, fn func(tx txStore) error) error
 		m.tx = &mockTxStore{}
 	}
 	return fn(m.tx)
+}
+
+func (m *mockStore) insertCustomerSKUMapping(_ context.Context, c CustomerSKUMapping) error {
+	if m.insertCSMErr != nil {
+		return m.insertCSMErr
+	}
+	m.insertedCSM = &c
+	return nil
+}
+
+func (m *mockStore) selectCustomerSKUMappingsPaged(_ context.Context, _ httpkit.PageParams, _ CustomerSKUMappingFilter) ([]CustomerSKUMapping, int, error) {
+	return m.selectCSMPagedResult, len(m.selectCSMPagedResult), m.selectCSMPagedErr
+}
+
+func (m *mockStore) selectCustomerSKUMappingByPK(_ context.Context, _ uuid.UUID, _ string) (CustomerSKUMapping, error) {
+	return m.selectCSMByPKResult, m.selectCSMByPKErr
+}
+
+func (m *mockStore) updateCustomerSKUMapping(_ context.Context, _ CustomerSKUMapping) error {
+	return m.updateCSMErr
+}
+
+func (m *mockStore) deleteCustomerSKUMapping(_ context.Context, _ uuid.UUID, _ string) error {
+	return m.deleteCSMErr
+}
+
+func (m *mockStore) bulkInsertCustomerSKUMappings(_ context.Context, rows []CustomerSKUMapping) error {
+	if m.bulkInsertCSMErr != nil {
+		return m.bulkInsertCSMErr
+	}
+	m.bulkInsertCSMRows = append(m.bulkInsertCSMRows, rows...)
+	return nil
 }
 
 func (m *mockTxStore) lockSOForUpdate(_ context.Context, _ uuid.UUID) (SalesOrder, error) {
@@ -794,5 +838,132 @@ func TestPickSplitDeadline_InheritsSOShipDate(t *testing.T) {
 func TestPickSplitDeadline_NilWhenBothMissing(t *testing.T) {
 	if got := pickSplitDeadline(time.Time{}, nil); got != nil {
 		t.Errorf("expected nil, got %v", got)
+	}
+}
+
+// ── CustomerSKUMapping (#304) ───────────────────────────────────────────────
+
+func TestCreateCustomerSKUMapping_HappyPath(t *testing.T) {
+	st := &mockStore{}
+	svc := newSvc(st, &mockSKUChecker{}, nil)
+
+	customerID := uuid.New()
+	skuID := uuid.New()
+	actor := uuid.New()
+	m, err := svc.CreateCustomerSKUMapping(context.Background(), CreateCustomerSKUMappingInput{
+		CustomerID:      customerID,
+		CustomerSKUCode: "  ACME-RED-01  ",
+		SKUID:           skuID,
+		Notes:           "  red marble  ",
+		ActorID:         actor,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if m.CustomerSKUCode != "ACME-RED-01" {
+		t.Errorf("CustomerSKUCode = %q, want trimmed ACME-RED-01", m.CustomerSKUCode)
+	}
+	if m.Notes != "red marble" {
+		t.Errorf("Notes = %q, want trimmed", m.Notes)
+	}
+	if st.insertedCSM == nil || st.insertedCSM.SKUID != skuID || st.insertedCSM.CustomerID != customerID {
+		t.Errorf("insertCustomerSKUMapping not called with expected payload: %+v", st.insertedCSM)
+	}
+	if st.insertedCSM.CreatedBy == nil || *st.insertedCSM.CreatedBy != actor {
+		t.Errorf("CreatedBy = %v, want %v", st.insertedCSM.CreatedBy, actor)
+	}
+}
+
+func TestCreateCustomerSKUMapping_NilCustomer_Rejected(t *testing.T) {
+	svc := newSvc(&mockStore{}, &mockSKUChecker{}, nil)
+	_, err := svc.CreateCustomerSKUMapping(context.Background(), CreateCustomerSKUMappingInput{
+		CustomerSKUCode: "X",
+		SKUID:           uuid.New(),
+	})
+	if !errors.Is(err, domain.ErrInvalidInput) {
+		t.Errorf("expected ErrInvalidInput on nil customer_id, got %v", err)
+	}
+}
+
+func TestCreateCustomerSKUMapping_UnknownSKU_Rejected(t *testing.T) {
+	missing := domain.NewBizError(domain.ErrNotFound, "sku missing")
+	svc := newSvc(&mockStore{}, &mockSKUChecker{err: missing}, nil)
+	_, err := svc.CreateCustomerSKUMapping(context.Background(), CreateCustomerSKUMappingInput{
+		CustomerID:      uuid.New(),
+		CustomerSKUCode: "X",
+		SKUID:           uuid.New(),
+	})
+	if !errors.Is(err, domain.ErrInvalidInput) {
+		t.Errorf("expected ErrInvalidInput when SKU is unknown, got %v", err)
+	}
+}
+
+func TestCreateCustomerSKUMapping_DuplicatePKPropagates(t *testing.T) {
+	dup := domain.NewBizError(domain.ErrInvalidInput, "mapping already exists")
+	st := &mockStore{insertCSMErr: dup}
+	svc := newSvc(st, &mockSKUChecker{}, nil)
+
+	_, err := svc.CreateCustomerSKUMapping(context.Background(), CreateCustomerSKUMappingInput{
+		CustomerID:      uuid.New(),
+		CustomerSKUCode: "DUP",
+		SKUID:           uuid.New(),
+	})
+	if !errors.Is(err, domain.ErrInvalidInput) {
+		t.Errorf("expected ErrInvalidInput surface from store dup, got %v", err)
+	}
+	if st.insertedCSM != nil {
+		t.Error("insertedCSM should remain nil when store rejects insert")
+	}
+}
+
+func TestBulkImportCustomerSKUMappings_FailAll_OnRowError(t *testing.T) {
+	st := &mockStore{}
+	svc := newSvc(st, &mockSKUChecker{}, nil)
+
+	customerID := uuid.New()
+	res, err := svc.BulkImportCustomerSKUMappings(context.Background(), BulkImportCustomerSKUMappingsInput{
+		CustomerID: customerID,
+		Rows: []BulkMappingRow{
+			{CustomerSKUCode: "A", SKUID: uuid.New()},
+			{CustomerSKUCode: "", SKUID: uuid.New()},     // invalid: blank code
+			{CustomerSKUCode: "A", SKUID: uuid.New()},     // duplicate of row 1
+		},
+	})
+	if !errors.Is(err, domain.ErrInvalidInput) {
+		t.Fatalf("expected ErrInvalidInput on row error, got %v", err)
+	}
+	if res.Inserted != 0 {
+		t.Errorf("Inserted = %d, want 0 (fail-all)", res.Inserted)
+	}
+	if len(res.Errors) != 2 {
+		t.Errorf("expected 2 row errors, got %+v", res.Errors)
+	}
+	if len(st.bulkInsertCSMRows) != 0 {
+		t.Errorf("bulk insert must not run when validation finds errors, got %d rows", len(st.bulkInsertCSMRows))
+	}
+}
+
+func TestBulkImportCustomerSKUMappings_HappyPath(t *testing.T) {
+	st := &mockStore{}
+	svc := newSvc(st, &mockSKUChecker{}, nil)
+
+	customerID := uuid.New()
+	rows := []BulkMappingRow{
+		{CustomerSKUCode: "A", SKUID: uuid.New()},
+		{CustomerSKUCode: "B", SKUID: uuid.New()},
+	}
+	res, err := svc.BulkImportCustomerSKUMappings(context.Background(), BulkImportCustomerSKUMappingsInput{
+		CustomerID: customerID,
+		Rows:       rows,
+		ActorID:    uuid.New(),
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if res.Inserted != 2 {
+		t.Errorf("Inserted = %d, want 2", res.Inserted)
+	}
+	if len(st.bulkInsertCSMRows) != 2 {
+		t.Errorf("store should have received 2 rows, got %d", len(st.bulkInsertCSMRows))
 	}
 }

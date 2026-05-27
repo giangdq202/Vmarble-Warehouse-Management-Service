@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/vmarble/warehouse-management-service/internal/domain"
@@ -576,4 +577,179 @@ func nullableUUID(id uuid.UUID) interface{} {
 		return nil
 	}
 	return id
+}
+
+// ── Customer SKU mappings (#304) ─────────────────────────────────────────────
+
+// scanCustomerSKUMapping maps one row using the canonical column order.
+func scanCustomerSKUMapping(r rowScanner) (CustomerSKUMapping, error) {
+	var m CustomerSKUMapping
+	var notes *string
+	var createdBy *uuid.UUID
+	if err := r.Scan(
+		&m.CustomerID, &m.CustomerSKUCode, &m.SKUID,
+		&notes, &createdBy, &m.CreatedAt, &m.UpdatedAt,
+	); err != nil {
+		return CustomerSKUMapping{}, err
+	}
+	m.Notes = stringFromPtr(notes)
+	m.CreatedBy = createdBy
+	return m, nil
+}
+
+const selectCSMCols = `customer_id, customer_sku_code, sku_id, notes, created_by, created_at, updated_at`
+
+// mapCSMPgError translates the postgres error codes raised by inserts/updates
+// against customer_sku_mappings into domain sentinel errors. Centralised so
+// the bulk path and the single-row path return the same shape.
+//
+//	23505 unique_violation       → ErrInvalidInput (PK collision = BR-CSM02)
+//	23503 foreign_key_violation  → ErrInvalidInput (unknown customer or sku)
+func mapCSMPgError(err error) error {
+	if err == nil {
+		return nil
+	}
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		switch pgErr.Code {
+		case "23505":
+			return domain.NewBizError(domain.ErrInvalidInput,
+				"customer_sku mapping already exists for (customer_id, customer_sku_code)")
+		case "23503":
+			// constraint_name lets us tell customer FK from sku FK so the
+			// caller renders a precise toast.
+			if strings.Contains(pgErr.ConstraintName, "sku") {
+				return domain.NewBizError(domain.ErrInvalidInput, "sku_id does not exist")
+			}
+			if strings.Contains(pgErr.ConstraintName, "customer") {
+				return domain.NewBizError(domain.ErrInvalidInput, "customer_id does not exist")
+			}
+			return domain.NewBizError(domain.ErrInvalidInput, "foreign key violation")
+		}
+	}
+	return err
+}
+
+func (s *pgStore) insertCustomerSKUMapping(ctx context.Context, m CustomerSKUMapping) error {
+	_, err := s.pool.Exec(ctx,
+		`INSERT INTO customer_sku_mappings
+		    (customer_id, customer_sku_code, sku_id, notes, created_by, created_at, updated_at)
+		 VALUES ($1, $2, $3, NULLIF($4,''), $5, $6, $7)`,
+		m.CustomerID, m.CustomerSKUCode, m.SKUID, m.Notes, m.CreatedBy, m.CreatedAt, m.UpdatedAt,
+	)
+	return mapCSMPgError(err)
+}
+
+func (s *pgStore) selectCustomerSKUMappingsPaged(ctx context.Context, p httpkit.PageParams, f CustomerSKUMappingFilter) ([]CustomerSKUMapping, int, error) {
+	var customerID any
+	if f.CustomerID != nil {
+		customerID = *f.CustomerID
+	}
+
+	var total int
+	if err := s.pool.QueryRow(ctx,
+		`SELECT COUNT(*) FROM customer_sku_mappings
+		 WHERE ($1::uuid IS NULL OR customer_id = $1)`,
+		customerID,
+	).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+
+	rows, err := s.pool.Query(ctx,
+		`SELECT `+selectCSMCols+`
+		 FROM customer_sku_mappings
+		 WHERE ($1::uuid IS NULL OR customer_id = $1)
+		 ORDER BY customer_id, customer_sku_code
+		 LIMIT $2 OFFSET $3`,
+		customerID, p.Limit, p.Offset(),
+	)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+
+	out := make([]CustomerSKUMapping, 0)
+	for rows.Next() {
+		m, err := scanCustomerSKUMapping(rows)
+		if err != nil {
+			return nil, 0, err
+		}
+		out = append(out, m)
+	}
+	return out, total, rows.Err()
+}
+
+func (s *pgStore) selectCustomerSKUMappingByPK(ctx context.Context, customerID uuid.UUID, code string) (CustomerSKUMapping, error) {
+	row := s.pool.QueryRow(ctx,
+		`SELECT `+selectCSMCols+`
+		 FROM customer_sku_mappings
+		 WHERE customer_id = $1 AND customer_sku_code = $2`,
+		customerID, code,
+	)
+	m, err := scanCustomerSKUMapping(row)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return CustomerSKUMapping{}, domain.ErrNotFound
+		}
+		return CustomerSKUMapping{}, err
+	}
+	return m, nil
+}
+
+func (s *pgStore) updateCustomerSKUMapping(ctx context.Context, m CustomerSKUMapping) error {
+	tag, err := s.pool.Exec(ctx,
+		`UPDATE customer_sku_mappings
+		    SET sku_id = $3, notes = NULLIF($4,''), updated_at = $5
+		  WHERE customer_id = $1 AND customer_sku_code = $2`,
+		m.CustomerID, m.CustomerSKUCode, m.SKUID, m.Notes, m.UpdatedAt,
+	)
+	if err != nil {
+		return mapCSMPgError(err)
+	}
+	if tag.RowsAffected() == 0 {
+		return domain.ErrNotFound
+	}
+	return nil
+}
+
+func (s *pgStore) deleteCustomerSKUMapping(ctx context.Context, customerID uuid.UUID, code string) error {
+	tag, err := s.pool.Exec(ctx,
+		`DELETE FROM customer_sku_mappings
+		  WHERE customer_id = $1 AND customer_sku_code = $2`,
+		customerID, code,
+	)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return domain.ErrNotFound
+	}
+	return nil
+}
+
+// bulkInsertCustomerSKUMappings inserts every row in one transaction. Any PK
+// or FK violation aborts the whole batch (fail-all matches BR-D08). The
+// caller validates input shape; this method is responsible only for the
+// atomicity guarantee.
+func (s *pgStore) bulkInsertCustomerSKUMappings(ctx context.Context, rows []CustomerSKUMapping) error {
+	if len(rows) == 0 {
+		return nil
+	}
+	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	for _, m := range rows {
+		if _, err := tx.Exec(ctx,
+			`INSERT INTO customer_sku_mappings
+			    (customer_id, customer_sku_code, sku_id, notes, created_by, created_at, updated_at)
+			 VALUES ($1, $2, $3, NULLIF($4,''), $5, $6, $7)`,
+			m.CustomerID, m.CustomerSKUCode, m.SKUID, m.Notes, m.CreatedBy, m.CreatedAt, m.UpdatedAt,
+		); err != nil {
+			return mapCSMPgError(err)
+		}
+	}
+	return tx.Commit(ctx)
 }
