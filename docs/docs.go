@@ -1105,6 +1105,58 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/containers/{id}/lines-history": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Audit trail of every container_lines row that was wiped by a\nv2 supersede. Optionally filter by the plan id that triggered\nthe supersede via ?plan_id=\u003cuuid\u003e.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "delivery"
+                ],
+                "summary": "List container_lines_history for a container (#302)",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "container id",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "loading plan id that supersededthis row",
+                        "name": "plan_id",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/internal_module_delivery.ContainerLineHistoryEntry"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/containers/{id}/lines/{line_id}": {
             "delete": {
                 "security": [
@@ -4590,6 +4642,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
+                "description": "When the container already has scanned container_lines, the\ncaller MUST set confirm_supersede=true. Without it the\nendpoint returns 412 so the FE can render the confirm dialog.",
                 "consumes": [
                     "application/json"
                 ],
@@ -4609,7 +4662,7 @@ const docTemplate = `{
                         "required": true
                     },
                     {
-                        "description": "optional notes",
+                        "description": "optional notes + confirm_supersede flag",
                         "name": "body",
                         "in": "body",
                         "schema": {
@@ -4635,6 +4688,15 @@ const docTemplate = `{
                     },
                     "409": {
                         "description": "Conflict",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "412": {
+                        "description": "container has scanned lines; resubmit with confirm_supersede=true",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -10756,6 +10818,44 @@ const docTemplate = `{
                 }
             }
         },
+        "internal_module_delivery.ContainerLineHistoryEntry": {
+            "type": "object",
+            "properties": {
+                "barcode_id": {
+                    "type": "string"
+                },
+                "container_id": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "original_line_id": {
+                    "type": "string"
+                },
+                "raw_snapshot": {
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    }
+                },
+                "reason": {
+                    "type": "string"
+                },
+                "sku_id": {
+                    "type": "string"
+                },
+                "superseded_at": {
+                    "type": "string"
+                },
+                "superseded_by_plan": {
+                    "type": "string"
+                },
+                "superseded_by_user": {
+                    "type": "string"
+                }
+            }
+        },
         "internal_module_delivery.ContainerStatusLogEntry": {
             "type": "object",
             "properties": {
@@ -11018,6 +11118,9 @@ const docTemplate = `{
         "internal_module_delivery.approveLoadingPlanRequest": {
             "type": "object",
             "properties": {
+                "confirm_supersede": {
+                    "type": "boolean"
+                },
                 "notes": {
                     "type": "string"
                 }

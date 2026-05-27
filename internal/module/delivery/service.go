@@ -23,6 +23,7 @@ type service struct {
 	fgTracker      FGTracker
 	skuResolver    CustomerSKUResolver
 	lpAuditor      LoadingPlanAuditLogger
+	planReloader   PlanReloadNotifier
 	cbmOverheadPct float64
 	now            func() time.Time // overridable in tests
 }
@@ -62,6 +63,12 @@ func (svc *service) SetCustomerSKUResolver(r CustomerSKUResolver) {
 // flows. nil leaves auditing off; production wires lpAuditAdapter.
 func (svc *service) SetLoadingPlanAuditor(a LoadingPlanAuditLogger) {
 	svc.lpAuditor = a
+}
+
+// SetPlanReloadNotifier wires the best-effort SSE hook fired after a v2
+// supersede wipes container_lines (BR-D13). nil leaves notifications off.
+func (svc *service) SetPlanReloadNotifier(n PlanReloadNotifier) {
+	svc.planReloader = n
 }
 
 // ── Container CRUD ──────────────────────────────────────────────────────────
@@ -909,8 +916,60 @@ func (svc *service) ApproveLoadingPlan(ctx context.Context, in ApproveLoadingPla
 	if in.ActorID == uuid.Nil {
 		return LoadingPlan{}, domain.NewBizError(domain.ErrInvalidInput, "actor_id is required")
 	}
+
+	// Resolve the target plan first so we know which container the BR-D12
+	// SEALED guard and the BR-D11 line-count check should run against. The
+	// row read is unlocked — supersedeLoadingPlanTx re-locks it for the
+	// actual update so the read-then-write race is bounded.
+	target, err := svc.s.selectLoadingPlanByID(ctx, in.PlanID)
+	if err != nil {
+		return LoadingPlan{}, err
+	}
+
+	// BR-D12: SEALED / SHIPPED containers refuse approve until an admin
+	// force-unseals (path covered by ReopenContainer). Cancelled containers
+	// likewise don't accept new plans — the FE should never offer the action,
+	// but the BE backstop keeps the audit chain clean.
+	container, err := svc.s.selectContainerByID(ctx, target.ContainerID)
+	if err != nil {
+		return LoadingPlan{}, err
+	}
+	switch container.Status {
+	case ContainerStatusSealed:
+		return LoadingPlan{}, domain.NewBizError(domain.ErrInvalidTransition,
+			"container is SEALED — force-unseal before approving a new plan")
+	case ContainerStatusShipped:
+		return LoadingPlan{}, domain.NewBizError(domain.ErrInvalidTransition,
+			"container has shipped — cannot approve another plan")
+	case ContainerStatusCancelled:
+		return LoadingPlan{}, domain.NewBizError(domain.ErrInvalidTransition,
+			"container is cancelled")
+	}
+
+	// BR-D11: when the container already has live container_lines we must
+	// supersede them. Require explicit ConfirmSupersede so the FE can show
+	// the confirm dialog and the operator's intent is logged.
+	lineCount, err := svc.s.countContainerLines(ctx, target.ContainerID)
+	if err != nil {
+		// countContainerLines uses the pool; remap to a service-shaped error.
+		return LoadingPlan{}, err
+	}
+	mustSupersede := lineCount > 0 && target.Status != LoadingPlanStatusApproved
+	if mustSupersede && !in.ConfirmSupersede {
+		return LoadingPlan{}, domain.NewBizError(domain.ErrPreconditionFailed,
+			"container has scanned lines that will be wiped; resubmit with confirm_supersede=true")
+	}
+
 	now := svc.now().UTC()
-	updated, err := svc.s.approveLoadingPlanTx(ctx, in.PlanID, in.ActorID, now)
+	var (
+		updated         LoadingPlan
+		supersededCount int
+	)
+	if mustSupersede {
+		updated, supersededCount, err = svc.s.supersedeLoadingPlanTx(ctx, in.PlanID, in.ActorID, now)
+	} else {
+		updated, err = svc.s.approveLoadingPlanTx(ctx, in.PlanID, in.ActorID, now)
+	}
 	if err != nil {
 		return LoadingPlan{}, err
 	}
@@ -920,8 +979,12 @@ func (svc *service) ApproveLoadingPlan(ctx context.Context, in ApproveLoadingPla
 	}
 	updated.Lines = lines
 
+	auditAction := AuditLPActionApproved
+	if supersededCount > 0 {
+		auditAction = AuditLPActionSuperseded
+	}
 	svc.logLoadingPlanAudit(ctx, AuditLoadingPlanInput{
-		Action:      AuditLPActionApproved,
+		Action:      auditAction,
 		PlanID:      updated.ID,
 		ContainerID: updated.ContainerID,
 		Version:     updated.Version,
@@ -929,7 +992,36 @@ func (svc *service) ApproveLoadingPlan(ctx context.Context, in ApproveLoadingPla
 		ActorID:     in.ActorID,
 		Notes:       strings.TrimSpace(in.Notes),
 	})
+
+	// BR-D13: notify packers on the kiosk only when something actually
+	// changed under their feet — first-time approve with no live lines
+	// stays silent.
+	if supersededCount > 0 && svc.planReloader != nil {
+		if err := svc.planReloader.NotifyPlanReload(ctx, PlanReloadNotice{
+			ContainerID:     updated.ContainerID,
+			NewPlanID:       updated.ID,
+			NewVersion:      updated.Version,
+			SupersededLines: supersededCount,
+			ActorID:         in.ActorID,
+		}); err != nil {
+			slog.Warn("plan reload notify failed",
+				"plan_id", updated.ID,
+				"container_id", updated.ContainerID,
+				"error", err,
+			)
+		}
+	}
 	return updated, nil
+}
+
+func (svc *service) ListContainerLinesHistory(ctx context.Context, containerID uuid.UUID, planID *uuid.UUID) ([]ContainerLineHistoryEntry, error) {
+	if containerID == uuid.Nil {
+		return nil, domain.NewBizError(domain.ErrInvalidInput, "container_id is required")
+	}
+	if planID != nil && *planID == uuid.Nil {
+		return nil, domain.NewBizError(domain.ErrInvalidInput, "plan_id must be a valid uuid")
+	}
+	return svc.s.selectContainerLinesHistory(ctx, containerID, planID)
 }
 
 func (svc *service) logLoadingPlanAudit(ctx context.Context, in AuditLoadingPlanInput) {

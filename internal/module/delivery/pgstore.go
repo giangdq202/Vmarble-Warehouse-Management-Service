@@ -2,6 +2,7 @@ package delivery
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -593,4 +594,211 @@ func (s *pgStore) approveLoadingPlanTx(ctx context.Context, planID, actorID uuid
 		return LoadingPlan{}, err
 	}
 	return updated, nil
+}
+
+// supersedeLoadingPlanTx wires BR-D11. The whole sequence runs under a single
+// SERIALIZABLE-friendly tx so a packer's concurrent scan either sees the v1
+// container_lines (and races with the snapshot) or the empty post-supersede
+// state — never a half-deleted set.
+func (s *pgStore) supersedeLoadingPlanTx(ctx context.Context, newPlanID, actorID uuid.UUID, now time.Time) (LoadingPlan, int, error) {
+	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return LoadingPlan{}, 0, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	// Lock target plan row so two concurrent approves can't both flip it.
+	row := tx.QueryRow(ctx, selectLoadingPlanCols+` WHERE id = $1 FOR UPDATE`, newPlanID)
+	target, err := scanLoadingPlan(row)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return LoadingPlan{}, 0, domain.NewBizError(domain.ErrNotFound, "loading plan not found")
+	}
+	if err != nil {
+		return LoadingPlan{}, 0, err
+	}
+	if target.Status == LoadingPlanStatusSuperseded {
+		return LoadingPlan{}, 0, domain.NewBizError(domain.ErrInvalidTransition, "cannot approve a superseded plan")
+	}
+	// Already-APPROVED is idempotent and skips the supersede side-effects —
+	// the caller decided beforehand whether confirm_supersede was required.
+	if target.Status == LoadingPlanStatusApproved {
+		if err := tx.Commit(ctx); err != nil {
+			return LoadingPlan{}, 0, err
+		}
+		return target, 0, nil
+	}
+
+	// (a) Snapshot every container_lines row to history before the DELETE.
+	// raw_snapshot freezes the entire row payload so re-running an audit
+	// report still works after FK targets churn.
+	rows, err := tx.Query(ctx,
+		`SELECT id, container_id, sku_id, qty, sales_order_line_id,
+		        cbm_total, weight_kg_total, added_by, added_at
+		   FROM container_lines
+		  WHERE container_id = $1
+		  FOR UPDATE`,
+		target.ContainerID,
+	)
+	if err != nil {
+		return LoadingPlan{}, 0, err
+	}
+	type snapshotRow struct {
+		ID               uuid.UUID
+		ContainerID      uuid.UUID
+		SKUID            uuid.UUID
+		Qty              int
+		SalesOrderLineID uuid.UUID
+		CBMTotal         float64
+		WeightKGTotal    float64
+		AddedBy          uuid.UUID
+		AddedAt          time.Time
+	}
+	var snaps []snapshotRow
+	for rows.Next() {
+		var r snapshotRow
+		if err := rows.Scan(
+			&r.ID, &r.ContainerID, &r.SKUID, &r.Qty, &r.SalesOrderLineID,
+			&r.CBMTotal, &r.WeightKGTotal, &r.AddedBy, &r.AddedAt,
+		); err != nil {
+			rows.Close()
+			return LoadingPlan{}, 0, err
+		}
+		snaps = append(snaps, r)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return LoadingPlan{}, 0, err
+	}
+
+	if len(snaps) > 0 {
+		batch := &pgx.Batch{}
+		for _, r := range snaps {
+			payload, err := json.Marshal(map[string]any{
+				"id":                  r.ID,
+				"container_id":        r.ContainerID,
+				"sku_id":              r.SKUID,
+				"qty":                 r.Qty,
+				"sales_order_line_id": r.SalesOrderLineID,
+				"cbm_total":           r.CBMTotal,
+				"weight_kg_total":     r.WeightKGTotal,
+				"added_by":            r.AddedBy,
+				"added_at":            r.AddedAt,
+			})
+			if err != nil {
+				return LoadingPlan{}, 0, fmt.Errorf("marshal container_line snapshot: %w", err)
+			}
+			batch.Queue(
+				`INSERT INTO container_lines_history
+				    (original_line_id, container_id, sku_id, barcode_id,
+				     superseded_at, superseded_by_plan, superseded_by_user,
+				     reason, raw_snapshot)
+				 VALUES ($1,$2,$3,NULL,$4,$5,$6,'PLAN_V2_SUPERSEDE',$7)`,
+				r.ID, r.ContainerID, r.SKUID, now, newPlanID, actorID, payload,
+			)
+		}
+		br := tx.SendBatch(ctx, batch)
+		for range snaps {
+			if _, err := br.Exec(); err != nil {
+				_ = br.Close()
+				return LoadingPlan{}, 0, err
+			}
+		}
+		if err := br.Close(); err != nil {
+			return LoadingPlan{}, 0, err
+		}
+
+		// (b) Wipe the live container_lines so packers restart from zero.
+		if _, err := tx.Exec(ctx,
+			`DELETE FROM container_lines WHERE container_id = $1`,
+			target.ContainerID,
+		); err != nil {
+			return LoadingPlan{}, 0, err
+		}
+	}
+
+	// (c) SUPERSEDE every other non-superseded plan for this container.
+	if _, err := tx.Exec(ctx,
+		`UPDATE loading_plans
+		    SET status        = 'SUPERSEDED',
+		        superseded_at = $1,
+		        superseded_by = $2
+		  WHERE container_id  = $3
+		    AND id            <> $2
+		    AND status        <> 'SUPERSEDED'`,
+		now, newPlanID, target.ContainerID,
+	); err != nil {
+		return LoadingPlan{}, 0, err
+	}
+
+	// (d) Promote the target plan to APPROVED.
+	row = tx.QueryRow(ctx,
+		`UPDATE loading_plans
+		    SET status      = 'APPROVED',
+		        approved_at = $1,
+		        approved_by = $2
+		  WHERE id          = $3
+		    AND status      IN ('PARSED','VALIDATED')
+		 RETURNING id, container_id, excel_file_url, excel_hash, parsed_at, uploaded_by,
+		           status, version, notes, approved_at, approved_by,
+		           superseded_at, superseded_by, created_at`,
+		now, actorID, newPlanID,
+	)
+	updated, err := scanLoadingPlan(row)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return LoadingPlan{}, 0, domain.NewBizError(domain.ErrInvalidTransition, "loading plan is not in PARSED or VALIDATED status")
+	}
+	if err != nil {
+		return LoadingPlan{}, 0, err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return LoadingPlan{}, 0, err
+	}
+	return updated, len(snaps), nil
+}
+
+func (s *pgStore) countContainerLines(ctx context.Context, containerID uuid.UUID) (int, error) {
+	var n int
+	if err := s.pool.QueryRow(ctx,
+		`SELECT COUNT(*) FROM container_lines WHERE container_id = $1`,
+		containerID,
+	).Scan(&n); err != nil {
+		return 0, err
+	}
+	return n, nil
+}
+
+func (s *pgStore) selectContainerLinesHistory(ctx context.Context, containerID uuid.UUID, planID *uuid.UUID) ([]ContainerLineHistoryEntry, error) {
+	q := `SELECT id, original_line_id, container_id, sku_id, barcode_id,
+	             superseded_at, superseded_by_plan, superseded_by_user,
+	             reason, raw_snapshot
+	        FROM container_lines_history
+	       WHERE container_id = $1`
+	args := []any{containerID}
+	if planID != nil {
+		q += ` AND superseded_by_plan = $2`
+		args = append(args, *planID)
+	}
+	q += ` ORDER BY superseded_at DESC`
+
+	rows, err := s.pool.Query(ctx, q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]ContainerLineHistoryEntry, 0)
+	for rows.Next() {
+		var e ContainerLineHistoryEntry
+		var bc *uuid.UUID
+		if err := rows.Scan(
+			&e.ID, &e.OriginalLineID, &e.ContainerID, &e.SKUID, &bc,
+			&e.SupersededAt, &e.SupersededByPlan, &e.SupersededByUser,
+			&e.Reason, &e.RawSnapshot,
+		); err != nil {
+			return nil, err
+		}
+		e.BarcodeID = bc
+		out = append(out, e)
+	}
+	return out, rows.Err()
 }

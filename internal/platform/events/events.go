@@ -62,6 +62,12 @@ const (
 	// defect. Same audience as FG_DEFECT_CREATED.
 	EventTypeFGDefectResolved = "FG_DEFECT_RESOLVED"
 
+	// EventTypePlanReload fires after delivery.ApproveLoadingPlan supersedes a
+	// prior plan and wipes container_lines (BR-D13). Routed by Roles to every
+	// kiosk/manager audience so packers see "kiosk reload required" before
+	// their next scan, and dashboards refresh the loading-plan view.
+	EventTypePlanReload = "PLAN_RELOAD"
+
 	// pgChannel is the PostgreSQL LISTEN/NOTIFY channel name.
 	pgChannel = "vwm_events"
 )

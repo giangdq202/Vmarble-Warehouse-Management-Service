@@ -69,6 +69,19 @@ type mockStore struct {
 
 	approveLoadingPlanResult LoadingPlan
 	approveLoadingPlanErr    error
+
+	// Supersede / lines-history (#302)
+	supersedeLoadingPlanResult LoadingPlan
+	supersedeLoadingPlanCount  int
+	supersedeLoadingPlanErr    error
+	supersedeLoadingPlanCalled bool
+
+	containerLinesCountResult int
+	containerLinesCountErr    error
+
+	linesHistoryResult []ContainerLineHistoryEntry
+	linesHistoryErr    error
+	linesHistoryFilter *uuid.UUID
 }
 
 type mockTxStore struct {
@@ -84,20 +97,20 @@ type mockTxStore struct {
 	linesForSeal []ShipmentItem
 
 	// errors per operation
-	lockContainerErr     error
-	lockLineErr          error
-	insertLineErr        error
-	deleteLineErr        error
-	updateLineQtyErr     error
-	updateStatusErr      error
-	listLinesForSealErr  error
+	lockContainerErr      error
+	lockLineErr           error
+	insertLineErr         error
+	deleteLineErr         error
+	updateLineQtyErr      error
+	updateStatusErr       error
+	listLinesForSealErr   error
 	sumLinesAggregatesErr error
 
 	// call captures
-	insertedLines    []ContainerLine
-	statusUpdates    []updateStatusInput
-	deletedLineIDs   []uuid.UUID
-	lineQtyUpdates   []lineQtyUpdate
+	insertedLines  []ContainerLine
+	statusUpdates  []updateStatusInput
+	deletedLineIDs []uuid.UUID
+	lineQtyUpdates []lineQtyUpdate
 }
 
 type lineQtyUpdate struct {
@@ -177,6 +190,20 @@ func (m *mockStore) nextLoadingPlanVersion(_ context.Context, _ uuid.UUID) (int,
 
 func (m *mockStore) approveLoadingPlanTx(_ context.Context, _, _ uuid.UUID, _ time.Time) (LoadingPlan, error) {
 	return m.approveLoadingPlanResult, m.approveLoadingPlanErr
+}
+
+func (m *mockStore) supersedeLoadingPlanTx(_ context.Context, _, _ uuid.UUID, _ time.Time) (LoadingPlan, int, error) {
+	m.supersedeLoadingPlanCalled = true
+	return m.supersedeLoadingPlanResult, m.supersedeLoadingPlanCount, m.supersedeLoadingPlanErr
+}
+
+func (m *mockStore) countContainerLines(_ context.Context, _ uuid.UUID) (int, error) {
+	return m.containerLinesCountResult, m.containerLinesCountErr
+}
+
+func (m *mockStore) selectContainerLinesHistory(_ context.Context, _ uuid.UUID, planID *uuid.UUID) ([]ContainerLineHistoryEntry, error) {
+	m.linesHistoryFilter = planID
+	return m.linesHistoryResult, m.linesHistoryErr
 }
 
 func newMockTx() *mockTxStore {
@@ -1274,5 +1301,194 @@ func TestUploadLoadingPlan_DuplicateHash_Rejected(t *testing.T) {
 	}
 	if st.insertedLoadingPlan != nil {
 		t.Error("plan must NOT be inserted when active hash matches (BR-D10)")
+	}
+}
+
+// ── ApproveLoadingPlan supersede + reload (#302) ────────────────────────────
+
+type mockPlanReloadNotifier struct {
+	calls   []PlanReloadNotice
+	failErr error
+}
+
+func (m *mockPlanReloadNotifier) NotifyPlanReload(_ context.Context, in PlanReloadNotice) error {
+	m.calls = append(m.calls, in)
+	return m.failErr
+}
+
+func TestApproveLoadingPlan_NoExistingLines_NoSupersede(t *testing.T) {
+	planID := uuid.New()
+	containerID := uuid.New()
+	st := &mockStore{
+		selectLoadingPlanByIDResult: LoadingPlan{
+			ID: planID, ContainerID: containerID, Status: LoadingPlanStatusParsed, Version: 1,
+		},
+		selectByIDResult:          Container{ID: containerID, Status: ContainerStatusOpen},
+		containerLinesCountResult: 0, // no live lines → plain approve path
+		approveLoadingPlanResult: LoadingPlan{
+			ID: planID, ContainerID: containerID, Status: LoadingPlanStatusApproved, Version: 1,
+		},
+	}
+	notifier := &mockPlanReloadNotifier{}
+	svc := newSvcWithLoadingPlan(t, st, &mockCustomerSKUResolver{})
+	svc.planReloader = notifier
+
+	out, err := svc.ApproveLoadingPlan(context.Background(), ApproveLoadingPlanInput{
+		PlanID: planID, ActorID: uuid.New(),
+	})
+	if err != nil {
+		t.Fatalf("ApproveLoadingPlan: %v", err)
+	}
+	if out.Status != LoadingPlanStatusApproved {
+		t.Errorf("status = %s, want APPROVED", out.Status)
+	}
+	if st.supersedeLoadingPlanCalled {
+		t.Error("supersedeLoadingPlanTx must NOT be called when no live lines exist")
+	}
+	if len(notifier.calls) != 0 {
+		t.Errorf("PLAN_RELOAD must not fire for first-time approve; got %d calls", len(notifier.calls))
+	}
+}
+
+func TestApproveLoadingPlan_WithLines_RequiresConfirm(t *testing.T) {
+	planID := uuid.New()
+	containerID := uuid.New()
+	st := &mockStore{
+		selectLoadingPlanByIDResult: LoadingPlan{
+			ID: planID, ContainerID: containerID, Status: LoadingPlanStatusParsed, Version: 2,
+		},
+		selectByIDResult:          Container{ID: containerID, Status: ContainerStatusOpen},
+		containerLinesCountResult: 7, // worker scanned 7 units → must confirm
+	}
+	svc := newSvcWithLoadingPlan(t, st, &mockCustomerSKUResolver{})
+
+	_, err := svc.ApproveLoadingPlan(context.Background(), ApproveLoadingPlanInput{
+		PlanID: planID, ActorID: uuid.New(),
+		// ConfirmSupersede deliberately false
+	})
+	if !errors.Is(err, domain.ErrPreconditionFailed) {
+		t.Fatalf("expected ErrPreconditionFailed without confirm_supersede, got %v", err)
+	}
+	if st.supersedeLoadingPlanCalled {
+		t.Error("supersede must NOT be invoked without confirm_supersede=true")
+	}
+}
+
+func TestApproveLoadingPlan_WithLines_ConfirmedSupersede_NotifiesReload(t *testing.T) {
+	planID := uuid.New()
+	containerID := uuid.New()
+	st := &mockStore{
+		selectLoadingPlanByIDResult: LoadingPlan{
+			ID: planID, ContainerID: containerID, Status: LoadingPlanStatusParsed, Version: 2,
+		},
+		selectByIDResult:          Container{ID: containerID, Status: ContainerStatusOpen},
+		containerLinesCountResult: 5,
+		supersedeLoadingPlanResult: LoadingPlan{
+			ID: planID, ContainerID: containerID, Status: LoadingPlanStatusApproved, Version: 2,
+		},
+		supersedeLoadingPlanCount: 5,
+	}
+	notifier := &mockPlanReloadNotifier{}
+	svc := newSvcWithLoadingPlan(t, st, &mockCustomerSKUResolver{})
+	svc.planReloader = notifier
+
+	actor := uuid.New()
+	out, err := svc.ApproveLoadingPlan(context.Background(), ApproveLoadingPlanInput{
+		PlanID: planID, ActorID: actor, ConfirmSupersede: true,
+	})
+	if err != nil {
+		t.Fatalf("ApproveLoadingPlan: %v", err)
+	}
+	if !st.supersedeLoadingPlanCalled {
+		t.Error("supersedeLoadingPlanTx must run when lines exist + confirmed")
+	}
+	if out.Version != 2 {
+		t.Errorf("version = %d, want 2", out.Version)
+	}
+	if len(notifier.calls) != 1 {
+		t.Fatalf("expected 1 PLAN_RELOAD notification, got %d", len(notifier.calls))
+	}
+	got := notifier.calls[0]
+	if got.ContainerID != containerID || got.NewPlanID != planID {
+		t.Errorf("notify ids = %+v, want container=%s plan=%s", got, containerID, planID)
+	}
+	if got.SupersededLines != 5 {
+		t.Errorf("superseded_lines = %d, want 5", got.SupersededLines)
+	}
+	if got.NewVersion != 2 {
+		t.Errorf("new_version = %d, want 2", got.NewVersion)
+	}
+}
+
+func TestApproveLoadingPlan_SealedContainer_Rejected(t *testing.T) {
+	planID := uuid.New()
+	containerID := uuid.New()
+	st := &mockStore{
+		selectLoadingPlanByIDResult: LoadingPlan{
+			ID: planID, ContainerID: containerID, Status: LoadingPlanStatusParsed, Version: 2,
+		},
+		selectByIDResult: Container{ID: containerID, Status: ContainerStatusSealed},
+	}
+	svc := newSvcWithLoadingPlan(t, st, &mockCustomerSKUResolver{})
+
+	_, err := svc.ApproveLoadingPlan(context.Background(), ApproveLoadingPlanInput{
+		PlanID: planID, ActorID: uuid.New(), ConfirmSupersede: true,
+	})
+	if !errors.Is(err, domain.ErrInvalidTransition) {
+		t.Fatalf("expected ErrInvalidTransition on SEALED container, got %v", err)
+	}
+	if st.supersedeLoadingPlanCalled {
+		t.Error("supersede must not run when container is SEALED (BR-D12)")
+	}
+}
+
+func TestApproveLoadingPlan_AfterForceUnseal_Accepted(t *testing.T) {
+	// Simulates the admin force-unseal flow: container goes SEALED → OPEN before
+	// approve runs, so the BR-D12 guard passes and supersede proceeds.
+	planID := uuid.New()
+	containerID := uuid.New()
+	st := &mockStore{
+		selectLoadingPlanByIDResult: LoadingPlan{
+			ID: planID, ContainerID: containerID, Status: LoadingPlanStatusParsed, Version: 2,
+		},
+		selectByIDResult:          Container{ID: containerID, Status: ContainerStatusOpen},
+		containerLinesCountResult: 3,
+		supersedeLoadingPlanResult: LoadingPlan{
+			ID: planID, ContainerID: containerID, Status: LoadingPlanStatusApproved, Version: 2,
+		},
+		supersedeLoadingPlanCount: 3,
+	}
+	svc := newSvcWithLoadingPlan(t, st, &mockCustomerSKUResolver{})
+
+	_, err := svc.ApproveLoadingPlan(context.Background(), ApproveLoadingPlanInput{
+		PlanID: planID, ActorID: uuid.New(), ConfirmSupersede: true,
+	})
+	if err != nil {
+		t.Fatalf("ApproveLoadingPlan after force-unseal: %v", err)
+	}
+	if !st.supersedeLoadingPlanCalled {
+		t.Error("supersede must run after force-unseal")
+	}
+}
+
+func TestListContainerLinesHistory_PlanFilterPropagated(t *testing.T) {
+	planID := uuid.New()
+	containerID := uuid.New()
+	st := &mockStore{
+		linesHistoryResult: []ContainerLineHistoryEntry{
+			{ID: uuid.New(), ContainerID: containerID, SupersededByPlan: planID},
+		},
+	}
+	svc := newSvcWithLoadingPlan(t, st, &mockCustomerSKUResolver{})
+
+	out, err := svc.ListContainerLinesHistory(context.Background(), containerID, &planID)
+	if err != nil {
+		t.Fatalf("ListContainerLinesHistory: %v", err)
+	}
+	if len(out) != 1 {
+		t.Errorf("entries = %d, want 1", len(out))
+	}
+	if st.linesHistoryFilter == nil || *st.linesHistoryFilter != planID {
+		t.Errorf("plan filter not propagated, got %v", st.linesHistoryFilter)
 	}
 }
