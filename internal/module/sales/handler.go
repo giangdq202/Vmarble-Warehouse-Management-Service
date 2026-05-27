@@ -664,7 +664,7 @@ func (h *Handler) bulkImportCustomerSKUMappings(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "could not open uploaded file"})
 		return
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	rows, parseErrs, err := parseCustomerSKUMappingCSV(f)
 	if err != nil {
