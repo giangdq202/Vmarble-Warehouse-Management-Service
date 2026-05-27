@@ -170,6 +170,79 @@ type ShipmentItemInput struct {
 	Qty      int
 }
 
+// CustomerSKUMapping bridges a customer-facing SKU code (as it appears in the
+// customer's packing-list Excel) with the internal catalog SKU id. Composite
+// PK (customer_id, customer_sku_code) enforces BR-CSM02. The Excel parser
+// (#301) joins this table to fail-fast on unmapped codes (BR-D09 / BR-CSM01).
+type CustomerSKUMapping struct {
+	CustomerID      uuid.UUID  `json:"customer_id"`
+	CustomerSKUCode string     `json:"customer_sku_code"`
+	SKUID           uuid.UUID  `json:"sku_id"`
+	Notes           string     `json:"notes,omitempty"`
+	CreatedBy       *uuid.UUID `json:"created_by,omitempty"`
+	CreatedAt       time.Time  `json:"created_at"`
+	UpdatedAt       time.Time  `json:"updated_at"`
+}
+
+type CreateCustomerSKUMappingInput struct {
+	CustomerID      uuid.UUID `json:"customer_id"`
+	CustomerSKUCode string    `json:"customer_sku_code"`
+	SKUID           uuid.UUID `json:"sku_id"`
+	Notes           string    `json:"notes,omitempty"`
+	ActorID         uuid.UUID `json:"-"`
+}
+
+// PatchCustomerSKUMappingInput rewrites the SKU and/or notes for an existing
+// (CustomerID, CustomerSKUCode) row. Nil leaves the column untouched. The PK
+// itself is immutable — to rename a customer code, delete and re-create.
+type PatchCustomerSKUMappingInput struct {
+	CustomerID      uuid.UUID
+	CustomerSKUCode string
+	SKUID           *uuid.UUID
+	Notes           *string
+	ActorID         uuid.UUID
+}
+
+type DeleteCustomerSKUMappingInput struct {
+	CustomerID      uuid.UUID
+	CustomerSKUCode string
+	ActorID         uuid.UUID
+}
+
+// CustomerSKUMappingFilter narrows the list endpoint by customer. Empty
+// CustomerID means "all customers" (admin-only use case).
+type CustomerSKUMappingFilter struct {
+	CustomerID *uuid.UUID
+}
+
+// BulkImportCustomerSKUMappingsInput carries the parsed CSV rows. The service
+// validates every row before issuing a single insert tx — fail-all on first
+// validation error so the response mirrors the Excel parser's BR-D08 contract.
+type BulkImportCustomerSKUMappingsInput struct {
+	CustomerID uuid.UUID
+	Rows       []BulkMappingRow
+	ActorID    uuid.UUID
+}
+
+type BulkMappingRow struct {
+	CustomerSKUCode string
+	SKUID           uuid.UUID
+	Notes           string
+}
+
+// BulkImportRowError pinpoints which row failed and why. Code values mirror
+// the Excel parser convention so the FE can surface the same toasts.
+type BulkImportRowError struct {
+	Row     int    `json:"row"`
+	Code    string `json:"code"`
+	Message string `json:"message"`
+}
+
+type BulkImportResult struct {
+	Inserted int                  `json:"inserted"`
+	Errors   []BulkImportRowError `json:"errors,omitempty"`
+}
+
 type Service interface {
 	CreateCustomer(ctx context.Context, in CreateCustomerInput) (Customer, error)
 	ListCustomers(ctx context.Context, p httpkit.PageParams, activeOnly bool) (httpkit.PagedResult[Customer], error)
@@ -198,4 +271,15 @@ type Service interface {
 	// when any bump would push qty_shipped past qty_planned (the DB CHECK
 	// chk_qty_shipped_le_planned is the authoritative backstop).
 	RecordShipmentTx(ctx context.Context, tx pgx.Tx, items []ShipmentItemInput) error
+
+	// Customer SKU mappings (#304) ------------------------------------------
+	// Exposed under the sales module because mapping is part of the customer
+	// onboarding workflow. The Excel parser (#301) will read these rows to
+	// translate customer-facing SKU codes into internal SKU ids.
+
+	CreateCustomerSKUMapping(ctx context.Context, in CreateCustomerSKUMappingInput) (CustomerSKUMapping, error)
+	ListCustomerSKUMappings(ctx context.Context, p httpkit.PageParams, f CustomerSKUMappingFilter) (httpkit.PagedResult[CustomerSKUMapping], error)
+	PatchCustomerSKUMapping(ctx context.Context, in PatchCustomerSKUMappingInput) (CustomerSKUMapping, error)
+	DeleteCustomerSKUMapping(ctx context.Context, in DeleteCustomerSKUMappingInput) error
+	BulkImportCustomerSKUMappings(ctx context.Context, in BulkImportCustomerSKUMappingsInput) (BulkImportResult, error)
 }

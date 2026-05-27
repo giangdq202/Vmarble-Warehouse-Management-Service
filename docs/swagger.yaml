@@ -348,6 +348,23 @@ definitions:
       total_pages:
         type: integer
     type: object
+  github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_sales_CustomerSKUMapping:
+    properties:
+      current_page:
+        type: integer
+      items:
+        items:
+          $ref: '#/definitions/internal_module_sales.CustomerSKUMapping'
+        type: array
+      limit:
+        type: integer
+      total_is_estimate:
+        type: boolean
+      total_items:
+        type: integer
+      total_pages:
+        type: integer
+    type: object
   github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_sales_SalesOrder:
     properties:
       current_page:
@@ -2001,6 +2018,24 @@ definitions:
       supplier:
         type: string
     type: object
+  internal_module_sales.BulkImportResult:
+    properties:
+      errors:
+        items:
+          $ref: '#/definitions/internal_module_sales.BulkImportRowError'
+        type: array
+      inserted:
+        type: integer
+    type: object
+  internal_module_sales.BulkImportRowError:
+    properties:
+      code:
+        type: string
+      message:
+        type: string
+      row:
+        type: integer
+    type: object
   internal_module_sales.CreateCustomerInput:
     properties:
       address:
@@ -2069,6 +2104,23 @@ definitions:
       is_active:
         type: boolean
       name:
+        type: string
+    type: object
+  internal_module_sales.CustomerSKUMapping:
+    properties:
+      created_at:
+        type: string
+      created_by:
+        type: string
+      customer_id:
+        type: string
+      customer_sku_code:
+        type: string
+      notes:
+        type: string
+      sku_id:
+        type: string
+      updated_at:
         type: string
     type: object
   internal_module_sales.SalesOrder:
@@ -2150,6 +2202,21 @@ definitions:
       reason:
         type: string
     type: object
+  internal_module_sales.createCustomerSKUMappingRequest:
+    properties:
+      customer_id:
+        type: string
+      customer_sku_code:
+        type: string
+      notes:
+        type: string
+      sku_id:
+        type: string
+    required:
+    - customer_id
+    - customer_sku_code
+    - sku_id
+    type: object
   internal_module_sales.patchCustomerRequest:
     properties:
       address:
@@ -2165,6 +2232,13 @@ definitions:
       is_active:
         type: boolean
       name:
+        type: string
+    type: object
+  internal_module_sales.patchCustomerSKUMappingRequest:
+    properties:
+      notes:
+        type: string
+      sku_id:
         type: string
     type: object
   internal_module_sales.patchSORequest:
@@ -3498,6 +3572,220 @@ paths:
       summary: Per-material waste-cost ledger (BR-C03)
       tags:
       - costing
+  /api/v1/customer-sku-mappings:
+    get:
+      parameters:
+      - description: page number (default 1)
+        in: query
+        name: page
+        type: integer
+      - description: items per page (default 10, max 100)
+        in: query
+        name: limit
+        type: integer
+      - description: filter by customer id (uuid); omit for all customers
+        in: query
+        name: customer_id
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_sales_CustomerSKUMapping'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: List customer SKU mappings
+      tags:
+      - sales
+    post:
+      consumes:
+      - application/json
+      description: Bridges a customer-facing SKU code (as it appears in the customer's
+        packing-list Excel) with the internal catalog SKU id. (#304, BR-CSM02)
+      parameters:
+      - description: payload
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_module_sales.createCustomerSKUMappingRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/internal_module_sales.CustomerSKUMapping'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Create customer SKU mapping
+      tags:
+      - sales
+  /api/v1/customer-sku-mappings/{customerID}/{code}:
+    delete:
+      parameters:
+      - description: customer id (uuid)
+        in: path
+        name: customerID
+        required: true
+        type: string
+      - description: customer SKU code (URL-encoded)
+        in: path
+        name: code
+        required: true
+        type: string
+      responses:
+        "204":
+          description: No Content
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Delete customer SKU mapping
+      tags:
+      - sales
+    patch:
+      consumes:
+      - application/json
+      description: Partial update; nil fields leave the column untouched. The (customer_id,
+        customer_sku_code) PK is immutable — to rename the customer code, delete and
+        re-create.
+      parameters:
+      - description: customer id (uuid)
+        in: path
+        name: customerID
+        required: true
+        type: string
+      - description: customer SKU code (URL-encoded)
+        in: path
+        name: code
+        required: true
+        type: string
+      - description: patch payload
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_module_sales.patchCustomerSKUMappingRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_module_sales.CustomerSKUMapping'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Update customer SKU mapping
+      tags:
+      - sales
+  /api/v1/customer-sku-mappings/bulk-import:
+    post:
+      consumes:
+      - multipart/form-data
+      description: 'Multipart upload with form fields `customer_id` (uuid) and `file`
+        (CSV, UTF-8 with optional BOM). CSV header: `customer_sku_code,sku_id,notes`.
+        Fail-all: any row error rolls the whole batch back and returns 422 with per-row
+        errors.'
+      parameters:
+      - description: customer id (uuid)
+        in: formData
+        name: customer_id
+        required: true
+        type: string
+      - description: CSV file
+        in: formData
+        name: file
+        required: true
+        type: file
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_module_sales.BulkImportResult'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "422":
+          description: Unprocessable Entity
+          schema:
+            $ref: '#/definitions/internal_module_sales.BulkImportResult'
+      security:
+      - BearerAuth: []
+      summary: Bulk-import customer SKU mappings from CSV
+      tags:
+      - sales
   /api/v1/customers:
     get:
       parameters:
