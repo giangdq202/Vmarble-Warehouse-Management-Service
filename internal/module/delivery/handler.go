@@ -36,6 +36,15 @@ func (h *Handler) Register(rg *gin.RouterGroup) {
 	rg.POST("/containers/:id/reopen", auth.RequireAdminOnly(), h.reopen)
 	rg.POST("/containers/:id/ship", auth.RequirePlannerUp(), h.ship)
 	rg.POST("/containers/:id/cancel", auth.RequirePlannerUp(), h.cancel)
+
+	// Loading plans (#301). Upload requires the planner persona; approve is
+	// admin-only because it locks the version that #291's VERIFY-mode kiosk
+	// reconciles scans against.
+	rg.POST("/containers/:id/loading-plan", auth.RequirePlannerUp(), h.uploadLoadingPlan)
+	rg.GET("/containers/:id/loading-plan", h.getActiveLoadingPlan)
+	rg.GET("/loading-plans/:id", h.getLoadingPlan)
+	rg.GET("/loading-plans/:id/diff", h.diffLoadingPlan)
+	rg.POST("/loading-plans/:id/approve", auth.RequireAdminOnly(), h.approveLoadingPlan)
 }
 
 // ── Container CRUD ──────────────────────────────────────────────────────────
@@ -396,4 +405,188 @@ func callerID(c *gin.Context) uuid.UUID {
 		return uuid.Nil
 	}
 	return uid
+}
+
+// ── Loading plans (#301) ────────────────────────────────────────────────────
+
+// uploadLoadingPlan godoc
+//
+// @Summary      Upload customer packing-list Excel as a loading plan (PARSED)
+// @Tags         delivery
+// @Accept       multipart/form-data
+// @Produce      json
+// @Param        id           path      string  true  "container id"
+// @Param        customer_id  formData  string  true  "customer uuid that owns the SKU mappings"
+// @Param        file         formData  file    true  "packing-list .xlsx"
+// @Param        notes        formData  string  false "free-form notes"
+// @Param        excel_url    formData  string  false "external URL where the file is archived"
+// @Success      200          {object}  LoadingPlanUploadResult
+// @Failure      400          {object}  LoadingPlanUploadResult
+// @Failure      409          {object}  map[string]string
+// @Security     BearerAuth
+// @Router       /api/v1/containers/{id}/loading-plan [post]
+func (h *Handler) uploadLoadingPlan(c *gin.Context) {
+	containerID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid container id"})
+		return
+	}
+	customerIDRaw := c.PostForm("customer_id")
+	customerID, err := uuid.Parse(customerIDRaw)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "customer_id is required"})
+		return
+	}
+
+	fh, err := c.FormFile("file")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "file is required"})
+		return
+	}
+	f, err := fh.Open()
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "could not open uploaded file"})
+		return
+	}
+	defer func() { _ = f.Close() }()
+
+	res, err := h.svc.UploadLoadingPlan(c.Request.Context(), UploadLoadingPlanInput{
+		ContainerID:  containerID,
+		CustomerID:   customerID,
+		ExcelFileURL: c.PostForm("excel_url"),
+		UploadedBy:   callerID(c),
+		Notes:        c.PostForm("notes"),
+		File:         f,
+	})
+	if err != nil {
+		// When validation collected per-row errors, bubble them up alongside
+		// the canonical 400 so the FE can render the row toasts.
+		if len(res.Errors) > 0 {
+			c.JSON(http.StatusBadRequest, res)
+			return
+		}
+		httpkit.Error(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, res)
+}
+
+// getActiveLoadingPlan godoc
+//
+// @Summary      Get the active (non-superseded) loading plan for a container
+// @Tags         delivery
+// @Produce      json
+// @Param        id   path      string  true  "container id"
+// @Success      200  {object}  LoadingPlan
+// @Failure      404  {object}  map[string]string
+// @Security     BearerAuth
+// @Router       /api/v1/containers/{id}/loading-plan [get]
+func (h *Handler) getActiveLoadingPlan(c *gin.Context) {
+	containerID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid container id"})
+		return
+	}
+	plan, err := h.svc.GetActiveLoadingPlan(c.Request.Context(), containerID)
+	if err != nil {
+		httpkit.Error(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, plan)
+}
+
+// getLoadingPlan godoc
+//
+// @Summary      Get one loading plan with its lines
+// @Tags         delivery
+// @Produce      json
+// @Param        id   path      string  true  "loading plan id"
+// @Success      200  {object}  LoadingPlan
+// @Failure      404  {object}  map[string]string
+// @Security     BearerAuth
+// @Router       /api/v1/loading-plans/{id} [get]
+func (h *Handler) getLoadingPlan(c *gin.Context) {
+	planID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid plan id"})
+		return
+	}
+	plan, err := h.svc.GetLoadingPlan(c.Request.Context(), planID)
+	if err != nil {
+		httpkit.Error(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, plan)
+}
+
+// diffLoadingPlan godoc
+//
+// @Summary      Diff a loading plan against another (added/removed/changed by sku)
+// @Tags         delivery
+// @Produce      json
+// @Param        id       path      string  true  "loading plan id"
+// @Param        against  query     string  true  "loading plan id to diff against"
+// @Success      200      {object}  LoadingPlanDiff
+// @Failure      400      {object}  map[string]string
+// @Security     BearerAuth
+// @Router       /api/v1/loading-plans/{id}/diff [get]
+func (h *Handler) diffLoadingPlan(c *gin.Context) {
+	planID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid plan id"})
+		return
+	}
+	againstID, err := uuid.Parse(c.Query("against"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "against query param must be a uuid"})
+		return
+	}
+	diff, err := h.svc.DiffLoadingPlans(c.Request.Context(), planID, againstID)
+	if err != nil {
+		httpkit.Error(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, diff)
+}
+
+type approveLoadingPlanRequest struct {
+	Notes string `json:"notes,omitempty"`
+}
+
+// approveLoadingPlan godoc
+//
+// @Summary      Approve a loading plan (admin) — locks the version
+// @Tags         delivery
+// @Accept       json
+// @Produce      json
+// @Param        id    path      string                      true   "loading plan id"
+// @Param        body  body      approveLoadingPlanRequest   false  "optional notes"
+// @Success      200   {object}  LoadingPlan
+// @Failure      404   {object}  map[string]string
+// @Failure      409   {object}  map[string]string
+// @Security     BearerAuth
+// @Router       /api/v1/loading-plans/{id}/approve [post]
+func (h *Handler) approveLoadingPlan(c *gin.Context) {
+	planID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid plan id"})
+		return
+	}
+	var req approveLoadingPlanRequest
+	if c.Request.ContentLength > 0 {
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid body"})
+			return
+		}
+	}
+	plan, err := h.svc.ApproveLoadingPlan(c.Request.Context(), ApproveLoadingPlanInput{
+		PlanID:  planID,
+		ActorID: callerID(c),
+		Notes:   req.Notes,
+	})
+	if err != nil {
+		httpkit.Error(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, plan)
 }

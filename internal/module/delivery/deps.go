@@ -82,3 +82,41 @@ type FGReserveRequest struct {
 	Qty              int
 	ContainerLineID  uuid.UUID
 }
+
+// CustomerSKUResolver translates a customer-facing SKU code (as it appears in
+// the customer's packing-list Excel) into the internal catalog SKU id. Used
+// by the loading-plan Excel parser (#301). Implementation lives in main.go
+// as a thin adapter over sales.GetCustomerSKUMapping so delivery does not
+// import the sales module directly.
+//
+// Returns ErrNotFound when the customer has not mapped that code yet — the
+// parser surfaces UNMAPPED_SKU on row N so the operator can fix the mapping
+// before re-uploading.
+type CustomerSKUResolver interface {
+	ResolveCustomerSKU(ctx context.Context, customerID uuid.UUID, code string) (uuid.UUID, error)
+}
+
+// LoadingPlanAuditLogger records loading-plan upload + approve events. Same
+// best-effort contract as the costing/customer-sku-mapping audits: a non-nil
+// error is logged via slog.Warn but never aborts the business write.
+type LoadingPlanAuditLogger interface {
+	LogLoadingPlan(ctx context.Context, in AuditLoadingPlanInput) error
+}
+
+type AuditLoadingPlanAction string
+
+const (
+	AuditLPActionUploaded   AuditLoadingPlanAction = "LP_UPLOADED"
+	AuditLPActionApproved   AuditLoadingPlanAction = "LP_APPROVED"
+	AuditLPActionSuperseded AuditLoadingPlanAction = "LP_SUPERSEDED"
+)
+
+type AuditLoadingPlanInput struct {
+	Action      AuditLoadingPlanAction
+	PlanID      uuid.UUID
+	ContainerID uuid.UUID
+	Version     int
+	ExcelHash   string
+	ActorID     uuid.UUID
+	Notes       string
+}

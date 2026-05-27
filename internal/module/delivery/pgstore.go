@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/vmarble/warehouse-management-service/internal/domain"
@@ -366,4 +367,230 @@ func stringFromPtr(p *string) string {
 		return ""
 	}
 	return *p
+}
+
+// ── Loading plans (#301) ────────────────────────────────────────────────────
+
+const selectLoadingPlanCols = `
+SELECT id, container_id, excel_file_url, excel_hash, parsed_at, uploaded_by,
+       status, version, notes, approved_at, approved_by,
+       superseded_at, superseded_by, created_at
+  FROM loading_plans`
+
+func scanLoadingPlan(r rowScanner) (LoadingPlan, error) {
+	var p LoadingPlan
+	if err := r.Scan(
+		&p.ID, &p.ContainerID, &p.ExcelFileURL, &p.ExcelHash, &p.ParsedAt, &p.UploadedBy,
+		&p.Status, &p.Version, &p.Notes, &p.ApprovedAt, &p.ApprovedBy,
+		&p.SupersededAt, &p.SupersededBy, &p.CreatedAt,
+	); err != nil {
+		return LoadingPlan{}, err
+	}
+	return p, nil
+}
+
+func mapLoadingPlanPgError(err error) error {
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) {
+		return err
+	}
+	switch pgErr.Code {
+	case "23505":
+		// uq_lp_container_hash_active — BR-D10 dup of currently-active hash.
+		return domain.NewBizError(domain.ErrInvalidInput, "loading plan with this Excel hash is already active for the container")
+	case "23503":
+		switch pgErr.ConstraintName {
+		case "loading_plans_container_id_fkey":
+			return domain.NewBizError(domain.ErrInvalidInput, "container_id does not exist")
+		case "loading_plan_lines_sku_id_fkey":
+			return domain.NewBizError(domain.ErrInvalidInput, "sku_id does not exist")
+		case "loading_plans_uploaded_by_fkey":
+			return domain.NewBizError(domain.ErrInvalidInput, "uploaded_by user does not exist")
+		}
+		return domain.NewBizError(domain.ErrInvalidInput, "foreign key violation: "+pgErr.ConstraintName)
+	}
+	return err
+}
+
+func (s *pgStore) insertLoadingPlanWithLines(ctx context.Context, plan LoadingPlan, lines []LoadingPlanLine) error {
+	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	if _, err := tx.Exec(ctx,
+		`INSERT INTO loading_plans
+		    (id, container_id, excel_file_url, excel_hash, parsed_at, uploaded_by,
+		     status, version, notes, created_at)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+		plan.ID, plan.ContainerID, plan.ExcelFileURL, plan.ExcelHash, plan.ParsedAt, plan.UploadedBy,
+		plan.Status, plan.Version, plan.Notes, plan.CreatedAt,
+	); err != nil {
+		return mapLoadingPlanPgError(err)
+	}
+
+	if len(lines) > 0 {
+		batch := &pgx.Batch{}
+		for _, l := range lines {
+			batch.Queue(
+				`INSERT INTO loading_plan_lines
+				    (id, loading_plan_id, sku_id, qty_planned_pieces, unit_in_excel,
+				     qty_in_excel, customer_sku_code, raw_excel_row, excel_row_num, created_at)
+				 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+				l.ID, plan.ID, l.SKUID, l.QtyPlannedPieces, l.UnitInExcel,
+				l.QtyInExcel, l.CustomerSKUCode, l.RawExcelRow, l.ExcelRowNum, l.CreatedAt,
+			)
+		}
+		br := tx.SendBatch(ctx, batch)
+		for range lines {
+			if _, err := br.Exec(); err != nil {
+				_ = br.Close()
+				return mapLoadingPlanPgError(err)
+			}
+		}
+		if err := br.Close(); err != nil {
+			return mapLoadingPlanPgError(err)
+		}
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return mapLoadingPlanPgError(err)
+	}
+	return nil
+}
+
+func (s *pgStore) selectLoadingPlanByID(ctx context.Context, id uuid.UUID) (LoadingPlan, error) {
+	row := s.pool.QueryRow(ctx, selectLoadingPlanCols+` WHERE id = $1`, id)
+	p, err := scanLoadingPlan(row)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return LoadingPlan{}, domain.NewBizError(domain.ErrNotFound, "loading plan not found")
+	}
+	return p, err
+}
+
+func (s *pgStore) selectLoadingPlanLines(ctx context.Context, planID uuid.UUID) ([]LoadingPlanLine, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT id, loading_plan_id, sku_id, qty_planned_pieces, unit_in_excel,
+		        qty_in_excel, customer_sku_code, raw_excel_row, excel_row_num, created_at
+		   FROM loading_plan_lines
+		  WHERE loading_plan_id = $1
+		  ORDER BY excel_row_num ASC`,
+		planID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]LoadingPlanLine, 0)
+	for rows.Next() {
+		var l LoadingPlanLine
+		if err := rows.Scan(
+			&l.ID, &l.LoadingPlanID, &l.SKUID, &l.QtyPlannedPieces, &l.UnitInExcel,
+			&l.QtyInExcel, &l.CustomerSKUCode, &l.RawExcelRow, &l.ExcelRowNum, &l.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		out = append(out, l)
+	}
+	return out, rows.Err()
+}
+
+func (s *pgStore) selectActiveLoadingPlan(ctx context.Context, containerID uuid.UUID) (LoadingPlan, error) {
+	row := s.pool.QueryRow(ctx,
+		selectLoadingPlanCols+`
+		 WHERE container_id = $1 AND status <> 'SUPERSEDED'
+		 ORDER BY version DESC
+		 LIMIT 1`,
+		containerID,
+	)
+	p, err := scanLoadingPlan(row)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return LoadingPlan{}, domain.NewBizError(domain.ErrNotFound, "no active loading plan for container")
+	}
+	return p, err
+}
+
+func (s *pgStore) nextLoadingPlanVersion(ctx context.Context, containerID uuid.UUID) (int, error) {
+	var next int
+	err := s.pool.QueryRow(ctx,
+		`SELECT COALESCE(MAX(version), 0) + 1 FROM loading_plans WHERE container_id = $1`,
+		containerID,
+	).Scan(&next)
+	if err != nil {
+		return 0, err
+	}
+	return next, nil
+}
+
+func (s *pgStore) approveLoadingPlanTx(ctx context.Context, planID, actorID uuid.UUID, now time.Time) (LoadingPlan, error) {
+	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return LoadingPlan{}, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	// Lock current row to keep two concurrent approves from racing.
+	row := tx.QueryRow(ctx,
+		selectLoadingPlanCols+` WHERE id = $1 FOR UPDATE`,
+		planID,
+	)
+	current, err := scanLoadingPlan(row)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return LoadingPlan{}, domain.NewBizError(domain.ErrNotFound, "loading plan not found")
+	}
+	if err != nil {
+		return LoadingPlan{}, err
+	}
+
+	// Idempotent on already-APPROVED.
+	if current.Status == LoadingPlanStatusApproved {
+		if err := tx.Commit(ctx); err != nil {
+			return LoadingPlan{}, err
+		}
+		return current, nil
+	}
+	if current.Status == LoadingPlanStatusSuperseded {
+		return LoadingPlan{}, domain.NewBizError(domain.ErrInvalidTransition, "cannot approve a superseded plan")
+	}
+
+	// SUPERSEDE every other non-superseded plan for the same container.
+	if _, err := tx.Exec(ctx,
+		`UPDATE loading_plans
+		    SET status        = 'SUPERSEDED',
+		        superseded_at = $1,
+		        superseded_by = $2
+		  WHERE container_id  = $3
+		    AND id            <> $2
+		    AND status        <> 'SUPERSEDED'`,
+		now, planID, current.ContainerID,
+	); err != nil {
+		return LoadingPlan{}, err
+	}
+
+	// Promote the named plan to APPROVED.
+	row = tx.QueryRow(ctx,
+		`UPDATE loading_plans
+		    SET status      = 'APPROVED',
+		        approved_at = $1,
+		        approved_by = $2
+		  WHERE id          = $3
+		    AND status      IN ('PARSED','VALIDATED')
+		 RETURNING id, container_id, excel_file_url, excel_hash, parsed_at, uploaded_by,
+		           status, version, notes, approved_at, approved_by,
+		           superseded_at, superseded_by, created_at`,
+		now, actorID, planID,
+	)
+	updated, err := scanLoadingPlan(row)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return LoadingPlan{}, domain.NewBizError(domain.ErrInvalidTransition, "loading plan is not in PARSED or VALIDATED status")
+	}
+	if err != nil {
+		return LoadingPlan{}, err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return LoadingPlan{}, err
+	}
+	return updated, nil
 }

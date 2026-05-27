@@ -1149,6 +1149,123 @@
                 }
             }
         },
+        "/api/v1/containers/{id}/loading-plan": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "delivery"
+                ],
+                "summary": "Get the active (non-superseded) loading plan for a container",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "container id",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_module_delivery.LoadingPlan"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "multipart/form-data"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "delivery"
+                ],
+                "summary": "Upload customer packing-list Excel as a loading plan (PARSED)",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "container id",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "customer uuid that owns the SKU mappings",
+                        "name": "customer_id",
+                        "in": "formData",
+                        "required": true
+                    },
+                    {
+                        "type": "file",
+                        "description": "packing-list .xlsx",
+                        "name": "file",
+                        "in": "formData",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "free-form notes",
+                        "name": "notes",
+                        "in": "formData"
+                    },
+                    {
+                        "type": "string",
+                        "description": "external URL where the file is archived",
+                        "name": "excel_url",
+                        "in": "formData"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_module_delivery.LoadingPlanUploadResult"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/internal_module_delivery.LoadingPlanUploadResult"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/containers/{id}/reopen": {
             "post": {
                 "security": [
@@ -4406,6 +4523,159 @@
                     },
                     "404": {
                         "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/loading-plans/{id}": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "delivery"
+                ],
+                "summary": "Get one loading plan with its lines",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "loading plan id",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_module_delivery.LoadingPlan"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/loading-plans/{id}/approve": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "delivery"
+                ],
+                "summary": "Approve a loading plan (admin) — locks the version",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "loading plan id",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "optional notes",
+                        "name": "body",
+                        "in": "body",
+                        "schema": {
+                            "$ref": "#/definitions/internal_module_delivery.approveLoadingPlanRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_module_delivery.LoadingPlan"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/loading-plans/{id}/diff": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "delivery"
+                ],
+                "summary": "Diff a loading plan against another (added/removed/changed by sku)",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "loading plan id",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "loading plan id to diff against",
+                        "name": "against",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_module_delivery.LoadingPlanDiff"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -10521,6 +10791,186 @@
                 }
             }
         },
+        "internal_module_delivery.LoadingPlan": {
+            "type": "object",
+            "properties": {
+                "approved_at": {
+                    "type": "string"
+                },
+                "approved_by": {
+                    "type": "string"
+                },
+                "container_id": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "excel_file_url": {
+                    "type": "string"
+                },
+                "excel_hash": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "lines": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_module_delivery.LoadingPlanLine"
+                    }
+                },
+                "notes": {
+                    "type": "string"
+                },
+                "parsed_at": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "superseded_at": {
+                    "type": "string"
+                },
+                "superseded_by": {
+                    "type": "string"
+                },
+                "uploaded_by": {
+                    "type": "string"
+                },
+                "version": {
+                    "type": "integer"
+                }
+            }
+        },
+        "internal_module_delivery.LoadingPlanDiff": {
+            "type": "object",
+            "properties": {
+                "added": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_module_delivery.LoadingPlanLine"
+                    }
+                },
+                "against": {
+                    "type": "string"
+                },
+                "changed": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_module_delivery.LoadingPlanLineDiff"
+                    }
+                },
+                "new_plan": {
+                    "type": "string"
+                },
+                "removed": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_module_delivery.LoadingPlanLine"
+                    }
+                }
+            }
+        },
+        "internal_module_delivery.LoadingPlanLine": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "customer_sku_code": {
+                    "type": "string"
+                },
+                "excel_row_num": {
+                    "type": "integer"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "loading_plan_id": {
+                    "type": "string"
+                },
+                "qty_in_excel": {
+                    "type": "number"
+                },
+                "qty_planned_pieces": {
+                    "type": "integer"
+                },
+                "raw_excel_row": {
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    }
+                },
+                "sku_id": {
+                    "type": "string"
+                },
+                "unit_in_excel": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_module_delivery.LoadingPlanLineDiff": {
+            "type": "object",
+            "properties": {
+                "customer_sku_code": {
+                    "type": "string"
+                },
+                "new_qty": {
+                    "type": "integer"
+                },
+                "old_qty": {
+                    "type": "integer"
+                },
+                "sku_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_module_delivery.LoadingPlanRowError": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "type": "string"
+                },
+                "col": {
+                    "type": "string"
+                },
+                "message": {
+                    "type": "string"
+                },
+                "row": {
+                    "type": "integer"
+                }
+            }
+        },
+        "internal_module_delivery.LoadingPlanUploadResult": {
+            "type": "object",
+            "properties": {
+                "errors": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_module_delivery.LoadingPlanRowError"
+                    }
+                },
+                "lines": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_module_delivery.LoadingPlanLine"
+                    }
+                },
+                "plan": {
+                    "$ref": "#/definitions/internal_module_delivery.LoadingPlan"
+                },
+                "warnings": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_module_delivery.LoadingPlanRowError"
+                    }
+                }
+            }
+        },
         "internal_module_delivery.TransferLineInput": {
             "type": "object",
             "properties": {
@@ -10554,6 +11004,14 @@
                 },
                 "target_line": {
                     "$ref": "#/definitions/internal_module_delivery.ContainerLine"
+                }
+            }
+        },
+        "internal_module_delivery.approveLoadingPlanRequest": {
+            "type": "object",
+            "properties": {
+                "notes": {
+                    "type": "string"
                 }
             }
         },

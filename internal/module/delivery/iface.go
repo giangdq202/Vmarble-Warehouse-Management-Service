@@ -6,6 +6,7 @@ package delivery
 
 import (
 	"context"
+	"io"
 	"time"
 
 	"github.com/google/uuid"
@@ -163,6 +164,106 @@ type ContainerListFilter struct {
 	ContainerType string
 }
 
+// ── Loading plans (#301) ────────────────────────────────────────────────────
+//
+// loading_plans is the Excel-driven "intent" layer above container_lines. One
+// file = one container; the parser produces a PARSED plan that admin approves
+// to lock the version. The kiosk's VERIFY-mode scan (#291) joins
+// loading_plan_lines to actual scans.
+
+const (
+	LoadingPlanStatusParsed     = "PARSED"
+	LoadingPlanStatusValidated  = "VALIDATED"
+	LoadingPlanStatusApproved   = "APPROVED"
+	LoadingPlanStatusSuperseded = "SUPERSEDED"
+)
+
+type LoadingPlan struct {
+	ID           uuid.UUID         `json:"id"`
+	ContainerID  uuid.UUID         `json:"container_id"`
+	ExcelFileURL string            `json:"excel_file_url"`
+	ExcelHash    string            `json:"excel_hash"`
+	ParsedAt     time.Time         `json:"parsed_at"`
+	UploadedBy   uuid.UUID         `json:"uploaded_by"`
+	Status       string            `json:"status"`
+	Version      int               `json:"version"`
+	Notes        string            `json:"notes,omitempty"`
+	ApprovedAt   *time.Time        `json:"approved_at,omitempty"`
+	ApprovedBy   *uuid.UUID        `json:"approved_by,omitempty"`
+	SupersededAt *time.Time        `json:"superseded_at,omitempty"`
+	SupersededBy *uuid.UUID        `json:"superseded_by,omitempty"`
+	CreatedAt    time.Time         `json:"created_at"`
+	Lines        []LoadingPlanLine `json:"lines,omitempty"`
+}
+
+type LoadingPlanLine struct {
+	ID               uuid.UUID `json:"id"`
+	LoadingPlanID    uuid.UUID `json:"loading_plan_id"`
+	SKUID            uuid.UUID `json:"sku_id"`
+	QtyPlannedPieces int       `json:"qty_planned_pieces"`
+	UnitInExcel      string    `json:"unit_in_excel"`
+	QtyInExcel       float64   `json:"qty_in_excel"`
+	CustomerSKUCode  string    `json:"customer_sku_code"`
+	RawExcelRow      []byte    `json:"raw_excel_row,omitempty"`
+	ExcelRowNum      int       `json:"excel_row_num"`
+	CreatedAt        time.Time `json:"created_at"`
+}
+
+// UploadLoadingPlanInput drives POST /containers/:id/loading-plan. The Excel
+// reader is fully consumed during parse — caller hands an io.Reader so the
+// service can compute the hash inline. CustomerID disambiguates which
+// customer_sku_mappings row is authoritative for each row in the file.
+type UploadLoadingPlanInput struct {
+	ContainerID  uuid.UUID
+	CustomerID   uuid.UUID
+	ExcelFileURL string
+	UploadedBy   uuid.UUID
+	Notes        string
+	File         io.Reader
+}
+
+// LoadingPlanRowError pinpoints the offending Excel row + column. Code values
+// mirror the customer-sku bulk-import convention so the FE can reuse toasts.
+type LoadingPlanRowError struct {
+	Row     int    `json:"row"`
+	Col     string `json:"col,omitempty"`
+	Code    string `json:"code"`
+	Message string `json:"message"`
+}
+
+// LoadingPlanUploadResult is what UploadLoadingPlan returns. When Errors is
+// non-empty no rows are persisted (fail-all mirrors BR-D08) and Plan/Lines
+// are zero-valued.
+type LoadingPlanUploadResult struct {
+	Plan     LoadingPlan           `json:"plan,omitempty"`
+	Lines    []LoadingPlanLine     `json:"lines,omitempty"`
+	Warnings []LoadingPlanRowError `json:"warnings,omitempty"`
+	Errors   []LoadingPlanRowError `json:"errors,omitempty"`
+}
+
+type ApproveLoadingPlanInput struct {
+	PlanID  uuid.UUID
+	ActorID uuid.UUID
+	Notes   string
+}
+
+// LoadingPlanDiff contrasts a new plan against a prior one for the FE to
+// render when v2 supersedes v1.
+type LoadingPlanDiff struct {
+	Against uuid.UUID             `json:"against"`
+	NewPlan uuid.UUID             `json:"new_plan"`
+	Added   []LoadingPlanLine     `json:"added"`
+	Removed []LoadingPlanLine     `json:"removed"`
+	Changed []LoadingPlanLineDiff `json:"changed"`
+}
+
+type LoadingPlanLineDiff struct {
+	SKUID           uuid.UUID `json:"sku_id"`
+	CustomerSKUCode string    `json:"customer_sku_code"`
+	OldQty          int       `json:"old_qty"`
+	NewQty          int       `json:"new_qty"`
+}
+
 type Service interface {
 	CreateContainer(ctx context.Context, in CreateContainerInput) (Container, error)
 	GetContainer(ctx context.Context, id uuid.UUID) (Container, error)
@@ -178,6 +279,35 @@ type Service interface {
 	Cancel(ctx context.Context, in CancelInput) (Container, error)
 
 	ListStatusLog(ctx context.Context, containerID uuid.UUID) ([]ContainerStatusLogEntry, error)
+
+	// ── Loading plans (#301) ────────────────────────────────────────────────
+
+	// UploadLoadingPlan parses the Excel file, validates every row (every
+	// customer_sku_code maps, qty>0, unit non-empty), rejects duplicates of
+	// the active plan's hash (BR-D10), and on success persists a PARSED plan
+	// with version = previous_active.version + 1 (or 1). When validation
+	// fails the result carries Errors populated and zero rows are written
+	// (fail-all, BR-D08).
+	UploadLoadingPlan(ctx context.Context, in UploadLoadingPlanInput) (LoadingPlanUploadResult, error)
+
+	// GetActiveLoadingPlan returns the latest non-SUPERSEDED plan for a
+	// container with its lines hydrated. ErrNotFound when none exists.
+	GetActiveLoadingPlan(ctx context.Context, containerID uuid.UUID) (LoadingPlan, error)
+
+	// GetLoadingPlan returns one plan + lines by id (any status). Used by
+	// the diff endpoint and audit drill-downs.
+	GetLoadingPlan(ctx context.Context, planID uuid.UUID) (LoadingPlan, error)
+
+	// DiffLoadingPlans contrasts `planID` against `againstID` (typically the
+	// previously-approved plan) so the FE can show "added / removed / qty
+	// changed" before approve.
+	DiffLoadingPlans(ctx context.Context, planID, againstID uuid.UUID) (LoadingPlanDiff, error)
+
+	// ApproveLoadingPlan flips PARSED|VALIDATED → APPROVED on the named plan
+	// and SUPERSEDED on the previously-active plan for the same container,
+	// in a single tx. Idempotent on a plan already APPROVED — returns the
+	// row unchanged.
+	ApproveLoadingPlan(ctx context.Context, in ApproveLoadingPlanInput) (LoadingPlan, error)
 }
 
 // DefaultCapacityForType returns the ISO defaults for a container type. When
