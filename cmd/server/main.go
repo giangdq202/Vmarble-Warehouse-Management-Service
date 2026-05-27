@@ -218,6 +218,18 @@ func main() {
 	}); ok {
 		hooked.SetFGTracker(&deliveryFGTrackerAdapter{svc: packingSvc})
 	}
+	// Loading-plan parser (#301) needs to translate customer-facing SKU codes
+	// via sales.GetCustomerSKUMapping; audit hook records upload + approve.
+	if hooked, ok := deliverySvc.(interface {
+		SetCustomerSKUResolver(delivery.CustomerSKUResolver)
+	}); ok {
+		hooked.SetCustomerSKUResolver(&deliveryCustomerSKUAdapter{svc: salesSvc})
+	}
+	if hooked, ok := deliverySvc.(interface {
+		SetLoadingPlanAuditor(delivery.LoadingPlanAuditLogger)
+	}); ok {
+		hooked.SetLoadingPlanAuditor(&deliveryLoadingPlanAuditAdapter{pool: pool})
+	}
 
 	// ── Background: auto-release expired remnant allocations ─────────────────
 	// Ticks every cfg.RemnantAllocCheckInterval. Remnants that have been
@@ -1246,4 +1258,48 @@ func (a *deliveryFGTrackerAdapter) ReleaseOnDelete(ctx context.Context, containe
 
 func (a *deliveryFGTrackerAdapter) MarkLoadedOnSeal(ctx context.Context, containerID uuid.UUID) error {
 	return a.svc.MarkLoadedOnSeal(ctx, containerID)
+}
+
+// deliveryCustomerSKUAdapter implements delivery.CustomerSKUResolver by
+// delegating to sales.GetCustomerSKUMapping. Trims the full mapping row down
+// to just the sku_id the parser needs so the cross-module surface stays
+// minimal — extending the contract requires touching this one adapter only.
+type deliveryCustomerSKUAdapter struct{ svc sales.Service }
+
+func (a *deliveryCustomerSKUAdapter) ResolveCustomerSKU(ctx context.Context, customerID uuid.UUID, code string) (uuid.UUID, error) {
+	m, err := a.svc.GetCustomerSKUMapping(ctx, customerID, code)
+	if err != nil {
+		return uuid.Nil, err
+	}
+	return m.SKUID, nil
+}
+
+// deliveryLoadingPlanAuditAdapter implements delivery.LoadingPlanAuditLogger
+// by writing directly to inventory_audit_log via pgxpool. Inlined here so the
+// delivery module does not depend on inventory — the audit table is a shared
+// cross-module ledger keyed by entity_type. Errors are swallowed by the
+// service (best-effort): a transient audit-write failure must never roll
+// back the loading-plan upload or approve.
+//
+// LP_* rows carry entity_type="LOADING_PLAN", entity_id = plan id; the
+// metadata JSON column holds container_id + version + excel_hash so
+// accountants can reconstruct the change without joining other tables.
+type deliveryLoadingPlanAuditAdapter struct{ pool *pgxpool.Pool }
+
+func (a *deliveryLoadingPlanAuditAdapter) LogLoadingPlan(ctx context.Context, in delivery.AuditLoadingPlanInput) error {
+	meta, err := json.Marshal(map[string]any{
+		"container_id": in.ContainerID,
+		"version":      in.Version,
+		"excel_hash":   in.ExcelHash,
+	})
+	if err != nil {
+		return err
+	}
+	_, err = a.pool.Exec(ctx,
+		`INSERT INTO inventory_audit_log
+		    (id, entity_type, entity_id, action, actor_id, reason, metadata, created_at)
+		 VALUES (gen_random_uuid(), 'LOADING_PLAN', $1, $2, $3, $4, $5, NOW())`,
+		in.PlanID, string(in.Action), in.ActorID, in.Notes, meta,
+	)
+	return err
 }

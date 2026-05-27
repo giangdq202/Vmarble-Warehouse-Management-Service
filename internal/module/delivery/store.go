@@ -31,6 +31,32 @@ type store interface {
 	// the delivery writes. This is the deliberate exception to module
 	// isolation; documented in deps.go.
 	withTx(ctx context.Context, fn func(tx txStore, raw pgx.Tx) error) error
+
+	// ── Loading plans (#301) ─────────────────────────────────────────────────
+
+	// insertLoadingPlanWithLines inserts the plan + every line atomically.
+	// The unique partial index on (container_id, excel_hash) WHERE status
+	// <> 'SUPERSEDED' makes BR-D10 race-proof — a duplicate hash returns
+	// ErrInvalidInput. Lines never land without their parent.
+	insertLoadingPlanWithLines(ctx context.Context, plan LoadingPlan, lines []LoadingPlanLine) error
+
+	selectLoadingPlanByID(ctx context.Context, id uuid.UUID) (LoadingPlan, error)
+	selectLoadingPlanLines(ctx context.Context, planID uuid.UUID) ([]LoadingPlanLine, error)
+
+	// selectActiveLoadingPlan returns the latest non-SUPERSEDED plan for a
+	// container (highest version). Returns ErrNotFound when no row matches.
+	selectActiveLoadingPlan(ctx context.Context, containerID uuid.UUID) (LoadingPlan, error)
+
+	// nextLoadingPlanVersion returns max(version)+1 for a container, or 1
+	// when none exist. Caller must already hold a row lock to keep two
+	// concurrent uploads from picking the same number.
+	nextLoadingPlanVersion(ctx context.Context, containerID uuid.UUID) (int, error)
+
+	// approveLoadingPlanTx flips status PARSED|VALIDATED -> APPROVED on
+	// planID and SUPERSEDED on prior active plans of the same container.
+	// Returns the updated plan row. Returns ErrInvalidTransition when the
+	// plan is already SUPERSEDED.
+	approveLoadingPlanTx(ctx context.Context, planID, actorID uuid.UUID, now time.Time) (LoadingPlan, error)
 }
 
 // txStore is the subset of operations safe to call from inside a transaction.

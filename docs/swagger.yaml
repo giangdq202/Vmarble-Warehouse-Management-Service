@@ -1098,6 +1098,124 @@ definitions:
       note:
         type: string
     type: object
+  internal_module_delivery.LoadingPlan:
+    properties:
+      approved_at:
+        type: string
+      approved_by:
+        type: string
+      container_id:
+        type: string
+      created_at:
+        type: string
+      excel_file_url:
+        type: string
+      excel_hash:
+        type: string
+      id:
+        type: string
+      lines:
+        items:
+          $ref: '#/definitions/internal_module_delivery.LoadingPlanLine'
+        type: array
+      notes:
+        type: string
+      parsed_at:
+        type: string
+      status:
+        type: string
+      superseded_at:
+        type: string
+      superseded_by:
+        type: string
+      uploaded_by:
+        type: string
+      version:
+        type: integer
+    type: object
+  internal_module_delivery.LoadingPlanDiff:
+    properties:
+      added:
+        items:
+          $ref: '#/definitions/internal_module_delivery.LoadingPlanLine'
+        type: array
+      against:
+        type: string
+      changed:
+        items:
+          $ref: '#/definitions/internal_module_delivery.LoadingPlanLineDiff'
+        type: array
+      new_plan:
+        type: string
+      removed:
+        items:
+          $ref: '#/definitions/internal_module_delivery.LoadingPlanLine'
+        type: array
+    type: object
+  internal_module_delivery.LoadingPlanLine:
+    properties:
+      created_at:
+        type: string
+      customer_sku_code:
+        type: string
+      excel_row_num:
+        type: integer
+      id:
+        type: string
+      loading_plan_id:
+        type: string
+      qty_in_excel:
+        type: number
+      qty_planned_pieces:
+        type: integer
+      raw_excel_row:
+        items:
+          type: integer
+        type: array
+      sku_id:
+        type: string
+      unit_in_excel:
+        type: string
+    type: object
+  internal_module_delivery.LoadingPlanLineDiff:
+    properties:
+      customer_sku_code:
+        type: string
+      new_qty:
+        type: integer
+      old_qty:
+        type: integer
+      sku_id:
+        type: string
+    type: object
+  internal_module_delivery.LoadingPlanRowError:
+    properties:
+      code:
+        type: string
+      col:
+        type: string
+      message:
+        type: string
+      row:
+        type: integer
+    type: object
+  internal_module_delivery.LoadingPlanUploadResult:
+    properties:
+      errors:
+        items:
+          $ref: '#/definitions/internal_module_delivery.LoadingPlanRowError'
+        type: array
+      lines:
+        items:
+          $ref: '#/definitions/internal_module_delivery.LoadingPlanLine'
+        type: array
+      plan:
+        $ref: '#/definitions/internal_module_delivery.LoadingPlan'
+      warnings:
+        items:
+          $ref: '#/definitions/internal_module_delivery.LoadingPlanRowError'
+        type: array
+    type: object
   internal_module_delivery.TransferLineInput:
     properties:
       cbm_total:
@@ -1119,6 +1237,11 @@ definitions:
         description: nil when the source line was fully consumed
       target_line:
         $ref: '#/definitions/internal_module_delivery.ContainerLine'
+    type: object
+  internal_module_delivery.approveLoadingPlanRequest:
+    properties:
+      notes:
+        type: string
     type: object
   internal_module_delivery.sealReopenShipRequest:
     properties:
@@ -2995,6 +3118,81 @@ paths:
       security:
       - BearerAuth: []
       summary: Remove a line from a container
+      tags:
+      - delivery
+  /api/v1/containers/{id}/loading-plan:
+    get:
+      parameters:
+      - description: container id
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_module_delivery.LoadingPlan'
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Get the active (non-superseded) loading plan for a container
+      tags:
+      - delivery
+    post:
+      consumes:
+      - multipart/form-data
+      parameters:
+      - description: container id
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: customer uuid that owns the SKU mappings
+        in: formData
+        name: customer_id
+        required: true
+        type: string
+      - description: packing-list .xlsx
+        in: formData
+        name: file
+        required: true
+        type: file
+      - description: free-form notes
+        in: formData
+        name: notes
+        type: string
+      - description: external URL where the file is archived
+        in: formData
+        name: excel_url
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_module_delivery.LoadingPlanUploadResult'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_module_delivery.LoadingPlanUploadResult'
+        "409":
+          description: Conflict
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Upload customer packing-list Excel as a loading plan (PARSED)
       tags:
       - delivery
   /api/v1/containers/{id}/reopen:
@@ -5105,6 +5303,102 @@ paths:
       summary: Generate pick-slip PDF for a work order
       tags:
       - inventory
+  /api/v1/loading-plans/{id}:
+    get:
+      parameters:
+      - description: loading plan id
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_module_delivery.LoadingPlan'
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Get one loading plan with its lines
+      tags:
+      - delivery
+  /api/v1/loading-plans/{id}/approve:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: loading plan id
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: optional notes
+        in: body
+        name: body
+        schema:
+          $ref: '#/definitions/internal_module_delivery.approveLoadingPlanRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_module_delivery.LoadingPlan'
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "409":
+          description: Conflict
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Approve a loading plan (admin) — locks the version
+      tags:
+      - delivery
+  /api/v1/loading-plans/{id}/diff:
+    get:
+      parameters:
+      - description: loading plan id
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: loading plan id to diff against
+        in: query
+        name: against
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_module_delivery.LoadingPlanDiff'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Diff a loading plan against another (added/removed/changed by sku)
+      tags:
+      - delivery
   /api/v1/machines:
     get:
       produces:

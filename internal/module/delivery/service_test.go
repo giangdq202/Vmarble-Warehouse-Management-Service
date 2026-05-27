@@ -1,6 +1,7 @@
 package delivery
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"testing"
@@ -8,10 +9,18 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/xuri/excelize/v2"
 
 	"github.com/vmarble/warehouse-management-service/internal/domain"
 	"github.com/vmarble/warehouse-management-service/internal/platform/httpkit"
 )
+
+// excelizeNewFile / excelizeCoord wrap the upstream API in case excelize
+// renames its constructors between minor versions; tests only call these.
+func excelizeNewFile() *excelize.File { return excelize.NewFile() }
+func excelizeCoord(col, row int) (string, error) {
+	return excelize.CoordinatesToCellName(col, row)
+}
 
 // ── mockStore ────────────────────────────────────────────────────────────────
 //
@@ -40,6 +49,26 @@ type mockStore struct {
 
 	tx        *mockTxStore
 	withTxErr error
+
+	// Loading plans (#301)
+	insertedLoadingPlan      *LoadingPlan
+	insertedLoadingPlanLines []LoadingPlanLine
+	insertLoadingPlanErr     error
+
+	selectLoadingPlanByIDResult LoadingPlan
+	selectLoadingPlanByIDErr    error
+
+	selectLoadingPlanLinesResult []LoadingPlanLine
+	selectLoadingPlanLinesErr    error
+
+	selectActiveLoadingPlanResult LoadingPlan
+	selectActiveLoadingPlanErr    error
+
+	nextLoadingPlanVersionResult int
+	nextLoadingPlanVersionErr    error
+
+	approveLoadingPlanResult LoadingPlan
+	approveLoadingPlanErr    error
 }
 
 type mockTxStore struct {
@@ -116,6 +145,38 @@ func (m *mockStore) withTx(_ context.Context, fn func(tx txStore, raw pgx.Tx) er
 	// raw is nil — tests that exercise Seal use a no-op shipment recorder so
 	// the cross-module dep never reads from raw.
 	return fn(m.tx, nil)
+}
+
+func (m *mockStore) insertLoadingPlanWithLines(_ context.Context, plan LoadingPlan, lines []LoadingPlanLine) error {
+	if m.insertLoadingPlanErr != nil {
+		return m.insertLoadingPlanErr
+	}
+	m.insertedLoadingPlan = &plan
+	m.insertedLoadingPlanLines = append(m.insertedLoadingPlanLines, lines...)
+	return nil
+}
+
+func (m *mockStore) selectLoadingPlanByID(_ context.Context, _ uuid.UUID) (LoadingPlan, error) {
+	return m.selectLoadingPlanByIDResult, m.selectLoadingPlanByIDErr
+}
+
+func (m *mockStore) selectLoadingPlanLines(_ context.Context, _ uuid.UUID) ([]LoadingPlanLine, error) {
+	return m.selectLoadingPlanLinesResult, m.selectLoadingPlanLinesErr
+}
+
+func (m *mockStore) selectActiveLoadingPlan(_ context.Context, _ uuid.UUID) (LoadingPlan, error) {
+	return m.selectActiveLoadingPlanResult, m.selectActiveLoadingPlanErr
+}
+
+func (m *mockStore) nextLoadingPlanVersion(_ context.Context, _ uuid.UUID) (int, error) {
+	if m.nextLoadingPlanVersionResult == 0 && m.nextLoadingPlanVersionErr == nil {
+		return 1, nil
+	}
+	return m.nextLoadingPlanVersionResult, m.nextLoadingPlanVersionErr
+}
+
+func (m *mockStore) approveLoadingPlanTx(_ context.Context, _, _ uuid.UUID, _ time.Time) (LoadingPlan, error) {
+	return m.approveLoadingPlanResult, m.approveLoadingPlanErr
 }
 
 func newMockTx() *mockTxStore {
@@ -954,5 +1015,264 @@ func TestOrderUUIDs_StableLockOrdering(t *testing.T) {
 	first, second = orderUUIDs(b, a)
 	if first != a || second != b {
 		t.Errorf("ordering broken (reverse args): got (%v, %v)", first, second)
+	}
+}
+
+// ── Loading plans (#301) ────────────────────────────────────────────────────
+//
+// The service path hinges on excelize parsing real .xlsx bytes, so the helper
+// below builds a minimal workbook in-memory per test. Six cases cover the DoD
+// matrix from issue #301: happy, missing column, unmapped SKU, invalid unit,
+// negative qty, duplicate hash.
+
+type mockCustomerSKUResolver struct {
+	mappings map[string]uuid.UUID
+	err      error
+}
+
+func (m *mockCustomerSKUResolver) ResolveCustomerSKU(_ context.Context, _ uuid.UUID, code string) (uuid.UUID, error) {
+	if m.err != nil {
+		return uuid.Nil, m.err
+	}
+	if id, ok := m.mappings[code]; ok {
+		return id, nil
+	}
+	return uuid.Nil, domain.NewBizError(domain.ErrNotFound, "no mapping for "+code)
+}
+
+// buildLoadingPlanXLSX renders a workbook with the v1 column layout, plus an
+// optional knob for omitting the unit column (drives the missing-column test).
+type loadingPlanRow struct {
+	Code  string
+	Qty   string
+	Unit  string
+	Notes string
+}
+
+func buildLoadingPlanXLSX(t *testing.T, header []string, rows []loadingPlanRow) *bytes.Buffer {
+	t.Helper()
+	f := excelizeNewFile()
+	defer func() { _ = f.Close() }()
+
+	for i, h := range header {
+		cell, _ := excelizeCoord(i+1, 1)
+		_ = f.SetCellValue("Sheet1", cell, h)
+	}
+	for ri, r := range rows {
+		colA, _ := excelizeCoord(1, ri+2)
+		colB, _ := excelizeCoord(2, ri+2)
+		colC, _ := excelizeCoord(3, ri+2)
+		colD, _ := excelizeCoord(4, ri+2)
+		_ = f.SetCellValue("Sheet1", colA, r.Code)
+		_ = f.SetCellValue("Sheet1", colB, r.Qty)
+		_ = f.SetCellValue("Sheet1", colC, r.Unit)
+		if r.Notes != "" {
+			_ = f.SetCellValue("Sheet1", colD, r.Notes)
+		}
+	}
+	var buf bytes.Buffer
+	if err := f.Write(&buf); err != nil {
+		t.Fatalf("excelize write: %v", err)
+	}
+	return &buf
+}
+
+func newSvcWithLoadingPlan(t *testing.T, st *mockStore, resolver CustomerSKUResolver) *service {
+	t.Helper()
+	svc := &service{
+		s:           st,
+		skuResolver: resolver,
+		now:         func() time.Time { return time.Date(2026, 5, 27, 10, 0, 0, 0, time.UTC) },
+	}
+	return svc
+}
+
+func validContainerForLoadingPlan() Container {
+	return Container{ID: uuid.New(), Status: ContainerStatusOpen}
+}
+
+func TestUploadLoadingPlan_HappyPath(t *testing.T) {
+	skuID := uuid.New()
+	st := &mockStore{
+		selectByIDResult:           validContainerForLoadingPlan(),
+		selectActiveLoadingPlanErr: domain.NewBizError(domain.ErrNotFound, "none"),
+	}
+	svc := newSvcWithLoadingPlan(t, st, &mockCustomerSKUResolver{
+		mappings: map[string]uuid.UUID{"CUST-001": skuID},
+	})
+
+	xlsx := buildLoadingPlanXLSX(t, []string{"customer_sku_code", "qty", "unit"}, []loadingPlanRow{
+		{Code: "CUST-001", Qty: "10", Unit: "PCS"},
+	})
+
+	res, err := svc.UploadLoadingPlan(context.Background(), UploadLoadingPlanInput{
+		ContainerID: st.selectByIDResult.ID,
+		CustomerID:  uuid.New(),
+		UploadedBy:  uuid.New(),
+		File:        xlsx,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(res.Lines) != 1 || res.Lines[0].SKUID != skuID || res.Lines[0].QtyPlannedPieces != 10 {
+		t.Errorf("expected one line with sku=%v qty=10, got %+v", skuID, res.Lines)
+	}
+	if res.Plan.Status != LoadingPlanStatusParsed {
+		t.Errorf("Status = %q, want PARSED", res.Plan.Status)
+	}
+	if st.insertedLoadingPlan == nil {
+		t.Error("insertLoadingPlanWithLines was never called")
+	}
+}
+
+func TestUploadLoadingPlan_MissingColumn_Rejected(t *testing.T) {
+	st := &mockStore{
+		selectByIDResult:           validContainerForLoadingPlan(),
+		selectActiveLoadingPlanErr: domain.NewBizError(domain.ErrNotFound, "none"),
+	}
+	svc := newSvcWithLoadingPlan(t, st, &mockCustomerSKUResolver{})
+
+	// Header is missing the unit column.
+	xlsx := buildLoadingPlanXLSX(t, []string{"customer_sku_code", "qty"}, []loadingPlanRow{
+		{Code: "CUST-001", Qty: "10"},
+	})
+
+	_, err := svc.UploadLoadingPlan(context.Background(), UploadLoadingPlanInput{
+		ContainerID: st.selectByIDResult.ID,
+		CustomerID:  uuid.New(),
+		UploadedBy:  uuid.New(),
+		File:        xlsx,
+	})
+	if !errors.Is(err, domain.ErrInvalidInput) {
+		t.Errorf("expected ErrInvalidInput on missing header column, got %v", err)
+	}
+	if st.insertedLoadingPlan != nil {
+		t.Error("plan must NOT be inserted when header is malformed")
+	}
+}
+
+func TestUploadLoadingPlan_UnmappedSKU_Rejected(t *testing.T) {
+	st := &mockStore{
+		selectByIDResult:           validContainerForLoadingPlan(),
+		selectActiveLoadingPlanErr: domain.NewBizError(domain.ErrNotFound, "none"),
+	}
+	// Resolver knows CUST-001 but the file references CUST-X.
+	svc := newSvcWithLoadingPlan(t, st, &mockCustomerSKUResolver{
+		mappings: map[string]uuid.UUID{"CUST-001": uuid.New()},
+	})
+
+	xlsx := buildLoadingPlanXLSX(t, []string{"customer_sku_code", "qty", "unit"}, []loadingPlanRow{
+		{Code: "CUST-X", Qty: "10", Unit: "PCS"},
+	})
+
+	res, err := svc.UploadLoadingPlan(context.Background(), UploadLoadingPlanInput{
+		ContainerID: st.selectByIDResult.ID,
+		CustomerID:  uuid.New(),
+		UploadedBy:  uuid.New(),
+		File:        xlsx,
+	})
+	if !errors.Is(err, domain.ErrInvalidInput) {
+		t.Fatalf("expected ErrInvalidInput on unmapped SKU, got %v", err)
+	}
+	if len(res.Errors) == 0 || res.Errors[0].Code != "UNMAPPED_SKU" {
+		t.Errorf("expected per-row UNMAPPED_SKU error, got %+v", res.Errors)
+	}
+	if st.insertedLoadingPlan != nil {
+		t.Error("plan must NOT be inserted when an SKU is unmapped (fail-all)")
+	}
+}
+
+func TestUploadLoadingPlan_InvalidUnit_Rejected(t *testing.T) {
+	st := &mockStore{
+		selectByIDResult:           validContainerForLoadingPlan(),
+		selectActiveLoadingPlanErr: domain.NewBizError(domain.ErrNotFound, "none"),
+	}
+	svc := newSvcWithLoadingPlan(t, st, &mockCustomerSKUResolver{
+		mappings: map[string]uuid.UUID{"CUST-001": uuid.New()},
+	})
+
+	xlsx := buildLoadingPlanXLSX(t, []string{"customer_sku_code", "qty", "unit"}, []loadingPlanRow{
+		{Code: "CUST-001", Qty: "10", Unit: ""}, // empty unit
+	})
+
+	res, err := svc.UploadLoadingPlan(context.Background(), UploadLoadingPlanInput{
+		ContainerID: st.selectByIDResult.ID,
+		CustomerID:  uuid.New(),
+		UploadedBy:  uuid.New(),
+		File:        xlsx,
+	})
+	if !errors.Is(err, domain.ErrInvalidInput) {
+		t.Fatalf("expected ErrInvalidInput on empty unit, got %v", err)
+	}
+	if len(res.Errors) == 0 || res.Errors[0].Code != "MISSING_UNIT" {
+		t.Errorf("expected MISSING_UNIT error, got %+v", res.Errors)
+	}
+}
+
+func TestUploadLoadingPlan_NegativeQty_Rejected(t *testing.T) {
+	st := &mockStore{
+		selectByIDResult:           validContainerForLoadingPlan(),
+		selectActiveLoadingPlanErr: domain.NewBizError(domain.ErrNotFound, "none"),
+	}
+	svc := newSvcWithLoadingPlan(t, st, &mockCustomerSKUResolver{
+		mappings: map[string]uuid.UUID{"CUST-001": uuid.New()},
+	})
+
+	xlsx := buildLoadingPlanXLSX(t, []string{"customer_sku_code", "qty", "unit"}, []loadingPlanRow{
+		{Code: "CUST-001", Qty: "-5", Unit: "PCS"},
+	})
+
+	res, err := svc.UploadLoadingPlan(context.Background(), UploadLoadingPlanInput{
+		ContainerID: st.selectByIDResult.ID,
+		CustomerID:  uuid.New(),
+		UploadedBy:  uuid.New(),
+		File:        xlsx,
+	})
+	if !errors.Is(err, domain.ErrInvalidInput) {
+		t.Fatalf("expected ErrInvalidInput on negative qty, got %v", err)
+	}
+	if len(res.Errors) == 0 || res.Errors[0].Code != "INVALID_QTY" {
+		t.Errorf("expected INVALID_QTY error, got %+v", res.Errors)
+	}
+}
+
+func TestUploadLoadingPlan_DuplicateHash_Rejected(t *testing.T) {
+	skuID := uuid.New()
+
+	xlsx := buildLoadingPlanXLSX(t, []string{"customer_sku_code", "qty", "unit"}, []loadingPlanRow{
+		{Code: "CUST-001", Qty: "10", Unit: "PCS"},
+	})
+	bodyBytes := xlsx.Bytes()
+
+	// Pre-compute the same hash the parser would generate so the active plan
+	// stub looks like a previously-uploaded copy of the same file.
+	probe, err := parseExcelV1(bytes.NewReader(bodyBytes))
+	if err != nil {
+		t.Fatalf("probe parse: %v", err)
+	}
+
+	st := &mockStore{
+		selectByIDResult: validContainerForLoadingPlan(),
+		selectActiveLoadingPlanResult: LoadingPlan{
+			ID:        uuid.New(),
+			Status:    LoadingPlanStatusApproved,
+			ExcelHash: probe.Hash,
+		},
+	}
+	svc := newSvcWithLoadingPlan(t, st, &mockCustomerSKUResolver{
+		mappings: map[string]uuid.UUID{"CUST-001": skuID},
+	})
+
+	_, err = svc.UploadLoadingPlan(context.Background(), UploadLoadingPlanInput{
+		ContainerID: st.selectByIDResult.ID,
+		CustomerID:  uuid.New(),
+		UploadedBy:  uuid.New(),
+		File:        bytes.NewReader(bodyBytes),
+	})
+	if !errors.Is(err, domain.ErrInvalidInput) {
+		t.Fatalf("expected ErrInvalidInput on duplicate hash, got %v", err)
+	}
+	if st.insertedLoadingPlan != nil {
+		t.Error("plan must NOT be inserted when active hash matches (BR-D10)")
 	}
 }

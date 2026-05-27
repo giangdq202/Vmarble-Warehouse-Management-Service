@@ -282,4 +282,10 @@ type Service interface {
 	PatchCustomerSKUMapping(ctx context.Context, in PatchCustomerSKUMappingInput) (CustomerSKUMapping, error)
 	DeleteCustomerSKUMapping(ctx context.Context, in DeleteCustomerSKUMappingInput) error
 	BulkImportCustomerSKUMappings(ctx context.Context, in BulkImportCustomerSKUMappingsInput) (BulkImportResult, error)
+
+	// GetCustomerSKUMapping resolves one (customer_id, customer_sku_code) pair
+	// to its internal sku_id. Used by the delivery Excel parser (#301) to
+	// translate customer-facing codes; returns ErrNotFound when no mapping
+	// exists so the parser can surface UNMAPPED_SKU.
+	GetCustomerSKUMapping(ctx context.Context, customerID uuid.UUID, code string) (CustomerSKUMapping, error)
 }

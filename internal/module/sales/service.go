@@ -627,6 +627,21 @@ func (svc *service) ListCustomerSKUMappings(ctx context.Context, p httpkit.PageP
 	return httpkit.NewPagedResult(rows, total, p), nil
 }
 
+// GetCustomerSKUMapping resolves one (customer_id, customer_sku_code) pair to
+// its internal sku_id. Used by the delivery Excel parser (#301) — returns
+// ErrNotFound when the customer has not mapped that code yet so the parser
+// can emit UNMAPPED_SKU.
+func (svc *service) GetCustomerSKUMapping(ctx context.Context, customerID uuid.UUID, code string) (CustomerSKUMapping, error) {
+	if customerID == uuid.Nil {
+		return CustomerSKUMapping{}, domain.NewBizError(domain.ErrInvalidInput, "customer_id is required")
+	}
+	trimmed, err := validateMappingCode(code)
+	if err != nil {
+		return CustomerSKUMapping{}, err
+	}
+	return svc.s.selectCustomerSKUMappingByPK(ctx, customerID, trimmed)
+}
+
 func (svc *service) PatchCustomerSKUMapping(ctx context.Context, in PatchCustomerSKUMappingInput) (CustomerSKUMapping, error) {
 	if in.CustomerID == uuid.Nil {
 		return CustomerSKUMapping{}, domain.NewBizError(domain.ErrInvalidInput, "customer_id is required")

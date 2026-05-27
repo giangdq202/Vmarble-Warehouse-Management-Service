@@ -3,7 +3,9 @@ package delivery
 import (
 	"bytes"
 	"context"
+	"errors"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -19,6 +21,8 @@ type service struct {
 	soLineChecker  SOLineChecker
 	shipRecorder   ShipmentRecorder
 	fgTracker      FGTracker
+	skuResolver    CustomerSKUResolver
+	lpAuditor      LoadingPlanAuditLogger
 	cbmOverheadPct float64
 	now            func() time.Time // overridable in tests
 }
@@ -45,6 +49,19 @@ func NewService(s store, sku SKUChecker, soLine SOLineChecker, ship ShipmentReco
 // once both services exist; tests leave it nil.
 func (svc *service) SetFGTracker(t FGTracker) {
 	svc.fgTracker = t
+}
+
+// SetCustomerSKUResolver wires the loading-plan parser dependency. Optional —
+// when nil, UploadLoadingPlan returns ErrPreconditionFailed so the missing
+// wiring is loud rather than a silent UNMAPPED_SKU storm.
+func (svc *service) SetCustomerSKUResolver(r CustomerSKUResolver) {
+	svc.skuResolver = r
+}
+
+// SetLoadingPlanAuditor wires the best-effort audit hook for upload/approve
+// flows. nil leaves auditing off; production wires lpAuditAdapter.
+func (svc *service) SetLoadingPlanAuditor(a LoadingPlanAuditLogger) {
+	svc.lpAuditor = a
 }
 
 // ── Container CRUD ──────────────────────────────────────────────────────────
@@ -666,4 +683,265 @@ func reasonBlank(s string) bool {
 // stable across runs (otherwise float64 division dribbles 14 digits).
 func roundPct(v float64) float64 {
 	return float64(int(v*100+0.5)) / 100
+}
+
+// ── Loading plans (#301) ────────────────────────────────────────────────────
+
+func (svc *service) UploadLoadingPlan(ctx context.Context, in UploadLoadingPlanInput) (LoadingPlanUploadResult, error) {
+	if in.ContainerID == uuid.Nil {
+		return LoadingPlanUploadResult{}, domain.NewBizError(domain.ErrInvalidInput, "container_id is required")
+	}
+	if in.CustomerID == uuid.Nil {
+		return LoadingPlanUploadResult{}, domain.NewBizError(domain.ErrInvalidInput, "customer_id is required")
+	}
+	if in.UploadedBy == uuid.Nil {
+		return LoadingPlanUploadResult{}, domain.NewBizError(domain.ErrInvalidInput, "uploaded_by is required")
+	}
+	if svc.skuResolver == nil {
+		return LoadingPlanUploadResult{}, domain.NewBizError(domain.ErrPreconditionFailed, "customer SKU resolver is not wired; cannot parse loading plans")
+	}
+
+	// Container must exist and be in a status that still allows packing intent.
+	c, err := svc.s.selectContainerByID(ctx, in.ContainerID)
+	if err != nil {
+		return LoadingPlanUploadResult{}, err
+	}
+	switch c.Status {
+	case ContainerStatusSealed, ContainerStatusShipped, ContainerStatusCancelled:
+		return LoadingPlanUploadResult{}, domain.NewBizError(domain.ErrInvalidTransition, "container is "+c.Status+"; loading plan can only be uploaded while OPEN or LOADING")
+	}
+
+	parsed, err := parseExcelV1(in.File)
+	if err != nil {
+		return LoadingPlanUploadResult{}, domain.NewBizError(domain.ErrInvalidInput, err.Error())
+	}
+	if len(parsed.RowErrors) > 0 {
+		// Fail-all mirrors BR-D08; never persist a partial plan.
+		return LoadingPlanUploadResult{Errors: parsed.RowErrors}, domain.NewBizError(domain.ErrInvalidInput, "loading plan has row errors")
+	}
+	if len(parsed.Rows) == 0 {
+		return LoadingPlanUploadResult{}, domain.NewBizError(domain.ErrInvalidInput, "loading plan has no data rows")
+	}
+
+	// BR-D10 service-level guard. The DB partial unique index is the
+	// authoritative backstop, but checking here gives the operator a
+	// human 409 instead of a constraint-violation 400.
+	active, err := svc.s.selectActiveLoadingPlan(ctx, in.ContainerID)
+	if err == nil && active.ExcelHash == parsed.Hash && active.Status != LoadingPlanStatusSuperseded {
+		return LoadingPlanUploadResult{}, domain.NewBizError(domain.ErrInvalidInput, "an active plan with the same Excel hash already exists for this container")
+	} else if err != nil && !errors.Is(err, domain.ErrNotFound) {
+		return LoadingPlanUploadResult{}, err
+	}
+
+	// Resolve every row's customer_sku_code → sku_id. Accumulate misses
+	// before bailing so the operator sees every missing mapping in one
+	// upload cycle instead of fixing them one at a time.
+	var rowErrs []LoadingPlanRowError
+	resolved := make([]LoadingPlanLine, 0, len(parsed.Rows))
+	now := svc.now().UTC()
+	planID := uuid.New()
+	for _, row := range parsed.Rows {
+		skuID, lookupErr := svc.skuResolver.ResolveCustomerSKU(ctx, in.CustomerID, row.CustomerSKUCode)
+		if lookupErr != nil {
+			if errors.Is(lookupErr, domain.ErrNotFound) {
+				rowErrs = append(rowErrs, LoadingPlanRowError{
+					Row:     row.RowNum,
+					Col:     "A",
+					Code:    "UNMAPPED_SKU",
+					Message: "customer_sku_code '" + row.CustomerSKUCode + "' is not mapped for this customer",
+				})
+				continue
+			}
+			return LoadingPlanUploadResult{}, lookupErr
+		}
+		// qty_planned_pieces is the integer quantity. v1 template uses col B
+		// as integer pieces; if the customer's file uses fractional units the
+		// parser already accepts the float and we round up so we never short
+		// the customer.
+		pieces := int(row.QtyInExcel)
+		if float64(pieces) < row.QtyInExcel {
+			pieces++
+		}
+		resolved = append(resolved, LoadingPlanLine{
+			ID:               uuid.New(),
+			LoadingPlanID:    planID,
+			SKUID:            skuID,
+			QtyPlannedPieces: pieces,
+			UnitInExcel:      row.UnitInExcel,
+			QtyInExcel:       row.QtyInExcel,
+			CustomerSKUCode:  row.CustomerSKUCode,
+			RawExcelRow:      rawRowJSON(row.Raw),
+			ExcelRowNum:      row.RowNum,
+			CreatedAt:        now,
+		})
+	}
+	if len(rowErrs) > 0 {
+		return LoadingPlanUploadResult{Errors: rowErrs}, domain.NewBizError(domain.ErrInvalidInput, "loading plan has unmapped SKUs")
+	}
+
+	version, err := svc.s.nextLoadingPlanVersion(ctx, in.ContainerID)
+	if err != nil {
+		return LoadingPlanUploadResult{}, err
+	}
+
+	plan := LoadingPlan{
+		ID:           planID,
+		ContainerID:  in.ContainerID,
+		ExcelFileURL: in.ExcelFileURL,
+		ExcelHash:    parsed.Hash,
+		ParsedAt:     now,
+		UploadedBy:   in.UploadedBy,
+		Status:       LoadingPlanStatusParsed,
+		Version:      version,
+		Notes:        strings.TrimSpace(in.Notes),
+		CreatedAt:    now,
+	}
+	if err := svc.s.insertLoadingPlanWithLines(ctx, plan, resolved); err != nil {
+		return LoadingPlanUploadResult{}, err
+	}
+	plan.Lines = resolved
+
+	svc.logLoadingPlanAudit(ctx, AuditLoadingPlanInput{
+		Action:      AuditLPActionUploaded,
+		PlanID:      plan.ID,
+		ContainerID: plan.ContainerID,
+		Version:     plan.Version,
+		ExcelHash:   plan.ExcelHash,
+		ActorID:     in.UploadedBy,
+		Notes:       plan.Notes,
+	})
+
+	return LoadingPlanUploadResult{Plan: plan, Lines: resolved}, nil
+}
+
+func (svc *service) GetActiveLoadingPlan(ctx context.Context, containerID uuid.UUID) (LoadingPlan, error) {
+	if containerID == uuid.Nil {
+		return LoadingPlan{}, domain.NewBizError(domain.ErrInvalidInput, "container_id is required")
+	}
+	plan, err := svc.s.selectActiveLoadingPlan(ctx, containerID)
+	if err != nil {
+		return LoadingPlan{}, err
+	}
+	lines, err := svc.s.selectLoadingPlanLines(ctx, plan.ID)
+	if err != nil {
+		return LoadingPlan{}, err
+	}
+	plan.Lines = lines
+	return plan, nil
+}
+
+func (svc *service) GetLoadingPlan(ctx context.Context, planID uuid.UUID) (LoadingPlan, error) {
+	if planID == uuid.Nil {
+		return LoadingPlan{}, domain.NewBizError(domain.ErrInvalidInput, "plan_id is required")
+	}
+	plan, err := svc.s.selectLoadingPlanByID(ctx, planID)
+	if err != nil {
+		return LoadingPlan{}, err
+	}
+	lines, err := svc.s.selectLoadingPlanLines(ctx, plan.ID)
+	if err != nil {
+		return LoadingPlan{}, err
+	}
+	plan.Lines = lines
+	return plan, nil
+}
+
+// DiffLoadingPlans diffs two plan ids by SKU. The "key" is sku_id so a
+// customer code rename (mapping moved to a different sku) shows up as one
+// removed + one added line, matching what the FE would render.
+func (svc *service) DiffLoadingPlans(ctx context.Context, planID, againstID uuid.UUID) (LoadingPlanDiff, error) {
+	if planID == uuid.Nil || againstID == uuid.Nil {
+		return LoadingPlanDiff{}, domain.NewBizError(domain.ErrInvalidInput, "plan_id and against are required")
+	}
+	if planID == againstID {
+		return LoadingPlanDiff{}, domain.NewBizError(domain.ErrInvalidInput, "plan_id and against must differ")
+	}
+
+	newPlan, err := svc.GetLoadingPlan(ctx, planID)
+	if err != nil {
+		return LoadingPlanDiff{}, err
+	}
+	oldPlan, err := svc.GetLoadingPlan(ctx, againstID)
+	if err != nil {
+		return LoadingPlanDiff{}, err
+	}
+	if newPlan.ContainerID != oldPlan.ContainerID {
+		return LoadingPlanDiff{}, domain.NewBizError(domain.ErrInvalidInput, "diffed plans belong to different containers")
+	}
+
+	bySKU := func(lines []LoadingPlanLine) map[uuid.UUID]LoadingPlanLine {
+		m := make(map[uuid.UUID]LoadingPlanLine, len(lines))
+		for _, l := range lines {
+			m[l.SKUID] = l
+		}
+		return m
+	}
+	oldBy := bySKU(oldPlan.Lines)
+	newBy := bySKU(newPlan.Lines)
+
+	out := LoadingPlanDiff{Against: againstID, NewPlan: planID}
+	for sku, nl := range newBy {
+		if ol, ok := oldBy[sku]; ok {
+			if ol.QtyPlannedPieces != nl.QtyPlannedPieces {
+				out.Changed = append(out.Changed, LoadingPlanLineDiff{
+					SKUID:           sku,
+					CustomerSKUCode: nl.CustomerSKUCode,
+					OldQty:          ol.QtyPlannedPieces,
+					NewQty:          nl.QtyPlannedPieces,
+				})
+			}
+		} else {
+			out.Added = append(out.Added, nl)
+		}
+	}
+	for sku, ol := range oldBy {
+		if _, ok := newBy[sku]; !ok {
+			out.Removed = append(out.Removed, ol)
+		}
+	}
+	return out, nil
+}
+
+func (svc *service) ApproveLoadingPlan(ctx context.Context, in ApproveLoadingPlanInput) (LoadingPlan, error) {
+	if in.PlanID == uuid.Nil {
+		return LoadingPlan{}, domain.NewBizError(domain.ErrInvalidInput, "plan_id is required")
+	}
+	if in.ActorID == uuid.Nil {
+		return LoadingPlan{}, domain.NewBizError(domain.ErrInvalidInput, "actor_id is required")
+	}
+	now := svc.now().UTC()
+	updated, err := svc.s.approveLoadingPlanTx(ctx, in.PlanID, in.ActorID, now)
+	if err != nil {
+		return LoadingPlan{}, err
+	}
+	lines, err := svc.s.selectLoadingPlanLines(ctx, updated.ID)
+	if err != nil {
+		return LoadingPlan{}, err
+	}
+	updated.Lines = lines
+
+	svc.logLoadingPlanAudit(ctx, AuditLoadingPlanInput{
+		Action:      AuditLPActionApproved,
+		PlanID:      updated.ID,
+		ContainerID: updated.ContainerID,
+		Version:     updated.Version,
+		ExcelHash:   updated.ExcelHash,
+		ActorID:     in.ActorID,
+		Notes:       strings.TrimSpace(in.Notes),
+	})
+	return updated, nil
+}
+
+func (svc *service) logLoadingPlanAudit(ctx context.Context, in AuditLoadingPlanInput) {
+	if svc.lpAuditor == nil {
+		return
+	}
+	if err := svc.lpAuditor.LogLoadingPlan(ctx, in); err != nil {
+		slog.Warn("loading plan audit hook failed",
+			"action", in.Action,
+			"plan_id", in.PlanID,
+			"container_id", in.ContainerID,
+			"error", err,
+		)
+	}
 }
