@@ -19,6 +19,16 @@ type store interface {
 
 	selectByContainerKeyset(ctx context.Context, containerID uuid.UUID, status string, cur httpkit.Cursor, limit int) ([]LoadingException, error)
 
+	// selectCrossContainerKeyset powers GET /loading-exceptions (#328).
+	// Joins to containers + sales_orders only when CustomerID filter is set,
+	// to keep the hot path on idx_le_pending.
+	selectCrossContainerKeyset(ctx context.Context, f CrossContainerFilter, cur httpkit.Cursor, limit int) ([]LoadingException, error)
+
+	// crossContainerSummary returns (pending_count, blocked_containers) for
+	// the dashboard pinned counter. Single round-trip with COUNT + COUNT
+	// DISTINCT against idx_le_pending.
+	crossContainerSummary(ctx context.Context, f CrossContainerFilter) (CrossContainerSummary, error)
+
 	// pendingByContainer returns the (count, ids) tuple for the BR-D14
 	// SEAL pre-check. Backed by idx_le_pending so the query stays cheap
 	// even when the container has many resolved exceptions in history.

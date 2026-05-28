@@ -137,3 +137,46 @@ func (p *Publisher) NotifyPlanReload(ctx context.Context, containerID, planID st
 		},
 	})
 }
+
+// NotifyLoadingExceptionCreated fires LOADING_EXCEPTION_CREATED after a row
+// lands in loading_exceptions. Audience covers planner-tier (decision makers)
+// + admin (oversight) so the cross-container queue (#248) refreshes without
+// polling.
+func (p *Publisher) NotifyLoadingExceptionCreated(ctx context.Context, exceptionID, containerID, exceptionType string) error {
+	return p.publish(ctx, Event{
+		Roles: []string{"planner", "accountant", "foreman", "cnc_manager", "admin"},
+		Type:  EventTypeLoadingExceptionCreated,
+		Payload: map[string]any{
+			"exception_id":   exceptionID,
+			"container_id":   containerID,
+			"exception_type": exceptionType,
+		},
+	})
+}
+
+// NotifyLoadingExceptionApproved fires LOADING_EXCEPTION_APPROVED after the
+// admin/sales adjudicator flips approved_by. Same audience as CREATED.
+func (p *Publisher) NotifyLoadingExceptionApproved(ctx context.Context, exceptionID, containerID, resolution string) error {
+	return p.publish(ctx, Event{
+		Roles: []string{"planner", "accountant", "foreman", "cnc_manager", "admin"},
+		Type:  EventTypeLoadingExceptionApproved,
+		Payload: map[string]any{
+			"exception_id": exceptionID,
+			"container_id": containerID,
+			"resolution":   resolution,
+		},
+	})
+}
+
+// NotifyLoadingExceptionRejected fires LOADING_EXCEPTION_REJECTED after Reject
+// closes the row. Same audience as APPROVED.
+func (p *Publisher) NotifyLoadingExceptionRejected(ctx context.Context, exceptionID, containerID string) error {
+	return p.publish(ctx, Event{
+		Roles: []string{"planner", "accountant", "foreman", "cnc_manager", "admin"},
+		Type:  EventTypeLoadingExceptionRejected,
+		Payload: map[string]any{
+			"exception_id": exceptionID,
+			"container_id": containerID,
+		},
+	})
+}

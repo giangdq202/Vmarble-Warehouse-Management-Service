@@ -2,6 +2,7 @@ package loading_exception
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"time"
 
@@ -17,21 +18,23 @@ type service struct {
 	soLine     SOLineChecker
 	carryOver  CarryOverCreator
 	audit      AuditLogger
+	notifier   ExceptionNotifier
 	now        func() time.Time
 	newID      func() uuid.UUID
 }
 
 // NewService wires the production stack. Optional deps (skuChecker, soLine,
-// carryOver, audit) may be nil — when nil, related side effects are skipped
-// or short-circuited with a domain error so a missing dep is loud rather
-// than silent.
-func NewService(s store, sku SKUChecker, soLine SOLineChecker, carry CarryOverCreator, audit AuditLogger) Service {
+// carryOver, audit, notifier) may be nil — when nil, related side effects are
+// skipped or short-circuited with a domain error so a missing dep is loud
+// rather than silent.
+func NewService(s store, sku SKUChecker, soLine SOLineChecker, carry CarryOverCreator, audit AuditLogger, notifier ExceptionNotifier) Service {
 	return &service{
 		s:          s,
 		skuChecker: sku,
 		soLine:     soLine,
 		carryOver:  carry,
 		audit:      audit,
+		notifier:   notifier,
 		now:        time.Now,
 		newID:      uuid.New,
 	}
@@ -83,6 +86,7 @@ func (svc *service) Create(ctx context.Context, in CreateInput) (LoadingExceptio
 		ActorID:       row.CreatedBy,
 		Notes:         row.Reason,
 	})
+	svc.notifyCreated(ctx, row)
 	return row, nil
 }
 
@@ -205,6 +209,7 @@ func (svc *service) Approve(ctx context.Context, in ApproveInput) (LoadingExcept
 		ActorID:       in.ApprovedBy,
 		Notes:         in.ResolutionNotes,
 	})
+	svc.notifyApproved(ctx, out, in.Resolution)
 	return out, nil
 }
 
@@ -257,7 +262,75 @@ func (svc *service) Reject(ctx context.Context, in RejectInput) (LoadingExceptio
 		ActorID:       in.ApprovedBy,
 		Notes:         in.Reason,
 	})
+	svc.notifyRejected(ctx, out)
 	return out, nil
+}
+
+// BulkApprove batches up to 50 ids in a single request.
+func (svc *service) BulkApprove(ctx context.Context, in BulkApproveInput) (BulkApproveResult, error) {
+	if len(in.IDs) == 0 {
+		return BulkApproveResult{}, domain.NewBizError(domain.ErrInvalidInput, "ids is required")
+	}
+	if len(in.IDs) > 50 {
+		return BulkApproveResult{}, domain.NewBizError(domain.ErrInvalidInput, "max 50 ids per bulk approve request")
+	}
+	if in.ApprovedBy == uuid.Nil {
+		return BulkApproveResult{}, domain.NewBizError(domain.ErrInvalidInput, "approved_by is required")
+	}
+	if !validResolution(in.Resolution) {
+		return BulkApproveResult{}, domain.NewBizError(domain.ErrInvalidInput, "invalid resolution")
+	}
+	// BACKORDER + SUBSTITUTE_ACCEPTED need per-row context that the bulk
+	// payload cannot supply (parent_so_line_id, substitute_sku_id). Force the
+	// FE to call the per-id approve endpoint for those resolutions.
+	switch in.Resolution {
+	case ResolutionBackorder, ResolutionSubstituteAccepted:
+		return BulkApproveResult{}, domain.NewBizError(domain.ErrInvalidInput,
+			"resolution "+in.Resolution+" requires per-row approve, not bulk")
+	}
+
+	res := BulkApproveResult{
+		Approved: []uuid.UUID{},
+		Failed:   []BulkApproveFailed{},
+	}
+	for _, id := range in.IDs {
+		updated, err := svc.Approve(ctx, ApproveInput{
+			ID:              id,
+			Resolution:      in.Resolution,
+			ResolutionNotes: in.ResolutionNotes,
+			ApprovedBy:      in.ApprovedBy,
+		})
+		if err != nil {
+			res.Failed = append(res.Failed, BulkApproveFailed{
+				ID:      id,
+				Code:    classifyBulkError(err),
+				Message: err.Error(),
+			})
+			continue
+		}
+		res.Approved = append(res.Approved, updated.ID)
+	}
+	return res, nil
+}
+
+// ListCrossContainer returns the global keyset-paginated queue (#328).
+func (svc *service) ListCrossContainer(ctx context.Context, f CrossContainerFilter, p httpkit.CursorParams) (httpkit.CursorResult[LoadingException], error) {
+	cur, err := p.Decoded()
+	if err != nil {
+		return httpkit.CursorResult[LoadingException]{}, domain.NewBizError(domain.ErrInvalidInput, err.Error())
+	}
+	rows, err := svc.s.selectCrossContainerKeyset(ctx, f, cur, p.Limit+1)
+	if err != nil {
+		return httpkit.CursorResult[LoadingException]{}, err
+	}
+	return httpkit.NewCursorResult(rows, p.Limit, func(r LoadingException) httpkit.Cursor {
+		return httpkit.Cursor{Ts: r.CreatedAt, ID: r.ID}
+	}), nil
+}
+
+// CrossContainerSummary returns the pinned-counter projection.
+func (svc *service) CrossContainerSummary(ctx context.Context, f CrossContainerFilter) (CrossContainerSummary, error) {
+	return svc.s.crossContainerSummary(ctx, f)
 }
 
 func (svc *service) Get(ctx context.Context, id uuid.UUID) (LoadingException, error) {
@@ -293,6 +366,64 @@ func (svc *service) logAudit(ctx context.Context, in AuditInput) {
 	if err := svc.audit.LogException(ctx, in); err != nil {
 		slog.Warn("loading_exception: audit write failed",
 			"action", in.Action, "exception_id", in.ExceptionID, "err", err)
+	}
+}
+
+func (svc *service) notifyCreated(ctx context.Context, row LoadingException) {
+	if svc.notifier == nil {
+		return
+	}
+	if err := svc.notifier.NotifyCreated(ctx, NotifyCreatedInput{
+		ExceptionID:   row.ID,
+		ContainerID:   row.ContainerID,
+		ExceptionType: row.ExceptionType,
+	}); err != nil {
+		slog.Warn("loading_exception: notify CREATED failed",
+			"exception_id", row.ID, "err", err)
+	}
+}
+
+func (svc *service) notifyApproved(ctx context.Context, row LoadingException, resolution string) {
+	if svc.notifier == nil {
+		return
+	}
+	if err := svc.notifier.NotifyApproved(ctx, NotifyApprovedInput{
+		ExceptionID: row.ID,
+		ContainerID: row.ContainerID,
+		Resolution:  resolution,
+	}); err != nil {
+		slog.Warn("loading_exception: notify APPROVED failed",
+			"exception_id", row.ID, "err", err)
+	}
+}
+
+func (svc *service) notifyRejected(ctx context.Context, row LoadingException) {
+	if svc.notifier == nil {
+		return
+	}
+	if err := svc.notifier.NotifyRejected(ctx, NotifyRejectedInput{
+		ExceptionID: row.ID,
+		ContainerID: row.ContainerID,
+	}); err != nil {
+		slog.Warn("loading_exception: notify REJECTED failed",
+			"exception_id", row.ID, "err", err)
+	}
+}
+
+// classifyBulkError maps domain sentinel errors to short codes the FE can
+// switch on without parsing free-text messages.
+func classifyBulkError(err error) string {
+	switch {
+	case errors.Is(err, domain.ErrNotFound):
+		return "NOT_FOUND"
+	case errors.Is(err, domain.ErrInvalidTransition):
+		return "INVALID_TRANSITION"
+	case errors.Is(err, domain.ErrInvalidInput):
+		return "INVALID_INPUT"
+	case errors.Is(err, domain.ErrPreconditionFailed):
+		return "PRECONDITION_FAILED"
+	default:
+		return "INTERNAL"
 	}
 }
 

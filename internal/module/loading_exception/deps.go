@@ -77,3 +77,33 @@ type AuditInput struct {
 	ActorID       uuid.UUID
 	Notes         string
 }
+
+// ExceptionNotifier fires SSE events after a loading_exception row lands or
+// transitions state (#329). Best-effort: a non-nil error is logged via
+// slog.Warn but never aborts the business write.
+//
+// Implementation lives in cmd/server/main.go as a thin adapter over
+// events.Publisher so the loading_exception module does not depend on the
+// events package directly.
+type ExceptionNotifier interface {
+	NotifyCreated(ctx context.Context, in NotifyCreatedInput) error
+	NotifyApproved(ctx context.Context, in NotifyApprovedInput) error
+	NotifyRejected(ctx context.Context, in NotifyRejectedInput) error
+}
+
+type NotifyCreatedInput struct {
+	ExceptionID   uuid.UUID
+	ContainerID   uuid.UUID
+	ExceptionType string
+}
+
+type NotifyApprovedInput struct {
+	ExceptionID uuid.UUID
+	ContainerID uuid.UUID
+	Resolution  string
+}
+
+type NotifyRejectedInput struct {
+	ExceptionID uuid.UUID
+	ContainerID uuid.UUID
+}
