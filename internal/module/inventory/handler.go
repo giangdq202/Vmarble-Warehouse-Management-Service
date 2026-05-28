@@ -25,6 +25,12 @@ func (h *Handler) Register(rg *gin.RouterGroup) {
 	inv.POST("/lots", auth.RequireRole(auth.RoleWarehouse, auth.RoleAdmin), h.receiveStock)
 	inv.GET("/lots", h.listLots)
 	inv.DELETE("/lots/:id", auth.RequireRole(auth.RoleWarehouse, auth.RoleAdmin), h.deleteLot)
+	inv.POST("/lots/:id/qc-pass", auth.RequireWorkerUp(), h.qcPassLot)
+	inv.POST("/lots/:id/reject", auth.RequireWorkerUp(), h.rejectLot)
+	inv.GET("/material-rejections", auth.RequireWorkerUp(), h.listRejections)
+	inv.GET("/material-rejections/:id", auth.RequireWorkerUp(), h.getRejection)
+	inv.PATCH("/material-rejections/:id", auth.RequireRole(auth.RoleAccountant, auth.RoleAdmin), h.updateRejectionClaim)
+	inv.GET("/reports/rejections", auth.RequireRole(auth.RoleAccountant, auth.RoleAdmin), h.rejectionReport)
 	inv.GET("/overflow-status", h.getOverflowStatus)
 	inv.GET("/sheets", h.listSheets)
 	inv.GET("/sheets/:id", h.getSheet)
@@ -923,4 +929,221 @@ func (h *Handler) getPickSlipPDF(c *gin.Context) {
 	}
 	c.Header("Content-Disposition", "inline; filename=pick-slip-"+id.String()+".pdf")
 	c.Data(http.StatusOK, "application/pdf", pdf)
+}
+
+// ── BR-INV01..06: Material rejection + supplier claim ───────────────────────
+
+// qcPassLot godoc
+//
+// @Summary      QC-pass an inventory lot (transition all PENDING_QC sheets to AVAILABLE)
+// @Tags         inventory
+// @Produce      json
+// @Param        id   path      string  true  "lot id (uuid)"
+// @Security     BearerAuth
+// @Success      204
+// @Failure      400  {object}  map[string]string
+// @Failure      404  {object}  map[string]string
+// @Failure      412  {object}  map[string]string
+// @Router       /api/v1/inventory/lots/{id}/qc-pass [post]
+func (h *Handler) qcPassLot(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+	actorID, ok := actorIDFromContext(c)
+	if !ok {
+		return
+	}
+	if err := h.svc.QCPassLot(c.Request.Context(), id, actorID); err != nil {
+		httpkit.Error(c, err)
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
+// rejectLot godoc
+//
+// @Summary      Reject part or all of an inventory lot
+// @Description  Transitions up to rejected_qty_sheets PENDING_QC sheets to REJECTED
+// @Description  and creates a material_rejections row. (BR-INV02/03/04)
+// @Tags         inventory
+// @Accept       json
+// @Produce      json
+// @Param        id    path      string          true  "lot id (uuid)"
+// @Param        body  body      RejectLotInput  true  "payload"
+// @Security     BearerAuth
+// @Success      201   {object}  RejectLotResult
+// @Failure      400   {object}  map[string]string
+// @Failure      412   {object}  map[string]string
+// @Router       /api/v1/inventory/lots/{id}/reject [post]
+func (h *Handler) rejectLot(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+	var in RejectLotInput
+	if !httpkit.Bind(c, &in) {
+		return
+	}
+	actorID, ok := actorIDFromContext(c)
+	if !ok {
+		return
+	}
+	in.LotID = id
+	in.ActorID = actorID
+	res, err := h.svc.RejectLot(c.Request.Context(), in)
+	if err != nil {
+		httpkit.Error(c, err)
+		return
+	}
+	c.JSON(http.StatusCreated, res)
+}
+
+// listRejections godoc
+//
+// @Summary      List material rejections (keyset paginated)
+// @Tags         inventory
+// @Produce      json
+// @Param        claim_status  query     string  false  "filter by claim_status (OPEN|APPROVED|REJECTED|PAID)"
+// @Param        lot_id        query     string  false  "filter by lot id (uuid)"
+// @Param        cursor        query     string  false  "opaque cursor token; omit for first page"
+// @Param        limit         query     int     false  "page size (default 50, max 200)"
+// @Security     BearerAuth
+// @Success      200  {object}  httpkit.CursorResult[inventory.MaterialRejection]
+// @Router       /api/v1/inventory/material-rejections [get]
+func (h *Handler) listRejections(c *gin.Context) {
+	f := RejectionFilter{ClaimStatus: c.Query("claim_status")}
+	if lotStr := c.Query("lot_id"); lotStr != "" {
+		parsed, err := uuid.Parse(lotStr)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid lot_id"})
+			return
+		}
+		f.LotID = &parsed
+	}
+	params := httpkit.BindCursorParams(c)
+	res, err := h.svc.ListRejections(c.Request.Context(), f, params)
+	if err != nil {
+		httpkit.Error(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, res)
+}
+
+// getRejection godoc
+//
+// @Summary      Get a single material rejection
+// @Tags         inventory
+// @Produce      json
+// @Param        id   path      string  true  "rejection id (uuid)"
+// @Security     BearerAuth
+// @Success      200  {object}  MaterialRejection
+// @Failure      404  {object}  map[string]string
+// @Router       /api/v1/inventory/material-rejections/{id} [get]
+func (h *Handler) getRejection(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+	r, err := h.svc.GetRejection(c.Request.Context(), id)
+	if err != nil {
+		httpkit.Error(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, r)
+}
+
+// updateRejectionClaim godoc
+//
+// @Summary      Update a material rejection's claim status
+// @Description  Allowed transitions: OPEN→APPROVED, OPEN→REJECTED, APPROVED→PAID. (BR-INV05)
+// @Tags         inventory
+// @Accept       json
+// @Produce      json
+// @Param        id    path      string            true  "rejection id (uuid)"
+// @Param        body  body      UpdateClaimInput  true  "payload"
+// @Security     BearerAuth
+// @Success      200   {object}  MaterialRejection
+// @Failure      400   {object}  map[string]string
+// @Failure      404   {object}  map[string]string
+// @Failure      409   {object}  map[string]string
+// @Router       /api/v1/inventory/material-rejections/{id} [patch]
+func (h *Handler) updateRejectionClaim(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+	var in UpdateClaimInput
+	if !httpkit.Bind(c, &in) {
+		return
+	}
+	actorID, ok := actorIDFromContext(c)
+	if !ok {
+		return
+	}
+	in.RejectionID = id
+	in.ActorID = actorID
+	r, err := h.svc.UpdateRejectionClaim(c.Request.Context(), in)
+	if err != nil {
+		httpkit.Error(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, r)
+}
+
+// rejectionReport godoc
+//
+// @Summary      Aggregate material-rejection totals by supplier (BR-INV06)
+// @Tags         inventory
+// @Produce      json
+// @Param        from          query     string  false  "RFC3339 lower bound on reported_at (inclusive)"
+// @Param        to            query     string  false  "RFC3339 upper bound on reported_at (exclusive)"
+// @Param        supplier_ref  query     string  false  "case-insensitive supplier filter"
+// @Security     BearerAuth
+// @Success      200  {array}   RejectionReport
+// @Router       /api/v1/inventory/reports/rejections [get]
+func (h *Handler) rejectionReport(c *gin.Context) {
+	f := RejectionReportFilter{SupplierRef: c.Query("supplier_ref")}
+	if fromStr := c.Query("from"); fromStr != "" {
+		t, err := time.Parse(time.RFC3339, fromStr)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid from (expected RFC3339)"})
+			return
+		}
+		f.From = t
+	}
+	if toStr := c.Query("to"); toStr != "" {
+		t, err := time.Parse(time.RFC3339, toStr)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid to (expected RFC3339)"})
+			return
+		}
+		f.To = t
+	}
+	rows, err := h.svc.RejectionReport(c.Request.Context(), f)
+	if err != nil {
+		httpkit.Error(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, rows)
+}
+
+// actorIDFromContext extracts the auth identity actor uuid; writes a 401 and
+// returns ok=false if missing/invalid.
+func actorIDFromContext(c *gin.Context) (uuid.UUID, bool) {
+	identity, ok := auth.FromContext(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "missing auth identity"})
+		return uuid.Nil, false
+	}
+	id, err := uuid.Parse(identity.UserID)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid auth identity"})
+		return uuid.Nil, false
+	}
+	return id, true
 }

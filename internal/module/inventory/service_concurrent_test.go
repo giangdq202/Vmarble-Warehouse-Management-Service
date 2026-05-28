@@ -210,6 +210,25 @@ func (s *concurrentMockStore) markRemnantWasteAtomically(_ context.Context, remn
 func (s *concurrentMockStore) releaseExpiredAllocations(_ context.Context, _ time.Time) (int64, error) {
 	return 0, nil
 }
+
+func (s *concurrentMockStore) qcPassLotAtomically(_ context.Context, _ uuid.UUID) (int, error) {
+	return 0, nil
+}
+func (s *concurrentMockStore) rejectLotAtomically(_ context.Context, _ rejectLotOp) ([]uuid.UUID, error) {
+	return nil, nil
+}
+func (s *concurrentMockStore) selectRejectionByID(_ context.Context, _ uuid.UUID) (MaterialRejection, error) {
+	return MaterialRejection{}, nil
+}
+func (s *concurrentMockStore) selectRejectionsKeyset(_ context.Context, _ RejectionFilter, _ httpkit.Cursor, _ int) ([]MaterialRejection, error) {
+	return nil, nil
+}
+func (s *concurrentMockStore) updateRejectionClaim(_ context.Context, _ updateClaimRow) (MaterialRejection, error) {
+	return MaterialRejection{}, nil
+}
+func (s *concurrentMockStore) selectRejectionReport(_ context.Context, _ RejectionReportFilter) ([]RejectionReport, error) {
+	return nil, nil
+}
 func (s *concurrentMockStore) updateRemnantBinLocation(_ context.Context, _ uuid.UUID, _ uuid.UUID) error {
 	return nil
 }

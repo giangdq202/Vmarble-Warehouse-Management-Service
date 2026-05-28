@@ -106,6 +106,24 @@ type mockStore struct {
 	releaseExpiredAllocationsResult int64
 	releaseExpiredAllocationsErr    error
 
+	// BR-INV01..06: QC + supplier claim
+	qcPassLotResult       int
+	qcPassLotErr          error
+	rejectLotCalled       bool
+	rejectLotOp           rejectLotOp
+	rejectLotResult       []uuid.UUID
+	rejectLotErr          error
+	selectRejectionResult MaterialRejection
+	selectRejectionErr    error
+	listRejectionsResult  []MaterialRejection
+	listRejectionsFilter  RejectionFilter
+	listRejectionsErr     error
+	updateClaimRow        updateClaimRow
+	updateClaimResult     MaterialRejection
+	updateClaimErr        error
+	rejectionReportResult []RejectionReport
+	rejectionReportErr    error
+
 	// selectTopRemnantSuggestions
 	selectTopRemnantSuggestionsResult []RemnantSuggestion
 	selectTopRemnantSuggestionsErr    error
@@ -219,6 +237,34 @@ func (m *mockStore) preAssignSheet(_ context.Context, _ uuid.UUID, _ uuid.UUID) 
 }
 func (m *mockStore) releaseExpiredAllocations(_ context.Context, _ time.Time) (int64, error) {
 	return m.releaseExpiredAllocationsResult, m.releaseExpiredAllocationsErr
+}
+
+// ── BR-INV01..06 stubs (overridden per-test as needed) ──────────────────────
+
+func (m *mockStore) qcPassLotAtomically(_ context.Context, _ uuid.UUID) (int, error) {
+	return m.qcPassLotResult, m.qcPassLotErr
+}
+func (m *mockStore) rejectLotAtomically(_ context.Context, op rejectLotOp) ([]uuid.UUID, error) {
+	m.rejectLotCalled = true
+	m.rejectLotOp = op
+	return m.rejectLotResult, m.rejectLotErr
+}
+func (m *mockStore) selectRejectionByID(_ context.Context, id uuid.UUID) (MaterialRejection, error) {
+	if m.selectRejectionResult.ID == uuid.Nil {
+		m.selectRejectionResult.ID = id
+	}
+	return m.selectRejectionResult, m.selectRejectionErr
+}
+func (m *mockStore) selectRejectionsKeyset(_ context.Context, f RejectionFilter, _ httpkit.Cursor, _ int) ([]MaterialRejection, error) {
+	m.listRejectionsFilter = f
+	return m.listRejectionsResult, m.listRejectionsErr
+}
+func (m *mockStore) updateRejectionClaim(_ context.Context, in updateClaimRow) (MaterialRejection, error) {
+	m.updateClaimRow = in
+	return m.updateClaimResult, m.updateClaimErr
+}
+func (m *mockStore) selectRejectionReport(_ context.Context, _ RejectionReportFilter) ([]RejectionReport, error) {
+	return m.rejectionReportResult, m.rejectionReportErr
 }
 func (m *mockStore) insertCuttingRecord(_ context.Context, _ CuttingRecord) error {
 	return m.insertCuttingRecordErr
@@ -1660,8 +1706,8 @@ func TestReceiveStock_SheetsAreAvailableAndLinkedToLot(t *testing.T) {
 		t.Fatalf("expected 4 sheets, got %d", len(capturedSheets))
 	}
 	for i, sh := range capturedSheets {
-		if sh.Status != "AVAILABLE" {
-			t.Errorf("sheet[%d].Status = %q, want AVAILABLE", i, sh.Status)
+		if sh.Status != SheetStatusPendingQC {
+			t.Errorf("sheet[%d].Status = %q, want PENDING_QC (BR-INV01)", i, sh.Status)
 		}
 		if sh.LotID != lot.ID {
 			t.Errorf("sheet[%d].LotID = %v, want lot.ID %v", i, sh.LotID, lot.ID)
@@ -4957,5 +5003,227 @@ func TestRecordCut_ValidationFails_NotifierNotCalled(t *testing.T) {
 	}
 	if len(notifier.calls) != 0 {
 		t.Errorf("notifier must not fire on validation failure, got %v", notifier.calls)
+	}
+}
+
+// ── BR-INV01..06: Material rejection + supplier claim ───────────────────────
+
+func TestQCPassLot_HappyPath_TransitionsAndAudits(t *testing.T) {
+	st := &mockStore{qcPassLotResult: 5}
+	svc := NewService(st, nil).(*service)
+
+	lotID := uuid.New()
+	actorID := uuid.New()
+	if err := svc.QCPassLot(context.Background(), lotID, actorID); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !st.insertAuditLogCalled {
+		t.Fatal("expected audit log to be written for qc-pass")
+	}
+	if st.insertAuditLogEntry.Action != auditActionLotQCPass {
+		t.Errorf("audit action = %q, want %q", st.insertAuditLogEntry.Action, auditActionLotQCPass)
+	}
+	if st.insertAuditLogEntry.EntityID != lotID {
+		t.Errorf("audit entity_id = %v, want lot %v", st.insertAuditLogEntry.EntityID, lotID)
+	}
+}
+
+func TestQCPassLot_NoPendingSheets_ReturnsPreconditionFailed(t *testing.T) {
+	st := &mockStore{qcPassLotResult: 0}
+	svc := NewService(st, nil).(*service)
+
+	err := svc.QCPassLot(context.Background(), uuid.New(), uuid.New())
+	if !errors.Is(err, domain.ErrPreconditionFailed) {
+		t.Fatalf("err = %v, want ErrPreconditionFailed", err)
+	}
+}
+
+func TestRejectLot_HappyPath_PartialReject(t *testing.T) {
+	rejectedIDs := []uuid.UUID{uuid.New(), uuid.New()}
+	st := &mockStore{rejectLotResult: rejectedIDs}
+	svc := NewService(st, nil).(*service)
+
+	lotID := uuid.New()
+	actorID := uuid.New()
+	res, err := svc.RejectLot(context.Background(), RejectLotInput{
+		LotID:             lotID,
+		ReasonCode:        RejectionReasonCrack,
+		ReasonDetail:      "edge chipped on 2 sheets",
+		RejectedQtySheets: 2,
+		ActorID:           actorID,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !st.rejectLotCalled {
+		t.Fatal("expected rejectLotAtomically to be called")
+	}
+	if st.rejectLotOp.Qty != 2 {
+		t.Errorf("op.Qty = %d, want 2", st.rejectLotOp.Qty)
+	}
+	if st.rejectLotOp.LotID != lotID {
+		t.Errorf("op.LotID = %v, want %v", st.rejectLotOp.LotID, lotID)
+	}
+	if got := st.rejectLotOp.Rejection; got.ClaimStatus != ClaimStatusOpen {
+		t.Errorf("rejection.ClaimStatus = %q, want OPEN", got.ClaimStatus)
+	}
+	if len(res.RejectedSheetIDs) != 2 {
+		t.Errorf("rejected sheet ids = %d, want 2", len(res.RejectedSheetIDs))
+	}
+	if res.Rejection.ReasonCode != RejectionReasonCrack {
+		t.Errorf("rejection.ReasonCode = %q, want CRACK", res.Rejection.ReasonCode)
+	}
+}
+
+func TestRejectLot_InvalidReasonCode_IsInvalidInput(t *testing.T) {
+	st := &mockStore{}
+	svc := NewService(st, nil).(*service)
+
+	_, err := svc.RejectLot(context.Background(), RejectLotInput{
+		LotID:             uuid.New(),
+		ReasonCode:        "BOGUS",
+		RejectedQtySheets: 1,
+		ActorID:           uuid.New(),
+	})
+	if !errors.Is(err, domain.ErrInvalidInput) {
+		t.Fatalf("err = %v, want ErrInvalidInput", err)
+	}
+	if st.rejectLotCalled {
+		t.Fatal("rejectLotAtomically must not be called on validation failure")
+	}
+}
+
+func TestRejectLot_ZeroQty_IsInvalidInput(t *testing.T) {
+	st := &mockStore{}
+	svc := NewService(st, nil).(*service)
+
+	_, err := svc.RejectLot(context.Background(), RejectLotInput{
+		LotID:             uuid.New(),
+		ReasonCode:        RejectionReasonDamage,
+		RejectedQtySheets: 0,
+		ActorID:           uuid.New(),
+	})
+	if !errors.Is(err, domain.ErrInvalidInput) {
+		t.Fatalf("err = %v, want ErrInvalidInput", err)
+	}
+}
+
+func TestUpdateRejectionClaim_OpenToApproved_WritesResolvedFields(t *testing.T) {
+	rejectionID := uuid.New()
+	lotID := uuid.New()
+	st := &mockStore{
+		selectRejectionResult: MaterialRejection{
+			ID:          rejectionID,
+			LotID:       lotID,
+			ClaimStatus: ClaimStatusOpen,
+		},
+		updateClaimResult: MaterialRejection{ID: rejectionID, ClaimStatus: ClaimStatusApproved},
+	}
+	svc := NewService(st, nil).(*service)
+
+	amount := int64(1_500_000)
+	got, err := svc.UpdateRejectionClaim(context.Background(), UpdateClaimInput{
+		RejectionID:   rejectionID,
+		ClaimStatus:   ClaimStatusApproved,
+		ClaimAmount:   &amount,
+		ClaimCurrency: "VND",
+		ActorID:       uuid.New(),
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got.ClaimStatus != ClaimStatusApproved {
+		t.Errorf("claim_status = %q, want APPROVED", got.ClaimStatus)
+	}
+	if st.updateClaimRow.ResolvedBy == nil || st.updateClaimRow.ResolvedAt == nil {
+		t.Errorf("expected resolved_by and resolved_at to be set; got %+v", st.updateClaimRow)
+	}
+}
+
+func TestUpdateRejectionClaim_ApprovedToPaid_HappyPath(t *testing.T) {
+	rejectionID := uuid.New()
+	st := &mockStore{
+		selectRejectionResult: MaterialRejection{
+			ID: rejectionID, ClaimStatus: ClaimStatusApproved,
+		},
+		updateClaimResult: MaterialRejection{ID: rejectionID, ClaimStatus: ClaimStatusPaid},
+	}
+	svc := NewService(st, nil).(*service)
+
+	amount := int64(2_000_000)
+	got, err := svc.UpdateRejectionClaim(context.Background(), UpdateClaimInput{
+		RejectionID:   rejectionID,
+		ClaimStatus:   ClaimStatusPaid,
+		ClaimAmount:   &amount,
+		ClaimCurrency: "VND",
+		ActorID:       uuid.New(),
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got.ClaimStatus != ClaimStatusPaid {
+		t.Errorf("claim_status = %q, want PAID", got.ClaimStatus)
+	}
+}
+
+func TestUpdateRejectionClaim_OpenToPaid_IsInvalidTransition(t *testing.T) {
+	rejectionID := uuid.New()
+	st := &mockStore{
+		selectRejectionResult: MaterialRejection{
+			ID: rejectionID, ClaimStatus: ClaimStatusOpen,
+		},
+	}
+	svc := NewService(st, nil).(*service)
+
+	amount := int64(2_000_000)
+	_, err := svc.UpdateRejectionClaim(context.Background(), UpdateClaimInput{
+		RejectionID:   rejectionID,
+		ClaimStatus:   ClaimStatusPaid,
+		ClaimAmount:   &amount,
+		ClaimCurrency: "VND",
+		ActorID:       uuid.New(),
+	})
+	if !errors.Is(err, domain.ErrInvalidTransition) {
+		t.Fatalf("err = %v, want ErrInvalidTransition", err)
+	}
+}
+
+func TestUpdateRejectionClaim_ApprovedWithoutAmount_IsInvalidInput(t *testing.T) {
+	rejectionID := uuid.New()
+	st := &mockStore{
+		selectRejectionResult: MaterialRejection{
+			ID: rejectionID, ClaimStatus: ClaimStatusOpen,
+		},
+	}
+	svc := NewService(st, nil).(*service)
+
+	_, err := svc.UpdateRejectionClaim(context.Background(), UpdateClaimInput{
+		RejectionID: rejectionID,
+		ClaimStatus: ClaimStatusApproved,
+		ActorID:     uuid.New(),
+	})
+	if !errors.Is(err, domain.ErrInvalidInput) {
+		t.Fatalf("err = %v, want ErrInvalidInput", err)
+	}
+}
+
+func TestUpdateRejectionClaim_OpenToRejected_HappyPath(t *testing.T) {
+	rejectionID := uuid.New()
+	st := &mockStore{
+		selectRejectionResult: MaterialRejection{ID: rejectionID, ClaimStatus: ClaimStatusOpen},
+		updateClaimResult:     MaterialRejection{ID: rejectionID, ClaimStatus: ClaimStatusRejected},
+	}
+	svc := NewService(st, nil).(*service)
+
+	got, err := svc.UpdateRejectionClaim(context.Background(), UpdateClaimInput{
+		RejectionID: rejectionID,
+		ClaimStatus: ClaimStatusRejected,
+		ActorID:     uuid.New(),
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got.ClaimStatus != ClaimStatusRejected {
+		t.Errorf("claim_status = %q, want REJECTED", got.ClaimStatus)
 	}
 }

@@ -116,6 +116,42 @@ type store interface {
 	// older than `before` back to AVAILABLE (allocated_to_wo_id and allocated_at
 	// are cleared). Returns the number of rows updated.
 	releaseExpiredAllocations(ctx context.Context, before time.Time) (int64, error)
+
+	// ── BR-INV01..06: QC + supplier claim ────────────────────────────────
+
+	// qcPassLotAtomically transitions every PENDING_QC sheet of the lot to
+	// AVAILABLE inside a single transaction. Returns the number of rows
+	// updated.
+	qcPassLotAtomically(ctx context.Context, lotID uuid.UUID) (int, error)
+
+	// rejectLotAtomically transitions up to qty PENDING_QC sheets of the lot
+	// to REJECTED and inserts the rejection row inside one transaction.
+	// Returns the rejected sheet IDs (in deterministic id order). Fails with
+	// ErrPreconditionFailed if fewer than qty PENDING_QC sheets remain.
+	rejectLotAtomically(ctx context.Context, op rejectLotOp) ([]uuid.UUID, error)
+
+	selectRejectionByID(ctx context.Context, id uuid.UUID) (MaterialRejection, error)
+	selectRejectionsKeyset(ctx context.Context, f RejectionFilter, cur httpkit.Cursor, limit int) ([]MaterialRejection, error)
+	updateRejectionClaim(ctx context.Context, in updateClaimRow) (MaterialRejection, error)
+	selectRejectionReport(ctx context.Context, f RejectionReportFilter) ([]RejectionReport, error)
+}
+
+// rejectLotOp carries everything needed for the atomic reject transition.
+type rejectLotOp struct {
+	LotID     uuid.UUID
+	Qty       int
+	Rejection MaterialRejection
+}
+
+// updateClaimRow is the post-validation payload handed to the store.
+type updateClaimRow struct {
+	RejectionID     uuid.UUID
+	ClaimStatus     string
+	ClaimAmount     *int64
+	ClaimCurrency   string
+	ResolutionNotes string
+	ResolvedBy      *uuid.UUID
+	ResolvedAt      *time.Time
 }
 
 // cutWriteOp carries the pre-validated, ready-to-persist data for a single cut

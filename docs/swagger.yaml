@@ -110,6 +110,17 @@ definitions:
       next_cursor:
         type: string
     type: object
+  ? github_com_vmarble_warehouse-management-service_internal_platform_httpkit.CursorResult-internal_module_inventory_MaterialRejection
+  : properties:
+      has_more:
+        type: boolean
+      items:
+        items:
+          $ref: '#/definitions/internal_module_inventory.MaterialRejection'
+        type: array
+      next_cursor:
+        type: string
+    type: object
   ? github_com_vmarble_warehouse-management-service_internal_platform_httpkit.CursorResult-internal_module_loading_exception_LoadingException
   : properties:
       has_more:
@@ -1460,6 +1471,39 @@ definitions:
       supplier_ref:
         type: string
     type: object
+  internal_module_inventory.MaterialRejection:
+    properties:
+      claim_amount:
+        type: integer
+      claim_currency:
+        type: string
+      claim_status:
+        type: string
+      id:
+        type: string
+      lot_id:
+        type: string
+      photo_urls:
+        items:
+          type: string
+        type: array
+      reason_code:
+        type: string
+      reason_detail:
+        type: string
+      rejected_qty_sheets:
+        type: integer
+      reported_at:
+        type: string
+      reported_by:
+        type: string
+      resolution_notes:
+        type: string
+      resolved_at:
+        type: string
+      resolved_by:
+        type: string
+    type: object
   internal_module_inventory.OverflowLevel:
     enum:
     - GREEN
@@ -1530,6 +1574,49 @@ definitions:
         $ref: '#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.Dimension'
       work_order_id:
         type: string
+    type: object
+  internal_module_inventory.RejectLotInput:
+    properties:
+      photo_urls:
+        items:
+          type: string
+        type: array
+      reason_code:
+        type: string
+      reason_detail:
+        type: string
+      rejected_qty_sheets:
+        type: integer
+    type: object
+  internal_module_inventory.RejectLotResult:
+    properties:
+      rejected_sheet_ids:
+        items:
+          type: string
+        type: array
+      rejection:
+        $ref: '#/definitions/internal_module_inventory.MaterialRejection'
+    type: object
+  internal_module_inventory.RejectionReport:
+    properties:
+      approved_amount:
+        type: integer
+      approved_count:
+        type: integer
+      open_amount:
+        type: integer
+      open_count:
+        type: integer
+      paid_amount:
+        type: integer
+      paid_count:
+        type: integer
+      rejected_count:
+        type: integer
+      supplier_ref:
+        type: string
+      total_rejections:
+        type: integer
     type: object
   internal_module_inventory.Remnant:
     properties:
@@ -1614,6 +1701,17 @@ definitions:
       from_location:
         type: string
       to_location:
+        type: string
+    type: object
+  internal_module_inventory.UpdateClaimInput:
+    properties:
+      claim_amount:
+        type: integer
+      claim_currency:
+        type: string
+      claim_status:
+        type: string
+      resolution_notes:
         type: string
     type: object
   internal_module_loading_exception.LoadingException:
@@ -5008,6 +5106,189 @@ paths:
       summary: Deactivate inventory lot (soft delete)
       tags:
       - inventory
+  /api/v1/inventory/lots/{id}/qc-pass:
+    post:
+      parameters:
+      - description: lot id (uuid)
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "204":
+          description: No Content
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "412":
+          description: Precondition Failed
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: QC-pass an inventory lot (transition all PENDING_QC sheets to AVAILABLE)
+      tags:
+      - inventory
+  /api/v1/inventory/lots/{id}/reject:
+    post:
+      consumes:
+      - application/json
+      description: |-
+        Transitions up to rejected_qty_sheets PENDING_QC sheets to REJECTED
+        and creates a material_rejections row. (BR-INV02/03/04)
+      parameters:
+      - description: lot id (uuid)
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: payload
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_module_inventory.RejectLotInput'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/internal_module_inventory.RejectLotResult'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "412":
+          description: Precondition Failed
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Reject part or all of an inventory lot
+      tags:
+      - inventory
+  /api/v1/inventory/material-rejections:
+    get:
+      parameters:
+      - description: filter by claim_status (OPEN|APPROVED|REJECTED|PAID)
+        in: query
+        name: claim_status
+        type: string
+      - description: filter by lot id (uuid)
+        in: query
+        name: lot_id
+        type: string
+      - description: opaque cursor token; omit for first page
+        in: query
+        name: cursor
+        type: string
+      - description: page size (default 50, max 200)
+        in: query
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_vmarble_warehouse-management-service_internal_platform_httpkit.CursorResult-internal_module_inventory_MaterialRejection'
+      security:
+      - BearerAuth: []
+      summary: List material rejections (keyset paginated)
+      tags:
+      - inventory
+  /api/v1/inventory/material-rejections/{id}:
+    get:
+      parameters:
+      - description: rejection id (uuid)
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_module_inventory.MaterialRejection'
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Get a single material rejection
+      tags:
+      - inventory
+    patch:
+      consumes:
+      - application/json
+      description: 'Allowed transitions: OPEN→APPROVED, OPEN→REJECTED, APPROVED→PAID.
+        (BR-INV05)'
+      parameters:
+      - description: rejection id (uuid)
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: payload
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_module_inventory.UpdateClaimInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_module_inventory.MaterialRejection'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "409":
+          description: Conflict
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Update a material rejection's claim status
+      tags:
+      - inventory
   /api/v1/inventory/overflow-status:
     get:
       produces:
@@ -5340,6 +5621,35 @@ paths:
       security:
       - BearerAuth: []
       summary: Suggest best-fit remnants for a required dimension
+      tags:
+      - inventory
+  /api/v1/inventory/reports/rejections:
+    get:
+      parameters:
+      - description: RFC3339 lower bound on reported_at (inclusive)
+        in: query
+        name: from
+        type: string
+      - description: RFC3339 upper bound on reported_at (exclusive)
+        in: query
+        name: to
+        type: string
+      - description: case-insensitive supplier filter
+        in: query
+        name: supplier_ref
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/internal_module_inventory.RejectionReport'
+            type: array
+      security:
+      - BearerAuth: []
+      summary: Aggregate material-rejection totals by supplier (BR-INV06)
       tags:
       - inventory
   /api/v1/inventory/sheets:

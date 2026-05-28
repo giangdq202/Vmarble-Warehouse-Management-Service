@@ -84,8 +84,9 @@ func (s *service) ReceiveStock(ctx context.Context, in ReceiveStockInput) (Inven
 			LotID:        lot.ID,
 			Dimensions:   in.Dimensions,
 			CostPerSheet: in.CostPerSheet,
-			Status:       "AVAILABLE",
-			LotBatch:     lotBatch,
+			// BR-INV01: every newly received sheet starts in PENDING_QC.
+			Status:   SheetStatusPendingQC,
+			LotBatch: lotBatch,
 		}
 	}
 	if err := s.st.insertSheets(ctx, sheets); err != nil {
@@ -527,6 +528,7 @@ const (
 	entityTypeRemnant    = "REMNANT"
 	entityTypeBoardSheet = "BOARD_SHEET"
 	entityTypeWorkOrder  = "WORK_ORDER"
+	entityTypeLot        = "INVENTORY_LOT"
 	auditActionTransfer  = "TRANSFER"
 	auditActionAdjust    = "ADJUSTMENT"
 	// auditActionOverflowBypassed is written when an authorised caller pre-assigns
@@ -536,6 +538,10 @@ const (
 	// least one matching remnant suggestion but the planner did not allocate
 	// any remnant to the work order (BR-K05).
 	auditActionRemnantBypassed = "REMNANT_BYPASSED"
+	// QC + supplier-claim audit actions (BR-INV01..05).
+	auditActionLotQCPass        = "LOT_QC_PASS"
+	auditActionLotReject        = "LOT_REJECT"
+	auditActionClaimTransition  = "CLAIM_TRANSITION"
 )
 
 func (s *service) Transfer(ctx context.Context, in TransferInput) (TransferResult, error) {
@@ -1195,3 +1201,229 @@ func (s *service) GeneratePickSlipPDF(ctx context.Context, workOrderID uuid.UUID
 	}
 	return buf.Bytes(), nil
 }
+
+// ── BR-INV01..06: Material rejection + supplier claim ───────────────────────
+
+// validRejectionReasons mirrors the CHECK constraint in migrations/00059.
+var validRejectionReasons = map[string]struct{}{
+	RejectionReasonCrack:         {},
+	RejectionReasonColorMismatch: {},
+	RejectionReasonLateDelivery:  {},
+	RejectionReasonDamage:        {},
+	RejectionReasonWrongSpec:     {},
+	RejectionReasonOther:         {},
+}
+
+// QCPassLot transitions every PENDING_QC sheet of the lot to AVAILABLE.
+// (BR-INV02)
+func (s *service) QCPassLot(ctx context.Context, lotID uuid.UUID, actorID uuid.UUID) error {
+	if lotID == uuid.Nil {
+		return domain.NewBizError(domain.ErrInvalidInput, "lot_id is required")
+	}
+	if actorID == uuid.Nil {
+		return domain.NewBizError(domain.ErrInvalidInput, "actor_id is required")
+	}
+	updated, err := s.st.qcPassLotAtomically(ctx, lotID)
+	if err != nil {
+		return err
+	}
+	if updated == 0 {
+		return domain.NewBizError(domain.ErrPreconditionFailed,
+			"lot has no PENDING_QC sheets to pass")
+	}
+	if err := s.st.insertAuditLog(ctx, AuditLogEntry{
+		ID:         uuid.New(),
+		EntityType: entityTypeLot,
+		EntityID:   lotID,
+		Action:     auditActionLotQCPass,
+		ActorID:    actorID,
+		FromStatus: ptrString(SheetStatusPendingQC),
+		ToStatus:   ptrString(SheetStatusAvailable),
+		CreatedAt:  time.Now().UTC(),
+	}); err != nil {
+		slog.Warn("inventory: QCPassLot audit log failed", "lot_id", lotID, "err", err)
+	}
+	return nil
+}
+
+// RejectLot transitions up to RejectedQtySheets PENDING_QC sheets of the lot to
+// REJECTED and creates a material_rejections row. (BR-INV02/03/04)
+func (s *service) RejectLot(ctx context.Context, in RejectLotInput) (RejectLotResult, error) {
+	if in.LotID == uuid.Nil {
+		return RejectLotResult{}, domain.NewBizError(domain.ErrInvalidInput, "lot_id is required")
+	}
+	if in.ActorID == uuid.Nil {
+		return RejectLotResult{}, domain.NewBizError(domain.ErrInvalidInput, "actor_id is required")
+	}
+	if _, ok := validRejectionReasons[in.ReasonCode]; !ok {
+		return RejectLotResult{}, domain.NewBizError(domain.ErrInvalidInput,
+			"reason_code must be one of CRACK, COLOR_MISMATCH, LATE_DELIVERY, DAMAGE, WRONG_SPEC, OTHER")
+	}
+	if in.RejectedQtySheets <= 0 {
+		return RejectLotResult{}, domain.NewBizError(domain.ErrInvalidInput,
+			"rejected_qty_sheets must be positive")
+	}
+
+	rejection := MaterialRejection{
+		ID:                uuid.New(),
+		LotID:             in.LotID,
+		ReasonCode:        in.ReasonCode,
+		ReasonDetail:      in.ReasonDetail,
+		RejectedQtySheets: in.RejectedQtySheets,
+		PhotoURLs:         in.PhotoURLs,
+		ClaimStatus:       ClaimStatusOpen,
+		ReportedBy:        in.ActorID,
+		ReportedAt:        time.Now().UTC(),
+	}
+	if rejection.PhotoURLs == nil {
+		rejection.PhotoURLs = []string{}
+	}
+
+	rejectedIDs, err := s.st.rejectLotAtomically(ctx, rejectLotOp{
+		LotID:     in.LotID,
+		Qty:       in.RejectedQtySheets,
+		Rejection: rejection,
+	})
+	if err != nil {
+		return RejectLotResult{}, err
+	}
+
+	reasonLabel := in.ReasonCode
+	if err := s.st.insertAuditLog(ctx, AuditLogEntry{
+		ID:         uuid.New(),
+		EntityType: entityTypeLot,
+		EntityID:   in.LotID,
+		Action:     auditActionLotReject,
+		ActorID:    in.ActorID,
+		FromStatus: ptrString(SheetStatusPendingQC),
+		ToStatus:   ptrString(SheetStatusRejected),
+		Reason:     &reasonLabel,
+		CreatedAt:  time.Now().UTC(),
+	}); err != nil {
+		slog.Warn("inventory: RejectLot audit log failed", "lot_id", in.LotID, "err", err)
+	}
+
+	return RejectLotResult{Rejection: rejection, RejectedSheetIDs: rejectedIDs}, nil
+}
+
+// ListRejections returns a keyset-paginated list of rejections.
+func (s *service) ListRejections(ctx context.Context, f RejectionFilter, params httpkit.CursorParams) (httpkit.CursorResult[MaterialRejection], error) {
+	if f.ClaimStatus != "" {
+		if !isValidClaimStatus(f.ClaimStatus) {
+			return httpkit.CursorResult[MaterialRejection]{}, domain.NewBizError(domain.ErrInvalidInput,
+				"claim_status must be OPEN, APPROVED, REJECTED, or PAID")
+		}
+	}
+	cur, err := params.Decoded()
+	if err != nil {
+		return httpkit.CursorResult[MaterialRejection]{}, err
+	}
+	rows, err := s.st.selectRejectionsKeyset(ctx, f, cur, params.Limit+1)
+	if err != nil {
+		return httpkit.CursorResult[MaterialRejection]{}, err
+	}
+	return httpkit.NewCursorResult(rows, params.Limit, func(r MaterialRejection) httpkit.Cursor {
+		return httpkit.Cursor{Ts: r.ReportedAt, ID: r.ID}
+	}), nil
+}
+
+// GetRejection returns a single rejection by ID.
+func (s *service) GetRejection(ctx context.Context, id uuid.UUID) (MaterialRejection, error) {
+	return s.st.selectRejectionByID(ctx, id)
+}
+
+// UpdateRejectionClaim transitions the claim status. (BR-INV05)
+func (s *service) UpdateRejectionClaim(ctx context.Context, in UpdateClaimInput) (MaterialRejection, error) {
+	if in.RejectionID == uuid.Nil {
+		return MaterialRejection{}, domain.NewBizError(domain.ErrInvalidInput, "rejection_id is required")
+	}
+	if in.ActorID == uuid.Nil {
+		return MaterialRejection{}, domain.NewBizError(domain.ErrInvalidInput, "actor_id is required")
+	}
+	if !isValidClaimStatus(in.ClaimStatus) {
+		return MaterialRejection{}, domain.NewBizError(domain.ErrInvalidInput,
+			"claim_status must be OPEN, APPROVED, REJECTED, or PAID")
+	}
+
+	current, err := s.st.selectRejectionByID(ctx, in.RejectionID)
+	if err != nil {
+		return MaterialRejection{}, err
+	}
+	if !isAllowedClaimTransition(current.ClaimStatus, in.ClaimStatus) {
+		return MaterialRejection{}, domain.NewBizError(domain.ErrInvalidTransition,
+			fmt.Sprintf("cannot transition claim from %s to %s", current.ClaimStatus, in.ClaimStatus))
+	}
+	if in.ClaimStatus == ClaimStatusApproved || in.ClaimStatus == ClaimStatusPaid {
+		if in.ClaimAmount == nil || *in.ClaimAmount <= 0 {
+			return MaterialRejection{}, domain.NewBizError(domain.ErrInvalidInput,
+				"claim_amount > 0 is required when approving or marking paid")
+		}
+		if in.ClaimCurrency == "" {
+			return MaterialRejection{}, domain.NewBizError(domain.ErrInvalidInput,
+				"claim_currency is required when approving or marking paid")
+		}
+	}
+
+	now := time.Now().UTC()
+	row := updateClaimRow{
+		RejectionID:     in.RejectionID,
+		ClaimStatus:     in.ClaimStatus,
+		ClaimAmount:     in.ClaimAmount,
+		ClaimCurrency:   in.ClaimCurrency,
+		ResolutionNotes: in.ResolutionNotes,
+	}
+	if in.ClaimStatus != ClaimStatusOpen {
+		actor := in.ActorID
+		row.ResolvedBy = &actor
+		row.ResolvedAt = &now
+	}
+
+	updated, err := s.st.updateRejectionClaim(ctx, row)
+	if err != nil {
+		return MaterialRejection{}, err
+	}
+
+	from := current.ClaimStatus
+	to := in.ClaimStatus
+	if err := s.st.insertAuditLog(ctx, AuditLogEntry{
+		ID:         uuid.New(),
+		EntityType: entityTypeLot,
+		EntityID:   current.LotID,
+		Action:     auditActionClaimTransition,
+		ActorID:    in.ActorID,
+		FromStatus: &from,
+		ToStatus:   &to,
+		CreatedAt:  now,
+	}); err != nil {
+		slog.Warn("inventory: UpdateRejectionClaim audit log failed", "rejection_id", in.RejectionID, "err", err)
+	}
+
+	return updated, nil
+}
+
+// RejectionReport aggregates rejection totals per supplier (BR-INV06).
+func (s *service) RejectionReport(ctx context.Context, f RejectionReportFilter) ([]RejectionReport, error) {
+	return s.st.selectRejectionReport(ctx, f)
+}
+
+func isValidClaimStatus(s string) bool {
+	switch s {
+	case ClaimStatusOpen, ClaimStatusApproved, ClaimStatusRejected, ClaimStatusPaid:
+		return true
+	default:
+		return false
+	}
+}
+
+func isAllowedClaimTransition(from, to string) bool {
+	switch from {
+	case ClaimStatusOpen:
+		return to == ClaimStatusApproved || to == ClaimStatusRejected
+	case ClaimStatusApproved:
+		return to == ClaimStatusPaid
+	default:
+		return false
+	}
+}
+
+func ptrString(s string) *string { return &s }
