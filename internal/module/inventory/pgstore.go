@@ -1476,3 +1476,250 @@ func isPGUniqueViolation(err error) bool {
 	}
 	return false
 }
+
+// ── BR-INV01..06: QC + supplier claim ───────────────────────────────────────
+
+func (s *pgStore) qcPassLotAtomically(ctx context.Context, lotID uuid.UUID) (int, error) {
+	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	tag, err := tx.Exec(ctx,
+		`UPDATE board_sheets
+		    SET status = $1
+		  WHERE lot_id = $2 AND status = $3`,
+		SheetStatusAvailable, lotID, SheetStatusPendingQC,
+	)
+	if err != nil {
+		return 0, fmt.Errorf("qc-pass lot: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return 0, err
+	}
+	return int(tag.RowsAffected()), nil
+}
+
+func (s *pgStore) rejectLotAtomically(ctx context.Context, op rejectLotOp) ([]uuid.UUID, error) {
+	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	rows, err := tx.Query(ctx,
+		`SELECT id
+		   FROM board_sheets
+		  WHERE lot_id = $1 AND status = $2
+		  ORDER BY id
+		  LIMIT $3
+		  FOR UPDATE`,
+		op.LotID, SheetStatusPendingQC, op.Qty,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("lock pending sheets: %w", err)
+	}
+	var ids []uuid.UUID
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if len(ids) < op.Qty {
+		return nil, domain.NewBizError(domain.ErrPreconditionFailed,
+			fmt.Sprintf("only %d PENDING_QC sheets remain, cannot reject %d", len(ids), op.Qty))
+	}
+
+	if _, err := tx.Exec(ctx,
+		`UPDATE board_sheets SET status = $1 WHERE id = ANY($2)`,
+		SheetStatusRejected, ids,
+	); err != nil {
+		return nil, fmt.Errorf("update sheets to REJECTED: %w", err)
+	}
+
+	r := op.Rejection
+	if _, err := tx.Exec(ctx,
+		`INSERT INTO material_rejections
+		    (id, lot_id, reason_code, reason_detail, rejected_qty_sheets,
+		     photo_urls, claim_amount, claim_currency, claim_status,
+		     resolution_notes, reported_by, reported_at,
+		     resolved_by, resolved_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, NULLIF($8, ''), $9, $10, $11, $12, $13, $14)`,
+		r.ID, r.LotID, r.ReasonCode, nullIfEmpty(r.ReasonDetail), r.RejectedQtySheets,
+		r.PhotoURLs, r.ClaimAmount, r.ClaimCurrency, r.ClaimStatus,
+		nullIfEmpty(r.ResolutionNotes), r.ReportedBy, r.ReportedAt,
+		r.ResolvedBy, r.ResolvedAt,
+	); err != nil {
+		return nil, fmt.Errorf("insert material_rejection: %w", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	return ids, nil
+}
+
+const rejectionCols = `id, lot_id, reason_code, COALESCE(reason_detail, ''),
+		rejected_qty_sheets, COALESCE(photo_urls, '{}'::TEXT[]),
+		claim_amount, COALESCE(claim_currency, ''), claim_status,
+		COALESCE(resolution_notes, ''), reported_by, reported_at,
+		resolved_by, resolved_at`
+
+func scanRejection(row interface{ Scan(...any) error }) (MaterialRejection, error) {
+	var r MaterialRejection
+	var amount sql.NullInt64
+	err := row.Scan(
+		&r.ID, &r.LotID, &r.ReasonCode, &r.ReasonDetail,
+		&r.RejectedQtySheets, &r.PhotoURLs,
+		&amount, &r.ClaimCurrency, &r.ClaimStatus,
+		&r.ResolutionNotes, &r.ReportedBy, &r.ReportedAt,
+		&r.ResolvedBy, &r.ResolvedAt,
+	)
+	if amount.Valid {
+		v := amount.Int64
+		r.ClaimAmount = &v
+	}
+	if r.PhotoURLs == nil {
+		r.PhotoURLs = []string{}
+	}
+	return r, err
+}
+
+func (s *pgStore) selectRejectionByID(ctx context.Context, id uuid.UUID) (MaterialRejection, error) {
+	row := s.pool.QueryRow(ctx, `SELECT `+rejectionCols+` FROM material_rejections WHERE id = $1`, id)
+	r, err := scanRejection(row)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return MaterialRejection{}, domain.NewBizError(domain.ErrNotFound, "material rejection not found")
+	}
+	return r, err
+}
+
+func (s *pgStore) selectRejectionsKeyset(ctx context.Context, f RejectionFilter, cur httpkit.Cursor, limit int) ([]MaterialRejection, error) {
+	q := `SELECT ` + rejectionCols + ` FROM material_rejections WHERE 1=1`
+	args := []any{}
+	idx := 1
+	if f.ClaimStatus != "" {
+		q += fmt.Sprintf(" AND claim_status = $%d", idx)
+		args = append(args, f.ClaimStatus)
+		idx++
+	}
+	if f.LotID != nil {
+		q += fmt.Sprintf(" AND lot_id = $%d", idx)
+		args = append(args, *f.LotID)
+		idx++
+	}
+	if !cur.IsZero() {
+		q += fmt.Sprintf(" AND (reported_at, id) < ($%d, $%d)", idx, idx+1)
+		args = append(args, cur.Ts, cur.ID)
+		idx += 2
+	}
+	q += fmt.Sprintf(" ORDER BY reported_at DESC, id DESC LIMIT $%d", idx)
+	args = append(args, limit)
+
+	rows, err := s.pool.Query(ctx, q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []MaterialRejection
+	for rows.Next() {
+		r, err := scanRejection(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+func (s *pgStore) updateRejectionClaim(ctx context.Context, in updateClaimRow) (MaterialRejection, error) {
+	tag, err := s.pool.Exec(ctx,
+		`UPDATE material_rejections
+		    SET claim_status     = $1,
+		        claim_amount     = COALESCE($2, claim_amount),
+		        claim_currency   = COALESCE(NULLIF($3, ''), claim_currency),
+		        resolution_notes = COALESCE(NULLIF($4, ''), resolution_notes),
+		        resolved_by      = COALESCE($5, resolved_by),
+		        resolved_at      = COALESCE($6, resolved_at)
+		  WHERE id = $7`,
+		in.ClaimStatus, in.ClaimAmount, in.ClaimCurrency, in.ResolutionNotes,
+		in.ResolvedBy, in.ResolvedAt, in.RejectionID,
+	)
+	if err != nil {
+		return MaterialRejection{}, err
+	}
+	if tag.RowsAffected() == 0 {
+		return MaterialRejection{}, domain.NewBizError(domain.ErrNotFound, "material rejection not found")
+	}
+	return s.selectRejectionByID(ctx, in.RejectionID)
+}
+
+func (s *pgStore) selectRejectionReport(ctx context.Context, f RejectionReportFilter) ([]RejectionReport, error) {
+	q := `
+		SELECT COALESCE(il.supplier_ref, '') AS supplier_ref,
+		       COUNT(*) FILTER (WHERE mr.claim_status = 'OPEN')                              AS open_count,
+		       COALESCE(SUM(mr.claim_amount) FILTER (WHERE mr.claim_status = 'OPEN'), 0)     AS open_amount,
+		       COUNT(*) FILTER (WHERE mr.claim_status = 'APPROVED')                          AS approved_count,
+		       COALESCE(SUM(mr.claim_amount) FILTER (WHERE mr.claim_status = 'APPROVED'), 0) AS approved_amount,
+		       COUNT(*) FILTER (WHERE mr.claim_status = 'PAID')                              AS paid_count,
+		       COALESCE(SUM(mr.claim_amount) FILTER (WHERE mr.claim_status = 'PAID'), 0)     AS paid_amount,
+		       COUNT(*) FILTER (WHERE mr.claim_status = 'REJECTED')                          AS rejected_count,
+		       COUNT(*)                                                                       AS total_rejections
+		  FROM material_rejections mr
+		  JOIN inventory_lots il ON il.id = mr.lot_id
+		 WHERE 1=1`
+	args := []any{}
+	idx := 1
+	if !f.From.IsZero() {
+		q += fmt.Sprintf(" AND mr.reported_at >= $%d", idx)
+		args = append(args, f.From)
+		idx++
+	}
+	if !f.To.IsZero() {
+		q += fmt.Sprintf(" AND mr.reported_at < $%d", idx)
+		args = append(args, f.To)
+		idx++
+	}
+	if f.SupplierRef != "" {
+		q += fmt.Sprintf(" AND il.supplier_ref ILIKE $%d", idx)
+		args = append(args, "%"+f.SupplierRef+"%")
+	}
+	q += " GROUP BY supplier_ref ORDER BY total_rejections DESC, supplier_ref ASC"
+
+	rows, err := s.pool.Query(ctx, q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []RejectionReport
+	for rows.Next() {
+		var r RejectionReport
+		if err := rows.Scan(
+			&r.SupplierRef,
+			&r.OpenCount, &r.OpenAmount,
+			&r.ApprovedCount, &r.ApprovedAmount,
+			&r.PaidCount, &r.PaidAmount,
+			&r.RejectedCount, &r.TotalRejections,
+		); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+func nullIfEmpty(s string) any {
+	if s == "" {
+		return nil
+	}
+	return s
+}

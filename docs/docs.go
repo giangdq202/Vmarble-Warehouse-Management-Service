@@ -3889,6 +3889,290 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/inventory/lots/{id}/qc-pass": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "inventory"
+                ],
+                "summary": "QC-pass an inventory lot (transition all PENDING_QC sheets to AVAILABLE)",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "lot id (uuid)",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "412": {
+                        "description": "Precondition Failed",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/inventory/lots/{id}/reject": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Transitions up to rejected_qty_sheets PENDING_QC sheets to REJECTED\nand creates a material_rejections row. (BR-INV02/03/04)",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "inventory"
+                ],
+                "summary": "Reject part or all of an inventory lot",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "lot id (uuid)",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "payload",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_module_inventory.RejectLotInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/internal_module_inventory.RejectLotResult"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "412": {
+                        "description": "Precondition Failed",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/inventory/material-rejections": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "inventory"
+                ],
+                "summary": "List material rejections (keyset paginated)",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "filter by claim_status (OPEN|APPROVED|REJECTED|PAID)",
+                        "name": "claim_status",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "filter by lot id (uuid)",
+                        "name": "lot_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "opaque cursor token; omit for first page",
+                        "name": "cursor",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "page size (default 50, max 200)",
+                        "name": "limit",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_platform_httpkit.CursorResult-internal_module_inventory_MaterialRejection"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/inventory/material-rejections/{id}": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "inventory"
+                ],
+                "summary": "Get a single material rejection",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "rejection id (uuid)",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_module_inventory.MaterialRejection"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            },
+            "patch": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Allowed transitions: OPEN→APPROVED, OPEN→REJECTED, APPROVED→PAID. (BR-INV05)",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "inventory"
+                ],
+                "summary": "Update a material rejection's claim status",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "rejection id (uuid)",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "payload",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_module_inventory.UpdateClaimInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_module_inventory.MaterialRejection"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/inventory/overflow-status": {
             "get": {
                 "security": [
@@ -4404,6 +4688,53 @@ const docTemplate = `{
                             "type": "object",
                             "additionalProperties": {
                                 "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/inventory/reports/rejections": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "inventory"
+                ],
+                "summary": "Aggregate material-rejection totals by supplier (BR-INV06)",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "RFC3339 lower bound on reported_at (inclusive)",
+                        "name": "from",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "RFC3339 upper bound on reported_at (exclusive)",
+                        "name": "to",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "case-insensitive supplier filter",
+                        "name": "supplier_ref",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/internal_module_inventory.RejectionReport"
                             }
                         }
                     }
@@ -9662,6 +9993,23 @@ const docTemplate = `{
                 }
             }
         },
+        "github_com_vmarble_warehouse-management-service_internal_platform_httpkit.CursorResult-internal_module_inventory_MaterialRejection": {
+            "type": "object",
+            "properties": {
+                "has_more": {
+                    "type": "boolean"
+                },
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_module_inventory.MaterialRejection"
+                    }
+                },
+                "next_cursor": {
+                    "type": "string"
+                }
+            }
+        },
         "github_com_vmarble_warehouse-management-service_internal_platform_httpkit.CursorResult-internal_module_loading_exception_LoadingException": {
             "type": "object",
             "properties": {
@@ -11717,6 +12065,56 @@ const docTemplate = `{
                 }
             }
         },
+        "internal_module_inventory.MaterialRejection": {
+            "type": "object",
+            "properties": {
+                "claim_amount": {
+                    "type": "integer"
+                },
+                "claim_currency": {
+                    "type": "string"
+                },
+                "claim_status": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "lot_id": {
+                    "type": "string"
+                },
+                "photo_urls": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "reason_code": {
+                    "type": "string"
+                },
+                "reason_detail": {
+                    "type": "string"
+                },
+                "rejected_qty_sheets": {
+                    "type": "integer"
+                },
+                "reported_at": {
+                    "type": "string"
+                },
+                "reported_by": {
+                    "type": "string"
+                },
+                "resolution_notes": {
+                    "type": "string"
+                },
+                "resolved_at": {
+                    "type": "string"
+                },
+                "resolved_by": {
+                    "type": "string"
+                }
+            }
+        },
         "internal_module_inventory.OverflowLevel": {
             "type": "string",
             "enum": [
@@ -11806,6 +12204,72 @@ const docTemplate = `{
                 },
                 "work_order_id": {
                     "type": "string"
+                }
+            }
+        },
+        "internal_module_inventory.RejectLotInput": {
+            "type": "object",
+            "properties": {
+                "photo_urls": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "reason_code": {
+                    "type": "string"
+                },
+                "reason_detail": {
+                    "type": "string"
+                },
+                "rejected_qty_sheets": {
+                    "type": "integer"
+                }
+            }
+        },
+        "internal_module_inventory.RejectLotResult": {
+            "type": "object",
+            "properties": {
+                "rejected_sheet_ids": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "rejection": {
+                    "$ref": "#/definitions/internal_module_inventory.MaterialRejection"
+                }
+            }
+        },
+        "internal_module_inventory.RejectionReport": {
+            "type": "object",
+            "properties": {
+                "approved_amount": {
+                    "type": "integer"
+                },
+                "approved_count": {
+                    "type": "integer"
+                },
+                "open_amount": {
+                    "type": "integer"
+                },
+                "open_count": {
+                    "type": "integer"
+                },
+                "paid_amount": {
+                    "type": "integer"
+                },
+                "paid_count": {
+                    "type": "integer"
+                },
+                "rejected_count": {
+                    "type": "integer"
+                },
+                "supplier_ref": {
+                    "type": "string"
+                },
+                "total_rejections": {
+                    "type": "integer"
                 }
             }
         },
@@ -11935,6 +12399,23 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "to_location": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_module_inventory.UpdateClaimInput": {
+            "type": "object",
+            "properties": {
+                "claim_amount": {
+                    "type": "integer"
+                },
+                "claim_currency": {
+                    "type": "string"
+                },
+                "claim_status": {
+                    "type": "string"
+                },
+                "resolution_notes": {
                     "type": "string"
                 }
             }

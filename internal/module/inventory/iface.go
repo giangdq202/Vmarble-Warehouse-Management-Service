@@ -279,6 +279,33 @@ type Service interface {
 	ListLots(ctx context.Context, p httpkit.PageParams) (httpkit.PagedResult[InventoryLot], error)
 	DeactivateLot(ctx context.Context, lotID uuid.UUID) error
 
+	// QCPassLot transitions every PENDING_QC sheet of the lot to AVAILABLE
+	// (BR-INV02). Idempotent: 0 PENDING_QC sheets returns ErrPreconditionFailed
+	// rather than silently succeeding.
+	QCPassLot(ctx context.Context, lotID uuid.UUID, actorID uuid.UUID) error
+
+	// RejectLot transitions up to RejectedQtySheets sheets of the lot from
+	// PENDING_QC to REJECTED and creates a material_rejections row (BR-INV02/03).
+	// If RejectedQtySheets equals the number of remaining PENDING_QC sheets the
+	// rest of the lot stays PENDING_QC for a later qc-pass / reject decision.
+	// Returns ErrPreconditionFailed when too few PENDING_QC sheets remain.
+	RejectLot(ctx context.Context, in RejectLotInput) (RejectLotResult, error)
+
+	// ListRejections returns a keyset-paginated list of rejections, newest first.
+	ListRejections(ctx context.Context, f RejectionFilter, params httpkit.CursorParams) (httpkit.CursorResult[MaterialRejection], error)
+
+	// GetRejection returns a single rejection by ID.
+	GetRejection(ctx context.Context, id uuid.UUID) (MaterialRejection, error)
+
+	// UpdateRejectionClaim transitions the claim_status (BR-INV05). Allowed:
+	// OPEN→APPROVED|REJECTED, APPROVED→PAID. Anything else returns
+	// ErrInvalidTransition.
+	UpdateRejectionClaim(ctx context.Context, in UpdateClaimInput) (MaterialRejection, error)
+
+	// RejectionReport aggregates claim totals per supplier for the given window
+	// (BR-INV06).
+	RejectionReport(ctx context.Context, f RejectionReportFilter) ([]RejectionReport, error)
+
 	GetSheet(ctx context.Context, sheetID uuid.UUID) (BoardSheet, error)
 	// ListAvailableSheets returns AVAILABLE sheets, optionally filtered by materialID.
 	ListAvailableSheets(ctx context.Context, p httpkit.PageParams, materialID *uuid.UUID) (httpkit.PagedResult[BoardSheet], error)
@@ -406,6 +433,106 @@ type CuttingRecordReport struct {
 	AssignedUsername  *string          `json:"assigned_username,omitempty"`
 	AssignedFullName  *string          `json:"assigned_full_name,omitempty"`
 	CreatedAt         time.Time        `json:"created_at"`
+}
+
+// ── BR-INV01..06: Material rejection + supplier claim ───────────────────────
+
+// Board-sheet status constants used by the QC gate. Stored as TEXT in the
+// board_sheets.status column; no DB enum is involved.
+const (
+	SheetStatusPendingQC = "PENDING_QC"
+	SheetStatusAvailable = "AVAILABLE"
+	SheetStatusRejected  = "REJECTED"
+)
+
+// Material-rejection reason codes (BR-INV02).
+const (
+	RejectionReasonCrack         = "CRACK"
+	RejectionReasonColorMismatch = "COLOR_MISMATCH"
+	RejectionReasonLateDelivery  = "LATE_DELIVERY"
+	RejectionReasonDamage        = "DAMAGE"
+	RejectionReasonWrongSpec     = "WRONG_SPEC"
+	RejectionReasonOther         = "OTHER"
+)
+
+// Claim status lifecycle (BR-INV05): OPEN → APPROVED → PAID, or OPEN → REJECTED.
+const (
+	ClaimStatusOpen     = "OPEN"
+	ClaimStatusApproved = "APPROVED"
+	ClaimStatusRejected = "REJECTED"
+	ClaimStatusPaid     = "PAID"
+)
+
+// MaterialRejection records a QC rejection event tied to an inventory_lot.
+type MaterialRejection struct {
+	ID                uuid.UUID  `json:"id"`
+	LotID             uuid.UUID  `json:"lot_id"`
+	ReasonCode        string     `json:"reason_code"`
+	ReasonDetail      string     `json:"reason_detail,omitempty"`
+	RejectedQtySheets int        `json:"rejected_qty_sheets"`
+	PhotoURLs         []string   `json:"photo_urls"`
+	ClaimAmount       *int64     `json:"claim_amount,omitempty"`
+	ClaimCurrency     string     `json:"claim_currency,omitempty"`
+	ClaimStatus       string     `json:"claim_status"`
+	ResolutionNotes   string     `json:"resolution_notes,omitempty"`
+	ReportedBy        uuid.UUID  `json:"reported_by"`
+	ReportedAt        time.Time  `json:"reported_at"`
+	ResolvedBy        *uuid.UUID `json:"resolved_by,omitempty"`
+	ResolvedAt        *time.Time `json:"resolved_at,omitempty"`
+}
+
+// RejectLotInput captures the QC reject request body.
+type RejectLotInput struct {
+	LotID             uuid.UUID `json:"-"`
+	ReasonCode        string    `json:"reason_code"`
+	ReasonDetail      string    `json:"reason_detail,omitempty"`
+	RejectedQtySheets int       `json:"rejected_qty_sheets"`
+	PhotoURLs         []string  `json:"photo_urls,omitempty"`
+	ActorID           uuid.UUID `json:"-"`
+}
+
+// RejectLotResult is returned by RejectLot.
+type RejectLotResult struct {
+	Rejection        MaterialRejection `json:"rejection"`
+	RejectedSheetIDs []uuid.UUID       `json:"rejected_sheet_ids"`
+}
+
+// UpdateClaimInput carries a claim-status transition. Allowed transitions:
+// OPEN→APPROVED, OPEN→REJECTED, APPROVED→PAID. Anything else returns 409.
+type UpdateClaimInput struct {
+	RejectionID     uuid.UUID `json:"-"`
+	ClaimStatus     string    `json:"claim_status"`
+	ClaimAmount     *int64    `json:"claim_amount,omitempty"`
+	ClaimCurrency   string    `json:"claim_currency,omitempty"`
+	ResolutionNotes string    `json:"resolution_notes,omitempty"`
+	ActorID         uuid.UUID `json:"-"`
+}
+
+// RejectionFilter narrows the list endpoint. Zero values mean "no filter".
+type RejectionFilter struct {
+	ClaimStatus string
+	LotID       *uuid.UUID
+}
+
+// RejectionReport is a per-supplier aggregation row used by /reports/rejections.
+type RejectionReport struct {
+	SupplierRef     string `json:"supplier_ref"`
+	OpenCount       int    `json:"open_count"`
+	OpenAmount      int64  `json:"open_amount"`
+	ApprovedCount   int    `json:"approved_count"`
+	ApprovedAmount  int64  `json:"approved_amount"`
+	PaidCount       int    `json:"paid_count"`
+	PaidAmount      int64  `json:"paid_amount"`
+	RejectedCount   int    `json:"rejected_count"`
+	TotalRejections int    `json:"total_rejections"`
+}
+
+// RejectionReportFilter narrows the rejection-report aggregate by date range
+// and optional supplier_ref.
+type RejectionReportFilter struct {
+	From        time.Time
+	To          time.Time
+	SupplierRef string
 }
 
 // CuttingRecordFilter narrows the cut-history report.
