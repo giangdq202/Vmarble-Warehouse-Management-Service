@@ -1692,7 +1692,6 @@ func (s *pgStore) selectRejectionReport(ctx context.Context, f RejectionReportFi
 	if f.SupplierRef != "" {
 		q += fmt.Sprintf(" AND il.supplier_ref ILIKE $%d", idx)
 		args = append(args, "%"+f.SupplierRef+"%")
-		idx++
 	}
 	q += " GROUP BY supplier_ref ORDER BY total_rejections DESC, supplier_ref ASC"
 
