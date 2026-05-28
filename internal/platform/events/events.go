@@ -68,6 +68,21 @@ const (
 	// their next scan, and dashboards refresh the loading-plan view.
 	EventTypePlanReload = "PLAN_RELOAD"
 
+	// EventTypeLoadingExceptionCreated fires after a loading_exception row is
+	// inserted (manual raise or auto-create from delivery / packing). Routed
+	// to planner/admin audience so the cross-container exception dashboard
+	// (#248) refreshes without polling.
+	EventTypeLoadingExceptionCreated = "LOADING_EXCEPTION_CREATED"
+
+	// EventTypeLoadingExceptionApproved fires after Approve flips approved_by.
+	// Same audience as CREATED so the dashboard removes the resolved row from
+	// the pending pinned counter.
+	EventTypeLoadingExceptionApproved = "LOADING_EXCEPTION_APPROVED"
+
+	// EventTypeLoadingExceptionRejected fires after Reject closes the row
+	// without picking a resolution. Same audience as APPROVED.
+	EventTypeLoadingExceptionRejected = "LOADING_EXCEPTION_REJECTED"
+
 	// pgChannel is the PostgreSQL LISTEN/NOTIFY channel name.
 	pgChannel = "vwm_events"
 )

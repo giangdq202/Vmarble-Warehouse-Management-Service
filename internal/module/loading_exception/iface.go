@@ -119,6 +119,51 @@ type ListFilter struct {
 	Status string // "pending" | "approved" | "all"
 }
 
+// CrossContainerFilter narrows the global GET /loading-exceptions endpoint
+// (#328). Zero values mean "no filter" for the corresponding field.
+type CrossContainerFilter struct {
+	// Status is "pending" (approved_by IS NULL), "approved" (approved_by IS NOT
+	// NULL AND resolution IS NOT NULL), "rejected" (approved_by IS NOT NULL AND
+	// resolution IS NULL), or "all". Empty defaults to "all".
+	Status        string
+	ContainerID   *uuid.UUID
+	CustomerID    *uuid.UUID // joined via containers.sales_order_id -> sales_orders.customer_id
+	ExceptionType string
+	From          time.Time // created_at >= From (inclusive)
+	To            time.Time // created_at < To (exclusive)
+}
+
+// CrossContainerSummary is the pinned-counter projection used by the
+// dashboard banner ("X exceptions blocking N containers from sealing").
+type CrossContainerSummary struct {
+	PendingCount      int `json:"pending_count"`
+	BlockedContainers int `json:"blocked_containers"`
+}
+
+// BulkApproveInput carries the batch payload for #330. Cap at 50 ids per
+// request — the service rejects with ErrInvalidInput when exceeded so callers
+// page through with predictable budgets.
+type BulkApproveInput struct {
+	IDs             []uuid.UUID
+	Resolution      string
+	ResolutionNotes string
+	ApprovedBy      uuid.UUID
+}
+
+// BulkApproveResult is the partial-success response shape: every id either
+// lands in Approved or in Failed with a structured error code so the FE can
+// highlight rows that need retry without parsing free-text strings.
+type BulkApproveResult struct {
+	Approved []uuid.UUID         `json:"approved"`
+	Failed   []BulkApproveFailed `json:"failed"`
+}
+
+type BulkApproveFailed struct {
+	ID      uuid.UUID `json:"id"`
+	Code    string    `json:"code"`
+	Message string    `json:"message"`
+}
+
 // PendingSummary is what delivery.Seal needs: just the count + the ids
 // that are still open so the 412 error body can list them. Cheap query
 // against idx_le_pending.
@@ -140,12 +185,27 @@ type Service interface {
 	// CarryOverCreator dep.
 	Approve(ctx context.Context, in ApproveInput) (LoadingException, error)
 
+	// BulkApprove processes up to 50 ids in one request, returning per-id
+	// success / failure (#330). Only resolutions WRITE_OFF / DEFER_TO_NEXT /
+	// CANCEL_FROM_SO are accepted in batch — BACKORDER and SUBSTITUTE_ACCEPTED
+	// require per-row context (parent_so_line_id, substitute_sku_id) that the
+	// batch payload cannot supply.
+	BulkApprove(ctx context.Context, in BulkApproveInput) (BulkApproveResult, error)
+
 	// Reject flips approved_by but leaves resolution = NULL.
 	Reject(ctx context.Context, in RejectInput) (LoadingException, error)
 
 	Get(ctx context.Context, id uuid.UUID) (LoadingException, error)
 
 	List(ctx context.Context, containerID uuid.UUID, f ListFilter, p httpkit.CursorParams) (httpkit.CursorResult[LoadingException], error)
+
+	// ListCrossContainer powers the cross-container dashboard (#328).
+	// Keyset-paginated by (created_at, id) DESC for newest-first scrolling.
+	ListCrossContainer(ctx context.Context, f CrossContainerFilter, p httpkit.CursorParams) (httpkit.CursorResult[LoadingException], error)
+
+	// CrossContainerSummary returns the pinned counter — total pending
+	// exceptions and the count of distinct containers they block.
+	CrossContainerSummary(ctx context.Context, f CrossContainerFilter) (CrossContainerSummary, error)
 
 	// PendingForContainer is the SEAL pre-check (BR-D14). Count == 0 means
 	// "ok to seal".

@@ -1714,6 +1714,33 @@ definitions:
       resolution_notes:
         type: string
     type: object
+  internal_module_loading_exception.BulkApproveFailed:
+    properties:
+      code:
+        type: string
+      id:
+        type: string
+      message:
+        type: string
+    type: object
+  internal_module_loading_exception.BulkApproveResult:
+    properties:
+      approved:
+        items:
+          type: string
+        type: array
+      failed:
+        items:
+          $ref: '#/definitions/internal_module_loading_exception.BulkApproveFailed'
+        type: array
+    type: object
+  internal_module_loading_exception.CrossContainerSummary:
+    properties:
+      blocked_containers:
+        type: integer
+      pending_count:
+        type: integer
+    type: object
   internal_module_loading_exception.LoadingException:
     properties:
       approved_at:
@@ -1762,6 +1789,20 @@ definitions:
       substitute_sku_id:
         type: string
     required:
+    - resolution
+    type: object
+  internal_module_loading_exception.bulkApproveRequest:
+    properties:
+      ids:
+        items:
+          type: string
+        type: array
+      resolution:
+        type: string
+      resolution_notes:
+        type: string
+    required:
+    - ids
     - resolution
     type: object
   internal_module_loading_exception.createRequest:
@@ -5841,6 +5882,57 @@ paths:
       summary: Generate pick-slip PDF for a work order
       tags:
       - inventory
+  /api/v1/loading-exceptions:
+    get:
+      description: |-
+        Cross-container queue used by the planner dashboard. Filters
+        by status (pending|approved|rejected|all), container_id,
+        customer_id, exception_type, and a created_at date range.
+      parameters:
+      - description: pending | approved | rejected | all (default all)
+        in: query
+        name: status
+        type: string
+      - description: filter by container id (uuid)
+        in: query
+        name: container_id
+        type: string
+      - description: filter by customer id (uuid)
+        in: query
+        name: customer_id
+        type: string
+      - description: SHORT_SHIPPED | OVER_LOADED | ...
+        in: query
+        name: exception_type
+        type: string
+      - description: RFC3339 lower bound on created_at (inclusive)
+        in: query
+        name: from
+        type: string
+      - description: RFC3339 upper bound on created_at (exclusive)
+        in: query
+        name: to
+        type: string
+      - description: opaque cursor token
+        in: query
+        name: cursor
+        type: string
+      - description: page size (default 50, max 200)
+        in: query
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_vmarble_warehouse-management-service_internal_platform_httpkit.CursorResult-internal_module_loading_exception_LoadingException'
+      security:
+      - BearerAuth: []
+      summary: List loading exceptions across containers (#328 — keyset paginated)
+      tags:
+      - loading-exceptions
   /api/v1/loading-exceptions/{id}:
     get:
       parameters:
@@ -5967,6 +6059,76 @@ paths:
       security:
       - BearerAuth: []
       summary: Reject a pending loading exception
+      tags:
+      - loading-exceptions
+  /api/v1/loading-exceptions/bulk-approve:
+    post:
+      consumes:
+      - application/json
+      description: |-
+        Partial-success response: every id lands in approved or failed
+        with a structured code (NOT_FOUND / INVALID_TRANSITION /
+        INVALID_INPUT / PRECONDITION_FAILED / INTERNAL). Resolutions
+        BACKORDER and SUBSTITUTE_ACCEPTED are rejected — they require
+        per-row context.
+      parameters:
+      - description: payload
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_module_loading_exception.bulkApproveRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_module_loading_exception.BulkApproveResult'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Approve up to 50 loading exceptions in one batch (#330)
+      tags:
+      - loading-exceptions
+  /api/v1/loading-exceptions/summary:
+    get:
+      parameters:
+      - description: filter by container id (uuid)
+        in: query
+        name: container_id
+        type: string
+      - description: filter by customer id (uuid)
+        in: query
+        name: customer_id
+        type: string
+      - description: SHORT_SHIPPED | OVER_LOADED | ...
+        in: query
+        name: exception_type
+        type: string
+      - description: RFC3339 lower bound on created_at (inclusive)
+        in: query
+        name: from
+        type: string
+      - description: RFC3339 upper bound on created_at (exclusive)
+        in: query
+        name: to
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_module_loading_exception.CrossContainerSummary'
+      security:
+      - BearerAuth: []
+      summary: Pinned counter — pending exceptions + blocked containers (#328)
       tags:
       - loading-exceptions
   /api/v1/loading-plans/{id}:

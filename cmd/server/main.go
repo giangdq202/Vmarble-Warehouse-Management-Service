@@ -249,6 +249,7 @@ func main() {
 		&loadingExceptionSOLineAdapter{svc: salesSvc},
 		&loadingExceptionCarryOverAdapter{svc: salesSvc},
 		&loadingExceptionAuditAdapter{pool: pool},
+		&loadingExceptionNotifierAdapter{pub: eventPublisher},
 	)
 	// BR-D14 SEAL pre-check + BR-D15 SHORT_SHIPPED auto-create.
 	if hooked, ok := deliverySvc.(interface {
@@ -1418,6 +1419,30 @@ func (a *loadingExceptionAuditAdapter) LogException(ctx context.Context, in load
 		in.ExceptionID, string(in.Action), in.ActorID, in.Notes, meta,
 	)
 	return err
+}
+
+// loadingExceptionNotifierAdapter bridges loading_exception.ExceptionNotifier
+// to events.Publisher (#329). Same best-effort contract as
+// PlanReloadNotifier — the publish failure is logged inside the service via
+// slog.Warn but never aborts the business write.
+type loadingExceptionNotifierAdapter struct{ pub *events.Publisher }
+
+func (a *loadingExceptionNotifierAdapter) NotifyCreated(ctx context.Context, in loading_exception.NotifyCreatedInput) error {
+	return a.pub.NotifyLoadingExceptionCreated(ctx,
+		in.ExceptionID.String(), in.ContainerID.String(), in.ExceptionType,
+	)
+}
+
+func (a *loadingExceptionNotifierAdapter) NotifyApproved(ctx context.Context, in loading_exception.NotifyApprovedInput) error {
+	return a.pub.NotifyLoadingExceptionApproved(ctx,
+		in.ExceptionID.String(), in.ContainerID.String(), in.Resolution,
+	)
+}
+
+func (a *loadingExceptionNotifierAdapter) NotifyRejected(ctx context.Context, in loading_exception.NotifyRejectedInput) error {
+	return a.pub.NotifyLoadingExceptionRejected(ctx,
+		in.ExceptionID.String(), in.ContainerID.String(),
+	)
 }
 
 // deliveryPendingExceptionsAdapter bridges delivery's BR-D14 SEAL pre-check

@@ -27,6 +27,12 @@ type mockStore struct {
 	pendingByContainerResult PendingSummary
 	pendingByContainerErr    error
 
+	selectCrossContainerKeysetResult []LoadingException
+	selectCrossContainerKeysetErr    error
+
+	crossContainerSummaryResult CrossContainerSummary
+	crossContainerSummaryErr    error
+
 	tx        *mockTxStore
 	withTxErr error
 }
@@ -49,6 +55,14 @@ func (m *mockStore) selectByContainerKeyset(_ context.Context, _ uuid.UUID, _ st
 
 func (m *mockStore) pendingByContainer(_ context.Context, _ uuid.UUID) (PendingSummary, error) {
 	return m.pendingByContainerResult, m.pendingByContainerErr
+}
+
+func (m *mockStore) selectCrossContainerKeyset(_ context.Context, _ CrossContainerFilter, _ httpkit.Cursor, _ int) ([]LoadingException, error) {
+	return m.selectCrossContainerKeysetResult, m.selectCrossContainerKeysetErr
+}
+
+func (m *mockStore) crossContainerSummary(_ context.Context, _ CrossContainerFilter) (CrossContainerSummary, error) {
+	return m.crossContainerSummaryResult, m.crossContainerSummaryErr
 }
 
 func (m *mockStore) withTx(ctx context.Context, fn func(tx txStore) error) error {
@@ -150,6 +164,37 @@ func (m *mockAudit) LogException(_ context.Context, in AuditInput) error {
 	return nil
 }
 
+type mockNotifier struct {
+	created  []NotifyCreatedInput
+	approved []NotifyApprovedInput
+	rejected []NotifyRejectedInput
+	err      error
+}
+
+func (m *mockNotifier) NotifyCreated(_ context.Context, in NotifyCreatedInput) error {
+	if m.err != nil {
+		return m.err
+	}
+	m.created = append(m.created, in)
+	return nil
+}
+
+func (m *mockNotifier) NotifyApproved(_ context.Context, in NotifyApprovedInput) error {
+	if m.err != nil {
+		return m.err
+	}
+	m.approved = append(m.approved, in)
+	return nil
+}
+
+func (m *mockNotifier) NotifyRejected(_ context.Context, in NotifyRejectedInput) error {
+	if m.err != nil {
+		return m.err
+	}
+	m.rejected = append(m.rejected, in)
+	return nil
+}
+
 // ── helpers ──────────────────────────────────────────────────────────────────
 
 func newTestSvc(s store, sku SKUChecker, carry CarryOverCreator, audit AuditLogger) *service {
@@ -161,6 +206,12 @@ func newTestSvc(s store, sku SKUChecker, carry CarryOverCreator, audit AuditLogg
 		now:        func() time.Time { return time.Date(2026, 5, 27, 12, 0, 0, 0, time.UTC) },
 		newID:      func() uuid.UUID { return uuid.MustParse("11111111-1111-1111-1111-111111111111") },
 	}
+}
+
+func newTestSvcWithNotifier(s store, sku SKUChecker, carry CarryOverCreator, audit AuditLogger, notifier ExceptionNotifier) *service {
+	svc := newTestSvc(s, sku, carry, audit)
+	svc.notifier = notifier
+	return svc
 }
 
 func intPtr(v int) *int              { return &v }
@@ -439,5 +490,128 @@ func TestService_PendingForContainer_RequiresID(t *testing.T) {
 	_, err := svc.PendingForContainer(context.Background(), uuid.Nil)
 	if !errors.Is(err, domain.ErrInvalidInput) {
 		t.Fatalf("err = %v, want ErrInvalidInput", err)
+	}
+}
+
+// ── #328 cross-container list + summary ─────────────────────────────────────
+
+func TestListCrossContainer_PassesFilterToStore(t *testing.T) {
+	expected := []LoadingException{{ID: uuid.New(), CreatedAt: time.Now().UTC()}}
+	st := &mockStore{selectCrossContainerKeysetResult: expected}
+	svc := newTestSvc(st, nil, nil, nil)
+
+	customerID := uuid.New()
+	res, err := svc.ListCrossContainer(context.Background(),
+		CrossContainerFilter{Status: "pending", CustomerID: &customerID, ExceptionType: TypeShortShipped},
+		httpkit.CursorParams{Limit: 50},
+	)
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if len(res.Items) != 1 || res.Items[0].ID != expected[0].ID {
+		t.Errorf("rows = %+v, want 1 row matching store result", res.Items)
+	}
+}
+
+func TestCrossContainerSummary_DelegatesToStore(t *testing.T) {
+	st := &mockStore{
+		crossContainerSummaryResult: CrossContainerSummary{PendingCount: 7, BlockedContainers: 3},
+	}
+	svc := newTestSvc(st, nil, nil, nil)
+
+	got, err := svc.CrossContainerSummary(context.Background(), CrossContainerFilter{})
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if got.PendingCount != 7 || got.BlockedContainers != 3 {
+		t.Errorf("summary = %+v, want {7,3}", got)
+	}
+}
+
+// ── #330 BulkApprove ────────────────────────────────────────────────────────
+
+func TestBulkApprove_RejectsEmptyIDs(t *testing.T) {
+	svc := newTestSvc(&mockStore{}, nil, nil, nil)
+	_, err := svc.BulkApprove(context.Background(), BulkApproveInput{
+		Resolution: ResolutionWriteOff,
+		ApprovedBy: uuid.New(),
+	})
+	if !errors.Is(err, domain.ErrInvalidInput) {
+		t.Fatalf("err = %v, want ErrInvalidInput", err)
+	}
+}
+
+func TestBulkApprove_RejectsOver50IDs(t *testing.T) {
+	ids := make([]uuid.UUID, 51)
+	for i := range ids {
+		ids[i] = uuid.New()
+	}
+	svc := newTestSvc(&mockStore{}, nil, nil, nil)
+	_, err := svc.BulkApprove(context.Background(), BulkApproveInput{
+		IDs:        ids,
+		Resolution: ResolutionWriteOff,
+		ApprovedBy: uuid.New(),
+	})
+	if !errors.Is(err, domain.ErrInvalidInput) {
+		t.Fatalf("err = %v, want ErrInvalidInput", err)
+	}
+}
+
+func TestBulkApprove_RejectsBackorderResolution(t *testing.T) {
+	svc := newTestSvc(&mockStore{}, nil, nil, nil)
+	_, err := svc.BulkApprove(context.Background(), BulkApproveInput{
+		IDs:        []uuid.UUID{uuid.New()},
+		Resolution: ResolutionBackorder,
+		ApprovedBy: uuid.New(),
+	})
+	if !errors.Is(err, domain.ErrInvalidInput) {
+		t.Fatalf("err = %v, want ErrInvalidInput", err)
+	}
+}
+
+// ── Notifier hooks ──────────────────────────────────────────────────────────
+
+func TestCreate_FiresNotifyCreated(t *testing.T) {
+	st := &mockStore{}
+	notifier := &mockNotifier{}
+	svc := newTestSvcWithNotifier(st, nil, nil, nil, notifier)
+
+	containerID := uuid.New()
+	_, err := svc.Create(context.Background(), CreateInput{
+		ContainerID:   containerID,
+		ExceptionType: TypeDamagedAtLoading,
+		Reason:        "edge chipped",
+		CreatedBy:     uuid.New(),
+	})
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if len(notifier.created) != 1 {
+		t.Fatalf("notifier.created = %d, want 1", len(notifier.created))
+	}
+	if notifier.created[0].ContainerID != containerID {
+		t.Errorf("notify container_id = %v, want %v", notifier.created[0].ContainerID, containerID)
+	}
+	if notifier.created[0].ExceptionType != TypeDamagedAtLoading {
+		t.Errorf("notify type = %q, want %q", notifier.created[0].ExceptionType, TypeDamagedAtLoading)
+	}
+}
+
+func TestCreate_NotifyError_DoesNotAbortBusinessWrite(t *testing.T) {
+	st := &mockStore{}
+	notifier := &mockNotifier{err: errors.New("publish fail")}
+	svc := newTestSvcWithNotifier(st, nil, nil, nil, notifier)
+
+	_, err := svc.Create(context.Background(), CreateInput{
+		ContainerID:   uuid.New(),
+		ExceptionType: TypeDamagedAtLoading,
+		Reason:        "edge chipped",
+		CreatedBy:     uuid.New(),
+	})
+	if err != nil {
+		t.Fatalf("publish failure must not abort Create, got %v", err)
+	}
+	if len(st.insertedRows) != 1 {
+		t.Errorf("expected 1 inserted row even with publish error, got %d", len(st.insertedRows))
 	}
 }

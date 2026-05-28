@@ -5029,6 +5029,185 @@
                 }
             }
         },
+        "/api/v1/loading-exceptions": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Cross-container queue used by the planner dashboard. Filters\nby status (pending|approved|rejected|all), container_id,\ncustomer_id, exception_type, and a created_at date range.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "loading-exceptions"
+                ],
+                "summary": "List loading exceptions across containers (#328 — keyset paginated)",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "pending | approved | rejected | all (default all)",
+                        "name": "status",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "filter by container id (uuid)",
+                        "name": "container_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "filter by customer id (uuid)",
+                        "name": "customer_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "SHORT_SHIPPED | OVER_LOADED | ...",
+                        "name": "exception_type",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "RFC3339 lower bound on created_at (inclusive)",
+                        "name": "from",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "RFC3339 upper bound on created_at (exclusive)",
+                        "name": "to",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "opaque cursor token",
+                        "name": "cursor",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "page size (default 50, max 200)",
+                        "name": "limit",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_platform_httpkit.CursorResult-internal_module_loading_exception_LoadingException"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/loading-exceptions/bulk-approve": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Partial-success response: every id lands in approved or failed\nwith a structured code (NOT_FOUND / INVALID_TRANSITION /\nINVALID_INPUT / PRECONDITION_FAILED / INTERNAL). Resolutions\nBACKORDER and SUBSTITUTE_ACCEPTED are rejected — they require\nper-row context.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "loading-exceptions"
+                ],
+                "summary": "Approve up to 50 loading exceptions in one batch (#330)",
+                "parameters": [
+                    {
+                        "description": "payload",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_module_loading_exception.bulkApproveRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_module_loading_exception.BulkApproveResult"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/loading-exceptions/summary": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "loading-exceptions"
+                ],
+                "summary": "Pinned counter — pending exceptions + blocked containers (#328)",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "filter by container id (uuid)",
+                        "name": "container_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "filter by customer id (uuid)",
+                        "name": "customer_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "SHORT_SHIPPED | OVER_LOADED | ...",
+                        "name": "exception_type",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "RFC3339 lower bound on created_at (inclusive)",
+                        "name": "from",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "RFC3339 upper bound on created_at (exclusive)",
+                        "name": "to",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_module_loading_exception.CrossContainerSummary"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/loading-exceptions/{id}": {
             "get": {
                 "security": [
@@ -12412,6 +12591,48 @@
                 }
             }
         },
+        "internal_module_loading_exception.BulkApproveFailed": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "message": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_module_loading_exception.BulkApproveResult": {
+            "type": "object",
+            "properties": {
+                "approved": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "failed": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_module_loading_exception.BulkApproveFailed"
+                    }
+                }
+            }
+        },
+        "internal_module_loading_exception.CrossContainerSummary": {
+            "type": "object",
+            "properties": {
+                "blocked_containers": {
+                    "type": "integer"
+                },
+                "pending_count": {
+                    "type": "integer"
+                }
+            }
+        },
         "internal_module_loading_exception.LoadingException": {
             "type": "object",
             "properties": {
@@ -12484,6 +12705,27 @@
                     "type": "string"
                 },
                 "substitute_sku_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_module_loading_exception.bulkApproveRequest": {
+            "type": "object",
+            "required": [
+                "ids",
+                "resolution"
+            ],
+            "properties": {
+                "ids": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "resolution": {
+                    "type": "string"
+                },
+                "resolution_notes": {
                     "type": "string"
                 }
             }

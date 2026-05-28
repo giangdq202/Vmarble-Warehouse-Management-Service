@@ -3,6 +3,8 @@ package loading_exception
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -149,6 +151,117 @@ func (s *pgStore) selectByContainerKeyset(ctx context.Context, containerID uuid.
 		out = append(out, e)
 	}
 	return out, rows.Err()
+}
+
+// crossContainerWhere builds the WHERE fragment + arg slice shared by the
+// list endpoint and the summary counter. Customer filter joins through
+// container_lines → sales_order_lines → sales_orders so the row-level filter
+// works without changing schema.
+func crossContainerWhere(f CrossContainerFilter, startIdx int) (string, []any) {
+	clauses := []string{}
+	args := []any{}
+	idx := startIdx
+
+	switch f.Status {
+	case "pending":
+		clauses = append(clauses, "le.approved_by IS NULL")
+	case "approved":
+		clauses = append(clauses, "le.approved_by IS NOT NULL AND le.resolution IS NOT NULL")
+	case "rejected":
+		clauses = append(clauses, "le.approved_by IS NOT NULL AND le.resolution IS NULL")
+	}
+	if f.ContainerID != nil {
+		clauses = append(clauses, fmt.Sprintf("le.container_id = $%d", idx))
+		args = append(args, *f.ContainerID)
+		idx++
+	}
+	if f.ExceptionType != "" {
+		clauses = append(clauses, fmt.Sprintf("le.exception_type = $%d", idx))
+		args = append(args, f.ExceptionType)
+		idx++
+	}
+	if !f.From.IsZero() {
+		clauses = append(clauses, fmt.Sprintf("le.created_at >= $%d", idx))
+		args = append(args, f.From)
+		idx++
+	}
+	if !f.To.IsZero() {
+		clauses = append(clauses, fmt.Sprintf("le.created_at < $%d", idx))
+		args = append(args, f.To)
+		idx++
+	}
+	if f.CustomerID != nil {
+		clauses = append(clauses, fmt.Sprintf(`EXISTS (
+			SELECT 1
+			  FROM container_lines cl
+			  JOIN sales_order_lines sol ON sol.id = cl.sales_order_line_id
+			  JOIN sales_orders so       ON so.id  = sol.sales_order_id
+			 WHERE cl.container_id = le.container_id
+			   AND so.customer_id = $%d
+		)`, idx))
+		args = append(args, *f.CustomerID)
+	}
+
+	if len(clauses) == 0 {
+		return "", args
+	}
+	return " WHERE " + strings.Join(clauses, " AND "), args
+}
+
+const leSelectColsAliased = `
+SELECT le.id, le.container_id, le.loading_plan_id, le.exception_type, le.sku_id, le.qty,
+       le.reason, le.photo_urls, le.approved_by, le.approved_at, le.resolution,
+       le.resolution_notes, le.carry_over_so_line_id, le.substitute_sku_id,
+       le.created_by, le.created_at
+  FROM loading_exceptions le`
+
+func (s *pgStore) selectCrossContainerKeyset(ctx context.Context, f CrossContainerFilter, cur httpkit.Cursor, limit int) ([]LoadingException, error) {
+	whereClause, args := crossContainerWhere(f, 1)
+	q := leSelectColsAliased + whereClause
+	idx := len(args) + 1
+	if !cur.IsZero() {
+		if whereClause == "" {
+			q += fmt.Sprintf(" WHERE (le.created_at, le.id) < ($%d, $%d)", idx, idx+1)
+		} else {
+			q += fmt.Sprintf(" AND (le.created_at, le.id) < ($%d, $%d)", idx, idx+1)
+		}
+		args = append(args, cur.Ts, cur.ID)
+		idx += 2
+	}
+	q += fmt.Sprintf(" ORDER BY le.created_at DESC, le.id DESC LIMIT $%d", idx)
+	args = append(args, limit)
+
+	rows, err := s.pool.Query(ctx, q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []LoadingException
+	for rows.Next() {
+		e, err := scanException(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
+func (s *pgStore) crossContainerSummary(ctx context.Context, f CrossContainerFilter) (CrossContainerSummary, error) {
+	// Summary always counts pending rows regardless of caller filter — the
+	// pinned counter is "X exceptions blocking N containers" by definition.
+	scoped := f
+	scoped.Status = "pending"
+	whereClause, args := crossContainerWhere(scoped, 1)
+
+	q := `SELECT COUNT(*) AS pending_count,
+	             COUNT(DISTINCT le.container_id) AS blocked_containers
+	        FROM loading_exceptions le` + whereClause
+
+	var sum CrossContainerSummary
+	err := s.pool.QueryRow(ctx, q, args...).Scan(&sum.PendingCount, &sum.BlockedContainers)
+	return sum, err
 }
 
 func (s *pgStore) pendingByContainer(ctx context.Context, containerID uuid.UUID) (PendingSummary, error) {
