@@ -96,7 +96,7 @@ func main() {
 
 	// ── Module services ─────────────────────────────────────
 	authnSvc := authn.NewService(authnStore, cfg.AuthSecret)
-	catalogSvc := catalog.NewService(catalogStore)
+	catalogSvc := catalog.NewService(catalogStore, &catalogPolicyAuditAdapter{pool: pool})
 	orderSvc := order.NewService(orderStore)
 	// planningWOCanceller is wired after productionSvc is constructed (cycle
 	// avoidance, same pattern as woAdvance/costingChecker). It powers the
@@ -1474,5 +1474,37 @@ func (a *deliveryShortShippedAdapter) AutoCreateShortShipped(ctx context.Context
 		Reason:        "auto: actual loaded qty is short of plan",
 		CreatedBy:     in.ActorID,
 	})
+	return err
+}
+
+// catalogPolicyAuditAdapter implements catalog.PolicyAuditLogger by writing
+// directly to inventory_audit_log via pgxpool. Inlined here so catalog does
+// not depend on the inventory module — the audit table is a shared
+// cross-module ledger keyed by entity_type. Errors are swallowed by the
+// service (best-effort): a transient audit-write failure must never roll
+// back the threshold mutation, since the row in materials is the source of
+// truth.
+//
+// MIN_REMNANT_POLICY_UPDATED rows carry entity_type="MATERIAL", entity_id =
+// material.id; metadata holds the before/after thresholds so accountants can
+// reconstruct the change without joining.
+type catalogPolicyAuditAdapter struct{ pool *pgxpool.Pool }
+
+func (a *catalogPolicyAuditAdapter) LogMinRemnantPolicyChange(ctx context.Context, in catalog.MinRemnantPolicyChange) error {
+	meta, err := json.Marshal(map[string]any{
+		"prev_length_mm": in.PrevLengthMM,
+		"prev_width_mm":  in.PrevWidthMM,
+		"new_length_mm":  in.NewLengthMM,
+		"new_width_mm":   in.NewWidthMM,
+	})
+	if err != nil {
+		return err
+	}
+	_, err = a.pool.Exec(ctx,
+		`INSERT INTO inventory_audit_log
+		    (id, entity_type, entity_id, action, actor_id, metadata, created_at)
+		 VALUES (gen_random_uuid(), 'MATERIAL', $1, 'MIN_REMNANT_POLICY_UPDATED', $2, $3, NOW())`,
+		in.MaterialID, in.ActorID, meta,
+	)
 	return err
 }

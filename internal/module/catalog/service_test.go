@@ -34,6 +34,14 @@ type mockStore struct {
 	// deactivateMaterial
 	deactivateMaterialErr error
 
+	// updateMinRemnantPolicy
+	updateMinRemnantPolicyResult Material
+	updateMinRemnantPolicyErr    error
+	updateMinRemnantPolicyCalls  int
+	updateMinRemnantPolicyLastID uuid.UUID
+	updateMinRemnantPolicyLastL  int
+	updateMinRemnantPolicyLastW  int
+
 	// insertSKU
 	insertSKUErr error
 
@@ -90,6 +98,13 @@ func (m *mockStore) selectMaterialByID(_ context.Context, _ uuid.UUID) (Material
 }
 func (m *mockStore) deactivateMaterial(_ context.Context, _ uuid.UUID) error {
 	return m.deactivateMaterialErr
+}
+func (m *mockStore) updateMinRemnantPolicy(_ context.Context, id uuid.UUID, lengthMM, widthMM int) (Material, error) {
+	m.updateMinRemnantPolicyCalls++
+	m.updateMinRemnantPolicyLastID = id
+	m.updateMinRemnantPolicyLastL = lengthMM
+	m.updateMinRemnantPolicyLastW = widthMM
+	return m.updateMinRemnantPolicyResult, m.updateMinRemnantPolicyErr
 }
 func (m *mockStore) insertSKU(_ context.Context, _ SKU) error {
 	return m.insertSKUErr

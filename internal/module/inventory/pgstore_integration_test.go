@@ -1391,7 +1391,10 @@ func TestIntegration_OverflowRed_BlocksSheetIssueAndAllowsRemnantCut(t *testing.
 	}
 	blockedSheetID := remaining.Items[0].ID
 
-	if err := svc.PreAssignSheet(context.Background(), blockedSheetID, uuid.New()); !errors.Is(err, domain.ErrPreconditionFailed) {
+	if err := svc.PreAssignSheet(context.Background(), PreAssignSheetInput{
+		SheetID:     blockedSheetID,
+		WorkOrderID: uuid.New(),
+	}); !errors.Is(err, domain.ErrPreconditionFailed) {
 		t.Fatalf("PreAssignSheet: want ErrPreconditionFailed, got %v", err)
 	}
 

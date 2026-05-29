@@ -22,16 +22,17 @@ func NewPGStore(pool *pgxpool.Pool) store {
 
 func (s *pgStore) insertMaterial(ctx context.Context, m Material) error {
 	_, err := s.pool.Exec(ctx,
-		`INSERT INTO materials (id, type, name, unit, is_active, created_at)
-		 VALUES ($1, $2, $3, $4, $5, $6)`,
-		m.ID, m.Type, m.Name, m.Unit, m.IsActive, m.CreatedAt,
+		`INSERT INTO materials (id, type, name, unit, is_active, min_remnant_length_mm, min_remnant_width_mm, created_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+		m.ID, m.Type, m.Name, m.Unit, m.IsActive, m.MinRemnantLengthMM, m.MinRemnantWidthMM, m.CreatedAt,
 	)
 	return err
 }
 
 func (s *pgStore) selectMaterials(ctx context.Context) ([]Material, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT id, type, name, unit, is_active, created_at FROM materials WHERE is_active = true ORDER BY created_at`,
+		`SELECT id, type, name, unit, is_active, min_remnant_length_mm, min_remnant_width_mm, created_at
+		 FROM materials WHERE is_active = true ORDER BY created_at`,
 	)
 	if err != nil {
 		return nil, err
@@ -41,7 +42,8 @@ func (s *pgStore) selectMaterials(ctx context.Context) ([]Material, error) {
 	var out []Material
 	for rows.Next() {
 		var m Material
-		if err := rows.Scan(&m.ID, &m.Type, &m.Name, &m.Unit, &m.IsActive, &m.CreatedAt); err != nil {
+		if err := rows.Scan(&m.ID, &m.Type, &m.Name, &m.Unit, &m.IsActive,
+			&m.MinRemnantLengthMM, &m.MinRemnantWidthMM, &m.CreatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, m)
@@ -76,7 +78,7 @@ func (s *pgStore) selectMaterialsPaged(ctx context.Context, p httpkit.PageParams
 	}
 
 	query := fmt.Sprintf(
-		`SELECT id, type, name, unit, is_active, created_at
+		`SELECT id, type, name, unit, is_active, min_remnant_length_mm, min_remnant_width_mm, created_at
 		 FROM materials
 		 WHERE is_active = true AND name ILIKE $1
 		 ORDER BY %s %s
@@ -92,7 +94,8 @@ func (s *pgStore) selectMaterialsPaged(ctx context.Context, p httpkit.PageParams
 	var out []Material
 	for rows.Next() {
 		var m Material
-		if err := rows.Scan(&m.ID, &m.Type, &m.Name, &m.Unit, &m.IsActive, &m.CreatedAt); err != nil {
+		if err := rows.Scan(&m.ID, &m.Type, &m.Name, &m.Unit, &m.IsActive,
+			&m.MinRemnantLengthMM, &m.MinRemnantWidthMM, &m.CreatedAt); err != nil {
 			return nil, 0, err
 		}
 		out = append(out, m)
@@ -103,9 +106,11 @@ func (s *pgStore) selectMaterialsPaged(ctx context.Context, p httpkit.PageParams
 func (s *pgStore) selectMaterialByID(ctx context.Context, id uuid.UUID) (Material, error) {
 	var m Material
 	err := s.pool.QueryRow(ctx,
-		`SELECT id, type, name, unit, is_active, created_at FROM materials WHERE id = $1`,
+		`SELECT id, type, name, unit, is_active, min_remnant_length_mm, min_remnant_width_mm, created_at
+		 FROM materials WHERE id = $1`,
 		id,
-	).Scan(&m.ID, &m.Type, &m.Name, &m.Unit, &m.IsActive, &m.CreatedAt)
+	).Scan(&m.ID, &m.Type, &m.Name, &m.Unit, &m.IsActive,
+		&m.MinRemnantLengthMM, &m.MinRemnantWidthMM, &m.CreatedAt)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return Material{}, domain.ErrNotFound
@@ -127,6 +132,26 @@ func (s *pgStore) deactivateMaterial(ctx context.Context, id uuid.UUID) error {
 		return domain.ErrNotFound
 	}
 	return nil
+}
+
+func (s *pgStore) updateMinRemnantPolicy(ctx context.Context, id uuid.UUID, lengthMM, widthMM int) (Material, error) {
+	var m Material
+	err := s.pool.QueryRow(ctx,
+		`UPDATE materials
+		    SET min_remnant_length_mm = $2,
+		        min_remnant_width_mm  = $3
+		  WHERE id = $1 AND is_active = true
+		  RETURNING id, type, name, unit, is_active, min_remnant_length_mm, min_remnant_width_mm, created_at`,
+		id, lengthMM, widthMM,
+	).Scan(&m.ID, &m.Type, &m.Name, &m.Unit, &m.IsActive,
+		&m.MinRemnantLengthMM, &m.MinRemnantWidthMM, &m.CreatedAt)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return Material{}, domain.ErrNotFound
+		}
+		return Material{}, err
+	}
+	return m, nil
 }
 
 func (s *pgStore) insertSKU(ctx context.Context, sku SKU) error {

@@ -97,6 +97,13 @@ Final Step: Update Instincts
 - Analyze the completed task for any new Go patterns, concurrency pitfalls, or monolith instincts discovered.
 - Append these lessons to Vmarble-Warehouse-Management-Service/INSTINCTS.md.
 
+Update working memory: `docs/PROJECT_STATE.md`
+- Append a row to **§3 Recently shipped** (newest on top) with PR # + one-line summary.
+- Remove the closed issue from **§4 Open backlog**.
+- Add any breaking change / silent contract change to **§7 Known gotchas**.
+- Update `Last updated:` date.
+- This file is gitignored (working memory only) — update it locally; do NOT include it in the commit.
+
 Commit message format: `<type>(scope): brief description` (conventional-commit, ASCII subject ≤72 chars).
 
 Authorship policy (strict):

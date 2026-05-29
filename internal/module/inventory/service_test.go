@@ -55,6 +55,11 @@ type mockStore struct {
 	// updateSheetStatus
 	updateSheetStatusErr error
 
+	// selectMinRemnantPolicyByParentBoard (BR-K06/K07)
+	minRemnantPolicyL   int
+	minRemnantPolicyW   int
+	minRemnantPolicyErr error
+
 	// insertCuttingRecord
 	insertCuttingRecordErr error
 
@@ -230,6 +235,9 @@ func (m *mockStore) countAvailableSheetsByMaterial(_ context.Context, materialID
 }
 func (m *mockStore) updateSheetStatus(_ context.Context, _ uuid.UUID, _ string, _ *uuid.UUID) error {
 	return m.updateSheetStatusErr
+}
+func (m *mockStore) selectMinRemnantPolicyByParentBoard(_ context.Context, _ uuid.UUID) (int, int, error) {
+	return m.minRemnantPolicyL, m.minRemnantPolicyW, m.minRemnantPolicyErr
 }
 func (m *mockStore) preAssignSheet(_ context.Context, _ uuid.UUID, _ uuid.UUID) error {
 	m.preAssignSheetCalled = true
@@ -5225,5 +5233,109 @@ func TestUpdateRejectionClaim_OpenToRejected_HappyPath(t *testing.T) {
 	}
 	if got.ClaimStatus != ClaimStatusRejected {
 		t.Errorf("claim_status = %q, want REJECTED", got.ClaimStatus)
+	}
+}
+
+// ── BR-K06/K07: min_remnant policy ──────────────────────────────────────────
+
+// recordCutWithPolicy is a small fixture builder shared by the BR-K06 cases.
+// All three cases cut from the same sheet with the same used+remnant
+// dimensions; only the policy thresholds differ.
+func recordCutWithPolicy(t *testing.T, policyL, policyW int, remnantDim domain.Dimension) (CutResult, *mockStore) {
+	t.Helper()
+	sheetID := uuid.New()
+	woID := uuid.New()
+	skuID := uuid.New()
+
+	st := &mockStore{
+		selectSheetByIDResult:   availableSheet(sheetID),
+		selectOverflowSheetArea: 1,
+		minRemnantPolicyL:       policyL,
+		minRemnantPolicyW:       policyW,
+	}
+	svc := NewService(st, nil)
+
+	in := RecordCutInput{
+		SheetID:          ptr(sheetID),
+		WorkOrderID:      woID,
+		SKUID:            skuID,
+		UsedDimension:    dim1000x500,
+		RemnantDimension: &remnantDim,
+	}
+	result, err := svc.RecordCut(context.Background(), in)
+	if err != nil {
+		t.Fatalf("RecordCut: %v", err)
+	}
+	return result, st
+}
+
+// BR-K07: when both thresholds are 0, the policy is bypassed and the remnant
+// is kept regardless of size. This preserves legacy material behaviour.
+func TestRecordCut_BRK07_BothThresholdsZero_KeepsRemnant(t *testing.T) {
+	tinyRemnant := domain.Dimension{LengthMM: 50, WidthMM: 30}
+	result, st := recordCutWithPolicy(t, 0, 0, tinyRemnant)
+
+	if result.DroppedRemnantCount != 0 {
+		t.Errorf("DroppedRemnantCount = %d, want 0 when policy is disabled", result.DroppedRemnantCount)
+	}
+	if result.RemnantID == nil {
+		t.Fatal("RemnantID must be set when policy is bypassed")
+	}
+	if st.recordCutAtomicallyOp.NewRemnant == nil {
+		t.Fatal("op.NewRemnant must be non-nil when policy is bypassed")
+	}
+}
+
+// BR-K06: when remnant length < min_remnant_length_mm, drop the remnant into
+// waste. No remnant row is inserted; DroppedRemnantCount = 1.
+func TestRecordCut_BRK06_LengthBelowThreshold_DropsRemnant(t *testing.T) {
+	subThresholdLen := domain.Dimension{LengthMM: 99, WidthMM: 400}
+	result, st := recordCutWithPolicy(t, 100, 0, subThresholdLen)
+
+	if result.DroppedRemnantCount != 1 {
+		t.Errorf("DroppedRemnantCount = %d, want 1 when length below threshold", result.DroppedRemnantCount)
+	}
+	if result.RemnantID != nil {
+		t.Errorf("RemnantID = %v, want nil when remnant is dropped", *result.RemnantID)
+	}
+	if st.recordCutAtomicallyOp.NewRemnant != nil {
+		t.Error("op.NewRemnant must be nil when remnant is dropped by policy")
+	}
+	if st.recordCutAtomicallyOp.Record.ProducedRemnantID != nil {
+		t.Error("Record.ProducedRemnantID must be nil when remnant is dropped")
+	}
+}
+
+// BR-K06: when remnant width < min_remnant_width_mm, drop the remnant into
+// waste even if the length passes.
+func TestRecordCut_BRK06_WidthBelowThreshold_DropsRemnant(t *testing.T) {
+	subThresholdWid := domain.Dimension{LengthMM: 800, WidthMM: 49}
+	result, st := recordCutWithPolicy(t, 0, 50, subThresholdWid)
+
+	if result.DroppedRemnantCount != 1 {
+		t.Errorf("DroppedRemnantCount = %d, want 1 when width below threshold", result.DroppedRemnantCount)
+	}
+	if result.RemnantID != nil {
+		t.Errorf("RemnantID = %v, want nil when remnant is dropped", *result.RemnantID)
+	}
+	if st.recordCutAtomicallyOp.NewRemnant != nil {
+		t.Error("op.NewRemnant must be nil when remnant is dropped by policy")
+	}
+}
+
+// BR-K06: remnant exactly at the threshold passes (the rule rejects strictly
+// below, not equal). Pinning this avoids accidental off-by-one regressions.
+func TestRecordCut_BRK06_ExactlyAtThreshold_KeepsRemnant(t *testing.T) {
+	atThreshold := domain.Dimension{LengthMM: 100, WidthMM: 50}
+	result, st := recordCutWithPolicy(t, 100, 50, atThreshold)
+
+	if result.DroppedRemnantCount != 0 {
+		t.Errorf("DroppedRemnantCount = %d, want 0 when remnant equals threshold", result.DroppedRemnantCount)
+	}
+	if result.RemnantID == nil {
+		t.Fatal("RemnantID must be set when remnant matches threshold exactly")
+	}
+	if st.recordCutAtomicallyOp.NewRemnant == nil {
+		t.Fatal("op.NewRemnant must be non-nil when remnant matches threshold exactly")
 	}
 }

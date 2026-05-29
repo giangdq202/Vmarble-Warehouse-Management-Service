@@ -320,6 +320,41 @@ func (s *service) RecordCut(ctx context.Context, in RecordCutInput) (CutResult, 
 			}
 		}
 
+		// BR-K06/K07: drop sub-threshold leftovers into waste before creating a
+		// remnant row. Policy is read by the lineage's root board sheet so nested
+		// cuts inherit the same min_remnant policy as the parent. When both
+		// thresholds are 0 (legacy materials) the check bypasses and we keep the
+		// remnant.
+		policyLen, policyWid, err := s.st.selectMinRemnantPolicyByParentBoard(ctx, parentBoardID)
+		if err != nil {
+			return CutResult{}, err
+		}
+		dropByPolicy := false
+		if policyLen > 0 && in.RemnantDimension.LengthMM < policyLen {
+			dropByPolicy = true
+		}
+		if policyWid > 0 && in.RemnantDimension.WidthMM < policyWid {
+			dropByPolicy = true
+		}
+		if dropByPolicy {
+			// Remnant area falls into waste naturally — the WasteReport SQL
+			// computes waste = source_area − used_area − new_remnant_area, and
+			// new_remnant_area is 0 when no remnant row is inserted.
+			// Skip remnant creation and signal the drop to the caller.
+			//
+			// We intentionally do NOT change ProducedRemnantID — leaving it nil
+			// means this cut produced no usable leftover, which is exactly the
+			// legacy waste shape.
+			if err := s.st.recordCutAtomically(ctx, op); err != nil {
+				return CutResult{}, err
+			}
+			s.afterCut(ctx, in, cr)
+			return CutResult{
+				CuttingRecordID:     cr.ID,
+				DroppedRemnantCount: 1,
+			}, nil
+		}
+
 		// Default bounding_box to the actual remnant dimension when not provided.
 		// This guarantees that FindAvailableRemnants can always filter on bounding_box
 		// without needing to fall back to length_mm / width_mm at query time.
@@ -384,9 +419,15 @@ func (s *service) RecordCut(ctx context.Context, in RecordCutInput) (CutResult, 
 		}
 	}
 
-	// After a successful cut, auto-advance the work order from IN_CUTTING to
-	// IN_PROCESSING. If the transition is not valid (e.g. the work order has
-	// already been advanced by another path), silently log and continue.
+	s.afterCut(ctx, in, cr)
+
+	return result, nil
+}
+
+// afterCut runs the best-effort side-effects shared between the BR-K06 drop
+// path and the regular happy path: work-order auto-advance and SSE
+// notification. Failures are logged and never roll the persisted cut back.
+func (s *service) afterCut(ctx context.Context, in RecordCutInput, cr CuttingRecord) {
 	if s.woa != nil {
 		if err := s.woa.AdvanceStatus(ctx, in.WorkOrderID, AdvanceWOInput{To: domain.WOInProcessing}); err != nil {
 			if !errors.Is(err, domain.ErrInvalidTransition) {
@@ -396,16 +437,12 @@ func (s *service) RecordCut(ctx context.Context, in RecordCutInput) (CutResult, 
 		}
 	}
 
-	// Best-effort SSE notification — log + continue if the broker is down so a
-	// transient failure never rolls back the persisted cut.
 	if s.notifier != nil {
 		if err := s.notifier.NotifyCuttingRecorded(ctx, in.WorkOrderID.String(), cr.ID.String()); err != nil {
 			slog.Warn("inventory: notify cutting recorded failed",
 				"work_order_id", in.WorkOrderID, "cutting_record_id", cr.ID, "err", err)
 		}
 	}
-
-	return result, nil
 }
 
 func (s *service) FindAvailableRemnants(ctx context.Context, minDim domain.Dimension) ([]Remnant, error) {

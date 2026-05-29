@@ -22,6 +22,7 @@ func (h *Handler) Register(rg *gin.RouterGroup) {
 	rg.POST("/materials", auth.RequireRole(auth.RoleWarehouse, auth.RoleAdmin), h.createMaterial)
 	rg.GET("/materials", h.listMaterials)
 	rg.GET("/materials/:id", h.getMaterial)
+	rg.PATCH("/materials/:id", auth.RequireAdminOnly(), h.updateMinRemnantPolicy)
 	rg.DELETE("/materials/:id", auth.RequireRole(auth.RoleAdmin), h.deleteMaterial)
 
 	rg.POST("/skus", auth.RequireRole(auth.RoleWarehouse, auth.RoleAdmin), h.createSKU)
@@ -139,6 +140,54 @@ func (h *Handler) deleteMaterial(c *gin.Context) {
 		return
 	}
 	c.Status(http.StatusNoContent)
+}
+
+// updateMinRemnantPolicy godoc
+//
+// @Summary      Update min remnant policy for material (BR-K06/K07/K08)
+// @Description  Admin-only endpoint to set the minimum dimension thresholds at
+// @Description  which a leftover is kept as a remnant. A value of 0 disables
+// @Description  enforcement on that axis. Threshold change is persisted to the
+// @Description  inventory audit log (action=MIN_REMNANT_POLICY_UPDATED).
+// @Tags         catalog
+// @Accept       json
+// @Produce      json
+// @Param        id    path      string                       true  "material id (uuid)"
+// @Param        body  body      UpdateMinRemnantPolicyInput  true  "payload"
+// @Success      200   {object}  Material
+// @Failure      400   {object}  map[string]string
+// @Failure      401   {object}  map[string]string
+// @Failure      404   {object}  map[string]string
+// @Security     BearerAuth
+// @Router       /api/v1/materials/{id} [patch]
+func (h *Handler) updateMinRemnantPolicy(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+	var in UpdateMinRemnantPolicyInput
+	if !httpkit.Bind(c, &in) {
+		return
+	}
+	identity, ok := auth.FromContext(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "missing auth identity"})
+		return
+	}
+	actorID, err := uuid.Parse(identity.UserID)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid auth identity"})
+		return
+	}
+	in.MaterialID = id
+	in.ActorID = actorID
+	m, err := h.svc.UpdateMinRemnantPolicy(c.Request.Context(), in)
+	if err != nil {
+		httpkit.Error(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, m)
 }
 
 // createSKU godoc

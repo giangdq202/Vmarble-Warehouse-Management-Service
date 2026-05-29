@@ -19,18 +19,30 @@ const (
 )
 
 type Material struct {
-	ID        uuid.UUID    `json:"id"`
-	Type      MaterialType `json:"type"`
-	Name      string       `json:"name"`
-	Unit      string       `json:"unit"`
-	IsActive  bool         `json:"is_active"`
-	CreatedAt time.Time    `json:"created_at"`
+	ID                 uuid.UUID    `json:"id"`
+	Type               MaterialType `json:"type"`
+	Name               string       `json:"name"`
+	Unit               string       `json:"unit"`
+	IsActive           bool         `json:"is_active"`
+	MinRemnantLengthMM int          `json:"min_remnant_length_mm"`
+	MinRemnantWidthMM  int          `json:"min_remnant_width_mm"`
+	CreatedAt          time.Time    `json:"created_at"`
 }
 
 type CreateMaterialInput struct {
 	Type MaterialType `json:"type"`
 	Name string       `json:"name"`
 	Unit string       `json:"unit"`
+}
+
+// UpdateMinRemnantPolicyInput carries new threshold values for BR-K06/K07/K08.
+// Both axes must be non-negative integers in millimetres. A value of 0 disables
+// enforcement on that axis.
+type UpdateMinRemnantPolicyInput struct {
+	MaterialID         uuid.UUID `json:"-"`
+	MinRemnantLengthMM int       `json:"min_remnant_length_mm"`
+	MinRemnantWidthMM  int       `json:"min_remnant_width_mm"`
+	ActorID            uuid.UUID `json:"-"`
 }
 
 type SKU struct {
@@ -88,6 +100,12 @@ type Service interface {
 	ListMaterials(ctx context.Context, p httpkit.PageParams) (httpkit.PagedResult[Material], error)
 	GetMaterial(ctx context.Context, materialID uuid.UUID) (Material, error)
 	DeactivateMaterial(ctx context.Context, materialID uuid.UUID) error
+
+	// UpdateMinRemnantPolicy adjusts the per-material thresholds used by
+	// inventory.RecordCut to drop sub-threshold remnants into waste
+	// (BR-K06/K07/K08). Both values must be non-negative; 0 disables the
+	// corresponding axis. Audit is logged by the catalog service.
+	UpdateMinRemnantPolicy(ctx context.Context, in UpdateMinRemnantPolicyInput) (Material, error)
 
 	CreateSKU(ctx context.Context, in CreateSKUInput) (SKU, error)
 	ListSKUs(ctx context.Context, p httpkit.PageParams) (httpkit.PagedResult[SKU], error)

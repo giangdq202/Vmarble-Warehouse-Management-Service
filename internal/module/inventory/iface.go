@@ -70,6 +70,12 @@ type CutResult struct {
 	CuttingRecordID uuid.UUID   `json:"cutting_record_id"`
 	RemnantID       *uuid.UUID  `json:"remnant_id,omitempty"`
 	BarcodeIDs      []uuid.UUID `json:"barcode_ids,omitempty"`
+	// DroppedRemnantCount is 1 when the cut produced a leftover whose length or
+	// width fell below the material's min_remnant policy (BR-K06) and was
+	// therefore dropped into waste instead of being persisted as a remnant.
+	// 0 otherwise. Currently 0/1 because RecordCut handles a single cut, but
+	// the field is typed as int so future bulk-cut endpoints can reuse it.
+	DroppedRemnantCount int `json:"dropped_remnant_count"`
 }
 
 // RemnantFilter holds optional filter parameters for ListRemnants.

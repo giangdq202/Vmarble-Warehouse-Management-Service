@@ -272,6 +272,29 @@ func (s *pgStore) countAvailableSheetsByMaterial(ctx context.Context, materialID
 	return n, nil
 }
 
+// selectMinRemnantPolicyByParentBoard resolves the per-material BR-K06/K07
+// thresholds for a given board sheet. The lookup walks board_sheets →
+// inventory_lots → materials. A 0 means enforcement is disabled on that axis.
+// Returns ErrNotFound when the board sheet does not exist.
+func (s *pgStore) selectMinRemnantPolicyByParentBoard(ctx context.Context, boardSheetID uuid.UUID) (int, int, error) {
+	var lengthMM, widthMM int
+	err := s.pool.QueryRow(ctx,
+		`SELECT m.min_remnant_length_mm, m.min_remnant_width_mm
+		 FROM board_sheets bs
+		 JOIN inventory_lots il ON il.id = bs.lot_id
+		 JOIN materials      m  ON m.id = il.material_id
+		 WHERE bs.id = $1`,
+		boardSheetID,
+	).Scan(&lengthMM, &widthMM)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return 0, 0, domain.NewBizError(domain.ErrNotFound, "board sheet not found")
+		}
+		return 0, 0, fmt.Errorf("select min remnant policy: %w", err)
+	}
+	return lengthMM, widthMM, nil
+}
+
 func (s *pgStore) updateSheetStatus(ctx context.Context, id uuid.UUID, status string, issuedToWO *uuid.UUID) error {
 	tag, err := s.pool.Exec(ctx,
 		`UPDATE board_sheets SET status = $1, issued_to_wo_id = $2 WHERE id = $3`,

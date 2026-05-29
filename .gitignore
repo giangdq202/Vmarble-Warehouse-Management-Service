@@ -44,3 +44,6 @@ docs/demo-prototype-script.md
 docs/*demo-script*.md
 docs/customer-*.md
 docs/*-customer-*.md
+
+# Working memory cho Claude Code agents — local session state, không share team.
+docs/PROJECT_STATE.md

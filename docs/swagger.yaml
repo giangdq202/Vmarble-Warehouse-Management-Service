@@ -712,6 +712,10 @@ definitions:
         type: string
       is_active:
         type: boolean
+      min_remnant_length_mm:
+        type: integer
+      min_remnant_width_mm:
+        type: integer
       name:
         type: string
       type:
@@ -756,6 +760,13 @@ definitions:
         type: array
       sku_id:
         type: string
+    type: object
+  internal_module_catalog.UpdateMinRemnantPolicyInput:
+    properties:
+      min_remnant_length_mm:
+        type: integer
+      min_remnant_width_mm:
+        type: integer
     type: object
   internal_module_costing.CostingAdjustment:
     properties:
@@ -1385,6 +1396,14 @@ definitions:
         type: array
       cutting_record_id:
         type: string
+      dropped_remnant_count:
+        description: |-
+          DroppedRemnantCount is 1 when the cut produced a leftover whose length or
+          width fell below the material's min_remnant policy (BR-K06) and was
+          therefore dropped into waste instead of being persisted as a remnant.
+          0 otherwise. Currently 0/1 because RecordCut handles a single cut, but
+          the field is typed as int so future bulk-cut endpoints can reuse it.
+        type: integer
       remnant_id:
         type: string
     type: object
@@ -6553,6 +6572,56 @@ paths:
       security:
       - BearerAuth: []
       summary: Get material
+      tags:
+      - catalog
+    patch:
+      consumes:
+      - application/json
+      description: |-
+        Admin-only endpoint to set the minimum dimension thresholds at
+        which a leftover is kept as a remnant. A value of 0 disables
+        enforcement on that axis. Threshold change is persisted to the
+        inventory audit log (action=MIN_REMNANT_POLICY_UPDATED).
+      parameters:
+      - description: material id (uuid)
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: payload
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_module_catalog.UpdateMinRemnantPolicyInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_module_catalog.Material'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Update min remnant policy for material (BR-K06/K07/K08)
       tags:
       - catalog
   /api/v1/notifications/stream:
