@@ -220,7 +220,8 @@ func (s *pgStore) insertCostingAdjustment(ctx context.Context, a CostingAdjustme
 	return err
 }
 
-// selectWasteReport aggregates per-cut waste area into a per-material ledger.
+// selectWasteReport aggregates per-cut waste area into a per-material ledger,
+// then offsets with scrap sale revenue (BR-C05/C06).
 //
 // Per-cut waste = source_area - used_area - new_remnant_area, where:
 //   - source_area is the area of the immediate source (sheet for direct cuts,
@@ -235,6 +236,12 @@ func (s *pgStore) insertCostingAdjustment(ctx context.Context, a CostingAdjustme
 // remnant in the lineage shares the original sheet's per-area cost.
 //
 // Date filter is applied on cutting_records.created_at (half-open [from, to)).
+// Scrap revenue filter uses sale_date with the same bounds (BR-C07).
+//
+// Materials with scrap sales but no cuts in the period are UNIONed in so
+// accounting sees the full picture (user confirm #2).
+//
+// net_waste_cost = GREATEST(total_waste_cost - scrap_sale_revenue, 0) (BR-C06).
 func (s *pgStore) selectWasteReport(ctx context.Context, filter WasteReportFilter) ([]WasteReportRow, error) {
 	const query = `
 WITH cuts_with_waste AS (
@@ -273,31 +280,63 @@ sheet_costs_per_material AS (
     JOIN board_sheets bs ON bs.id = ds.root_sheet_id
     JOIN inventory_lots il ON il.id = bs.lot_id
     GROUP BY il.material_id
+),
+waste_from_cuts AS (
+    SELECT
+        il.material_id,
+        COALESCE(m.name, 'Unknown') AS material_name,
+        COUNT(DISTINCT cwnr.root_sheet_id) AS sheets_consumed,
+        COALESCE(SUM(GREATEST(cwnr.source_area_mm2 - cwnr.used_area_mm2 - cwnr.new_remnant_area_mm2, 0)), 0) AS waste_area_mm2,
+        COALESCE(scpm.avg_sheet_cost, 0) AS avg_sheet_cost,
+        COALESCE(scpm.currency, 'VND') AS currency,
+        COALESCE(SUM(
+            CASE
+                WHEN CAST(bs.length_mm AS bigint) * CAST(bs.width_mm AS bigint) > 0 THEN
+                    GREATEST(cwnr.source_area_mm2 - cwnr.used_area_mm2 - cwnr.new_remnant_area_mm2, 0)
+                    * bs.cost_amount
+                    / (CAST(bs.length_mm AS bigint) * CAST(bs.width_mm AS bigint))
+                ELSE 0
+            END
+        ), 0) AS total_waste_cost
+    FROM cuts_with_waste cwnr
+    JOIN board_sheets bs ON bs.id = cwnr.root_sheet_id
+    JOIN inventory_lots il ON il.id = bs.lot_id
+    LEFT JOIN materials m ON m.id = il.material_id
+    LEFT JOIN sheet_costs_per_material scpm ON scpm.material_id = il.material_id
+    WHERE ($3::uuid IS NULL OR il.material_id = $3)
+    GROUP BY il.material_id, m.name, scpm.avg_sheet_cost, scpm.currency
+),
+scrap_revenue_per_material AS (
+    SELECT
+        material_id,
+        SUM(total_amount) AS scrap_revenue_amount
+    FROM scrap_sales
+    WHERE currency = 'VND'
+      AND ($1::timestamptz IS NULL OR sale_date >= $1::date)
+      AND ($2::timestamptz IS NULL OR sale_date < $2::date)
+      AND ($3::uuid IS NULL OR material_id = $3)
+    GROUP BY material_id
+),
+all_materials AS (
+    SELECT material_id FROM waste_from_cuts
+    UNION
+    SELECT material_id FROM scrap_revenue_per_material
 )
 SELECT
-    il.material_id,
-    COALESCE(m.name, 'Unknown') AS material_name,
-    COUNT(DISTINCT cwnr.root_sheet_id) AS sheets_consumed,
-    COALESCE(SUM(GREATEST(cwnr.source_area_mm2 - cwnr.used_area_mm2 - cwnr.new_remnant_area_mm2, 0)), 0) AS waste_area_mm2,
-    COALESCE(scpm.avg_sheet_cost, 0) AS avg_sheet_cost,
-    COALESCE(scpm.currency, 'VND') AS currency,
-    COALESCE(SUM(
-        CASE
-            WHEN CAST(bs.length_mm AS bigint) * CAST(bs.width_mm AS bigint) > 0 THEN
-                GREATEST(cwnr.source_area_mm2 - cwnr.used_area_mm2 - cwnr.new_remnant_area_mm2, 0)
-                * bs.cost_amount
-                / (CAST(bs.length_mm AS bigint) * CAST(bs.width_mm AS bigint))
-            ELSE 0
-        END
-    ), 0) AS total_waste_cost
-FROM cuts_with_waste cwnr
-JOIN board_sheets bs ON bs.id = cwnr.root_sheet_id
-JOIN inventory_lots il ON il.id = bs.lot_id
-LEFT JOIN materials m ON m.id = il.material_id
-LEFT JOIN sheet_costs_per_material scpm ON scpm.material_id = il.material_id
-WHERE ($3::uuid IS NULL OR il.material_id = $3)
-GROUP BY il.material_id, m.name, scpm.avg_sheet_cost, scpm.currency
-ORDER BY total_waste_cost DESC, material_name ASC NULLS LAST
+    am.material_id,
+    COALESCE(wfc.material_name, COALESCE(m.name, 'Unknown')) AS material_name,
+    COALESCE(wfc.sheets_consumed, 0) AS sheets_consumed,
+    COALESCE(wfc.waste_area_mm2, 0) AS waste_area_mm2,
+    COALESCE(wfc.avg_sheet_cost, 0) AS avg_sheet_cost,
+    COALESCE(wfc.currency, 'VND') AS currency,
+    COALESCE(wfc.total_waste_cost, 0) AS total_waste_cost,
+    COALESCE(srpm.scrap_revenue_amount, 0) AS scrap_revenue_amount,
+    GREATEST(COALESCE(wfc.total_waste_cost, 0) - COALESCE(srpm.scrap_revenue_amount, 0), 0) AS net_waste_cost
+FROM all_materials am
+LEFT JOIN waste_from_cuts wfc ON wfc.material_id = am.material_id
+LEFT JOIN scrap_revenue_per_material srpm ON srpm.material_id = am.material_id
+LEFT JOIN materials m ON m.id = am.material_id
+ORDER BY net_waste_cost DESC, material_name ASC NULLS LAST
 `
 	rows, err := s.pool.Query(ctx, query, filter.From, filter.To, filter.MaterialID)
 	if err != nil {
@@ -308,7 +347,7 @@ ORDER BY total_waste_cost DESC, material_name ASC NULLS LAST
 	out := make([]WasteReportRow, 0)
 	for rows.Next() {
 		var r WasteReportRow
-		var avgAmount, totalAmount int64
+		var avgAmount, totalWasteAmount, scrapRevenueAmount, netWasteAmount int64
 		var currency string
 		if err := rows.Scan(
 			&r.MaterialID,
@@ -317,12 +356,16 @@ ORDER BY total_waste_cost DESC, material_name ASC NULLS LAST
 			&r.WasteAreaMM2,
 			&avgAmount,
 			&currency,
-			&totalAmount,
+			&totalWasteAmount,
+			&scrapRevenueAmount,
+			&netWasteAmount,
 		); err != nil {
 			return nil, err
 		}
 		r.AvgSheetCost = domain.Money{Amount: avgAmount, Currency: currency}
-		r.TotalWasteCost = domain.Money{Amount: totalAmount, Currency: currency}
+		r.TotalWasteCost = domain.Money{Amount: totalWasteAmount, Currency: currency}
+		r.ScrapSaleRevenue = domain.Money{Amount: scrapRevenueAmount, Currency: "VND"}
+		r.NetWasteCost = domain.Money{Amount: netWasteAmount, Currency: currency}
 		out = append(out, r)
 	}
 	return out, rows.Err()

@@ -132,6 +132,17 @@ definitions:
       next_cursor:
         type: string
     type: object
+  github_com_vmarble_warehouse-management-service_internal_platform_httpkit.CursorResult-internal_module_scrap_ScrapSale:
+    properties:
+      has_more:
+        type: boolean
+      items:
+        items:
+          $ref: '#/definitions/internal_module_scrap.ScrapSale'
+        type: array
+      next_cursor:
+        type: string
+    type: object
   github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_authn_UserDetail:
     properties:
       current_page:
@@ -860,6 +871,10 @@ definitions:
         type: string
       material_name:
         type: string
+      net_waste_cost:
+        $ref: '#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.Money'
+      scrap_sale_revenue:
+        $ref: '#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.Money'
       sheets_consumed:
         type: integer
       total_waste_cost:
@@ -2668,6 +2683,52 @@ definitions:
         type: array
       deadline:
         type: string
+    type: object
+  internal_module_scrap.CreateScrapSaleInput:
+    properties:
+      buyer_name:
+        type: string
+      currency:
+        type: string
+      invoice_number:
+        type: string
+      material_id:
+        type: string
+      notes:
+        type: string
+      quantity_kg:
+        type: number
+      sale_date:
+        type: string
+      unit_price:
+        type: integer
+    type: object
+  internal_module_scrap.ScrapSale:
+    properties:
+      buyer_name:
+        type: string
+      created_at:
+        type: string
+      created_by:
+        type: string
+      currency:
+        type: string
+      id:
+        type: string
+      invoice_number:
+        type: string
+      material_id:
+        type: string
+      notes:
+        type: string
+      quantity_kg:
+        type: number
+      sale_date:
+        type: string
+      total_amount:
+        type: integer
+      unit_price:
+        type: integer
     type: object
 info:
   contact: {}
@@ -8000,6 +8061,107 @@ paths:
       summary: Split sales order lines into a production plan + work orders
       tags:
       - sales
+  /api/v1/scrap-sales:
+    get:
+      description: |-
+        Returns scrap sales ordered by created_at DESC. Filter by
+        sale_date range and/or material_id. Period filter matches
+        WasteReport filter (BR-C07).
+      parameters:
+      - description: opaque keyset cursor from a previous response (omit for first
+          page)
+        in: query
+        name: cursor
+        type: string
+      - description: items per page (default 10, max 100)
+        in: query
+        name: limit
+        type: integer
+      - description: from date (Asia/Ho_Chi_Minh, YYYY-MM-DD)
+        in: query
+        name: from
+        type: string
+      - description: to date inclusive (Asia/Ho_Chi_Minh, YYYY-MM-DD)
+        in: query
+        name: to
+        type: string
+      - description: filter by material id (uuid)
+        in: query
+        name: material_id
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_vmarble_warehouse-management-service_internal_platform_httpkit.CursorResult-internal_module_scrap_ScrapSale'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: List scrap sales (keyset pagination)
+      tags:
+      - scrap
+    post:
+      consumes:
+      - application/json
+      description: |-
+        Records a scrap sale. Phase A: only VND currency is accepted.
+        Scrap sales offset waste cost in the WasteReport (BR-C06).
+      parameters:
+      - description: payload
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_module_scrap.CreateScrapSaleInput'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/internal_module_scrap.ScrapSale'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Record a scrap sale transaction (BR-C05/C08)
+      tags:
+      - scrap
   /api/v1/skus:
     get:
       parameters:

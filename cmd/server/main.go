@@ -31,6 +31,7 @@ import (
 	"github.com/vmarble/warehouse-management-service/internal/module/purchasing"
 	"github.com/vmarble/warehouse-management-service/internal/module/reports"
 	"github.com/vmarble/warehouse-management-service/internal/module/sales"
+	"github.com/vmarble/warehouse-management-service/internal/module/scrap"
 	"github.com/vmarble/warehouse-management-service/internal/platform/auth"
 	"github.com/vmarble/warehouse-management-service/internal/platform/config"
 	"github.com/vmarble/warehouse-management-service/internal/platform/events"
@@ -93,6 +94,7 @@ func main() {
 	deliveryStore := delivery.NewPGStore(pool)
 	packingStore := packing.NewPGStore(pool)
 	loadingExceptionStore := loading_exception.NewPGStore(pool)
+	scrapStore := scrap.NewPGStore(pool)
 
 	// ── Module services ─────────────────────────────────────
 	authnSvc := authn.NewService(authnStore, cfg.AuthSecret)
@@ -263,6 +265,9 @@ func main() {
 		hooked.SetShortShippedAutoCreator(&deliveryShortShippedAdapter{svc: loadingExceptionSvc})
 	}
 
+	// Scrap sales (#299). No cross-module deps — standalone CRUD.
+	scrapSvc := scrap.NewService(scrapStore)
+
 	// ── Background: auto-release expired remnant allocations ─────────────────
 	// Ticks every cfg.RemnantAllocCheckInterval. Remnants that have been
 	// ALLOCATED for longer than cfg.RemnantAllocTimeout without being consumed
@@ -322,6 +327,7 @@ func main() {
 	delivery.NewHandler(deliverySvc).Register(api)
 	packing.NewHandler(packingSvc).Register(api)
 	loading_exception.NewHandler(loadingExceptionSvc).Register(api)
+	scrap.NewHandler(scrapSvc).Register(api)
 
 	srv := &http.Server{
 		Addr:         ":" + cfg.Port,

@@ -78,13 +78,17 @@ type WasteReportFilter struct {
 //
 // BR-C03: waste area is excluded from per-SKU allocation; this report
 // posts the corresponding cost to the "tài khoản hao hụt" (waste account).
+// BR-C06: scrap_sale_revenue offsets total_waste_cost; net_waste_cost is
+// clamped to 0 when scrap revenue exceeds waste cost.
 type WasteReportRow struct {
-	MaterialID     uuid.UUID    `json:"material_id"`
-	MaterialName   string       `json:"material_name"`
-	SheetsConsumed int          `json:"sheets_consumed"`
-	WasteAreaMM2   int64        `json:"waste_area_mm2"`
-	AvgSheetCost   domain.Money `json:"avg_sheet_cost"`
-	TotalWasteCost domain.Money `json:"total_waste_cost"`
+	MaterialID       uuid.UUID    `json:"material_id"`
+	MaterialName     string       `json:"material_name"`
+	SheetsConsumed   int          `json:"sheets_consumed"`
+	WasteAreaMM2     int64        `json:"waste_area_mm2"`
+	AvgSheetCost     domain.Money `json:"avg_sheet_cost"`
+	TotalWasteCost   domain.Money `json:"total_waste_cost"`
+	ScrapSaleRevenue domain.Money `json:"scrap_sale_revenue"`
+	NetWasteCost     domain.Money `json:"net_waste_cost"`
 }
 
 // CostingListFilter narrows the keyset list endpoint by date range, SKU,
