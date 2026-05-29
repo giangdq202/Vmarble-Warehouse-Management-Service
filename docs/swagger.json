@@ -6062,6 +6062,77 @@
                         }
                     }
                 }
+            },
+            "patch": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Admin-only endpoint to set the minimum dimension thresholds at\nwhich a leftover is kept as a remnant. A value of 0 disables\nenforcement on that axis. Threshold change is persisted to the\ninventory audit log (action=MIN_REMNANT_POLICY_UPDATED).",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "catalog"
+                ],
+                "summary": "Update min remnant policy for material (BR-K06/K07/K08)",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "material id (uuid)",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "payload",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_module_catalog.UpdateMinRemnantPolicyInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_module_catalog.Material"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
             }
         },
         "/api/v1/notifications/stream": {
@@ -11080,6 +11151,12 @@
                 "is_active": {
                     "type": "boolean"
                 },
+                "min_remnant_length_mm": {
+                    "type": "integer"
+                },
+                "min_remnant_width_mm": {
+                    "type": "integer"
+                },
                 "name": {
                     "type": "string"
                 },
@@ -11143,6 +11220,17 @@
                 },
                 "sku_id": {
                     "type": "string"
+                }
+            }
+        },
+        "internal_module_catalog.UpdateMinRemnantPolicyInput": {
+            "type": "object",
+            "properties": {
+                "min_remnant_length_mm": {
+                    "type": "integer"
+                },
+                "min_remnant_width_mm": {
+                    "type": "integer"
                 }
             }
         },
@@ -12104,6 +12192,10 @@
                 },
                 "cutting_record_id": {
                     "type": "string"
+                },
+                "dropped_remnant_count": {
+                    "description": "DroppedRemnantCount is 1 when the cut produced a leftover whose length or\nwidth fell below the material's min_remnant policy (BR-K06) and was\ntherefore dropped into waste instead of being persisted as a remnant.\n0 otherwise. Currently 0/1 because RecordCut handles a single cut, but\nthe field is typed as int so future bulk-cut endpoints can reuse it.",
+                    "type": "integer"
                 },
                 "remnant_id": {
                     "type": "string"

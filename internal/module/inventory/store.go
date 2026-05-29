@@ -24,6 +24,11 @@ type store interface {
 	countAvailableSheetsByMaterial(ctx context.Context, materialID uuid.UUID) (int, error)
 	selectOverflowAreas(ctx context.Context) (int64, int64, error)
 	updateSheetStatus(ctx context.Context, id uuid.UUID, status string, issuedToWO *uuid.UUID) error
+	// selectMinRemnantPolicyByParentBoard resolves the per-material min remnant
+	// thresholds (BR-K06/K07) by joining board_sheets → inventory_lots →
+	// materials. A value of 0 means enforcement is disabled on that axis.
+	// Returns ErrNotFound when the board sheet does not exist.
+	selectMinRemnantPolicyByParentBoard(ctx context.Context, boardSheetID uuid.UUID) (lengthMM, widthMM int, err error)
 	// preAssignSheet sets issued_to_work_order_id on an AVAILABLE sheet inside a
 	// transaction with FOR UPDATE. Returns ErrPreconditionFailed if the sheet
 	// is no longer AVAILABLE when the lock is acquired.

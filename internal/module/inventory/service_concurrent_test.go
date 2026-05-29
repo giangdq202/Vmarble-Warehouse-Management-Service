@@ -105,6 +105,9 @@ func (s *concurrentMockStore) countAvailableSheetsByMaterial(_ context.Context, 
 func (s *concurrentMockStore) updateSheetStatus(_ context.Context, _ uuid.UUID, _ string, _ *uuid.UUID) error {
 	return nil
 }
+func (s *concurrentMockStore) selectMinRemnantPolicyByParentBoard(_ context.Context, _ uuid.UUID) (int, int, error) {
+	return 0, 0, nil
+}
 func (s *concurrentMockStore) insertCuttingRecord(_ context.Context, _ CuttingRecord) error {
 	return nil
 }

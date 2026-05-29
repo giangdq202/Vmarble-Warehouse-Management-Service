@@ -13,6 +13,10 @@ type store interface {
 	selectMaterialsPaged(ctx context.Context, p httpkit.PageParams) ([]Material, int, error)
 	selectMaterialByID(ctx context.Context, id uuid.UUID) (Material, error)
 	deactivateMaterial(ctx context.Context, id uuid.UUID) error
+	// updateMinRemnantPolicy persists new threshold values for a material and
+	// returns the refreshed row. Returns ErrNotFound if the material does not
+	// exist or is inactive.
+	updateMinRemnantPolicy(ctx context.Context, id uuid.UUID, lengthMM, widthMM int) (Material, error)
 
 	insertSKU(ctx context.Context, s SKU) error
 	selectSKUs(ctx context.Context) ([]SKU, error)

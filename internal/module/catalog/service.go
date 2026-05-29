@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/google/uuid"
@@ -12,11 +13,19 @@ import (
 )
 
 type service struct {
-	st store
+	st    store
+	audit PolicyAuditLogger
 }
 
-func NewService(st store) Service {
-	return &service{st: st}
+// NewService constructs a catalog service. Pass an optional PolicyAuditLogger
+// as the second argument to persist BR-K08 audit rows to the shared inventory
+// audit ledger. When nil, threshold changes are recorded via slog only.
+func NewService(st store, audit ...PolicyAuditLogger) Service {
+	var a PolicyAuditLogger
+	if len(audit) > 0 {
+		a = audit[0]
+	}
+	return &service{st: st, audit: a}
 }
 
 func validMaterialType(t MaterialType) bool {
@@ -67,6 +76,51 @@ func (s *service) GetMaterial(ctx context.Context, materialID uuid.UUID) (Materi
 
 func (s *service) DeactivateMaterial(ctx context.Context, materialID uuid.UUID) error {
 	return s.st.deactivateMaterial(ctx, materialID)
+}
+
+func (s *service) UpdateMinRemnantPolicy(ctx context.Context, in UpdateMinRemnantPolicyInput) (Material, error) {
+	if in.MinRemnantLengthMM < 0 || in.MinRemnantWidthMM < 0 {
+		return Material{}, domain.NewBizError(domain.ErrInvalidInput,
+			"min_remnant_length_mm and min_remnant_width_mm must be non-negative")
+	}
+	prev, err := s.st.selectMaterialByID(ctx, in.MaterialID)
+	if err != nil {
+		return Material{}, err
+	}
+	if !prev.IsActive {
+		return Material{}, domain.NewBizError(domain.ErrNotFound, "material not found")
+	}
+	updated, err := s.st.updateMinRemnantPolicy(ctx, in.MaterialID, in.MinRemnantLengthMM, in.MinRemnantWidthMM)
+	if err != nil {
+		return Material{}, err
+	}
+	// BR-K08: persist threshold change to the shared audit ledger so accountants
+	// can trace policy adjustments. Best-effort: a transient audit-write failure
+	// must not roll back the mutation itself — the row in materials is the
+	// source of truth and an admin can re-issue the PATCH if the audit row is
+	// missing.
+	if s.audit != nil {
+		if err := s.audit.LogMinRemnantPolicyChange(ctx, MinRemnantPolicyChange{
+			MaterialID:   updated.ID,
+			ActorID:      in.ActorID,
+			PrevLengthMM: prev.MinRemnantLengthMM,
+			PrevWidthMM:  prev.MinRemnantWidthMM,
+			NewLengthMM:  updated.MinRemnantLengthMM,
+			NewWidthMM:   updated.MinRemnantWidthMM,
+		}); err != nil {
+			slog.Warn("catalog: min_remnant_policy audit log failed",
+				"material_id", updated.ID, "actor_id", in.ActorID, "err", err)
+		}
+	}
+	slog.Info("catalog: min_remnant_policy updated",
+		"material_id", updated.ID,
+		"actor_id", in.ActorID,
+		"prev_length_mm", prev.MinRemnantLengthMM,
+		"prev_width_mm", prev.MinRemnantWidthMM,
+		"new_length_mm", updated.MinRemnantLengthMM,
+		"new_width_mm", updated.MinRemnantWidthMM,
+	)
+	return updated, nil
 }
 
 func (s *service) CreateSKU(ctx context.Context, in CreateSKUInput) (SKU, error) {
