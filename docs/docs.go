@@ -8290,6 +8290,154 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/scrap-sales": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns scrap sales ordered by created_at DESC. Filter by\nsale_date range and/or material_id. Period filter matches\nWasteReport filter (BR-C07).",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "scrap"
+                ],
+                "summary": "List scrap sales (keyset pagination)",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "opaque keyset cursor from a previous response (omit for first page)",
+                        "name": "cursor",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "items per page (default 10, max 100)",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "from date (Asia/Ho_Chi_Minh, YYYY-MM-DD)",
+                        "name": "from",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "to date inclusive (Asia/Ho_Chi_Minh, YYYY-MM-DD)",
+                        "name": "to",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "filter by material id (uuid)",
+                        "name": "material_id",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_platform_httpkit.CursorResult-internal_module_scrap_ScrapSale"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Records a scrap sale. Phase A: only VND currency is accepted.\nScrap sales offset waste cost in the WasteReport (BR-C06).",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "scrap"
+                ],
+                "summary": "Record a scrap sale transaction (BR-C05/C08)",
+                "parameters": [
+                    {
+                        "description": "payload",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_module_scrap.CreateScrapSaleInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/internal_module_scrap.ScrapSale"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/skus": {
             "get": {
                 "security": [
@@ -10277,6 +10425,23 @@ const docTemplate = `{
                 }
             }
         },
+        "github_com_vmarble_warehouse-management-service_internal_platform_httpkit.CursorResult-internal_module_scrap_ScrapSale": {
+            "type": "object",
+            "properties": {
+                "has_more": {
+                    "type": "boolean"
+                },
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_module_scrap.ScrapSale"
+                    }
+                },
+                "next_cursor": {
+                    "type": "string"
+                }
+            }
+        },
         "github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_authn_UserDetail": {
             "type": "object",
             "properties": {
@@ -11380,6 +11545,12 @@ const docTemplate = `{
                 },
                 "material_name": {
                     "type": "string"
+                },
+                "net_waste_cost": {
+                    "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.Money"
+                },
+                "scrap_sale_revenue": {
+                    "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.Money"
                 },
                 "sheets_consumed": {
                     "type": "integer"
@@ -14098,6 +14269,76 @@ const docTemplate = `{
                 },
                 "deadline": {
                     "type": "string"
+                }
+            }
+        },
+        "internal_module_scrap.CreateScrapSaleInput": {
+            "type": "object",
+            "properties": {
+                "buyer_name": {
+                    "type": "string"
+                },
+                "currency": {
+                    "type": "string"
+                },
+                "invoice_number": {
+                    "type": "string"
+                },
+                "material_id": {
+                    "type": "string"
+                },
+                "notes": {
+                    "type": "string"
+                },
+                "quantity_kg": {
+                    "type": "number"
+                },
+                "sale_date": {
+                    "type": "string"
+                },
+                "unit_price": {
+                    "type": "integer"
+                }
+            }
+        },
+        "internal_module_scrap.ScrapSale": {
+            "type": "object",
+            "properties": {
+                "buyer_name": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "created_by": {
+                    "type": "string"
+                },
+                "currency": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "invoice_number": {
+                    "type": "string"
+                },
+                "material_id": {
+                    "type": "string"
+                },
+                "notes": {
+                    "type": "string"
+                },
+                "quantity_kg": {
+                    "type": "number"
+                },
+                "sale_date": {
+                    "type": "string"
+                },
+                "total_amount": {
+                    "type": "integer"
+                },
+                "unit_price": {
+                    "type": "integer"
                 }
             }
         }

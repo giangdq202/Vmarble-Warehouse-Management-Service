@@ -316,6 +316,8 @@ func writeWasteReportCSV(c *gin.Context, rows []WasteReportRow) {
 		"waste_area_mm2",
 		"avg_sheet_cost",
 		"total_waste_cost",
+		"scrap_sale_revenue",
+		"net_waste_cost",
 		"currency",
 	})
 	for _, r := range rows {
@@ -326,6 +328,8 @@ func writeWasteReportCSV(c *gin.Context, rows []WasteReportRow) {
 			strconv.FormatInt(r.WasteAreaMM2, 10),
 			strconv.FormatInt(r.AvgSheetCost.Amount, 10),
 			strconv.FormatInt(r.TotalWasteCost.Amount, 10),
+			strconv.FormatInt(r.ScrapSaleRevenue.Amount, 10),
+			strconv.FormatInt(r.NetWasteCost.Amount, 10),
 			r.TotalWasteCost.Currency,
 		})
 	}
