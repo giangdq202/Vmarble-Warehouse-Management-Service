@@ -49,3 +49,16 @@ jobs:
       - name: Trigger Dokploy Redeploy Webhook
         run: |
           curl -sS -f -X POST "${{ secrets.DOKPLOY_BE_WEBHOOK_URL }}"
+
+      - name: Discord Notification
+        if: always()
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: |
+          STATUS="${{ job.status }}"
+          COMMIT_MSG=$(git log -1 --pretty=format:"%s")
+          PROJECT="BE-Staging"
+          
+          curl -sS -X POST "$DISCORD_WEBHOOK" \
+            -H "Content-Type: application/json" \
+            -d "{ \"content\": \"**[$PROJECT]** $STATUS: $COMMIT_MSG (by ${{ github.actor }}) | [Log](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})\" }"
