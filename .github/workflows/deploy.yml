@@ -11,10 +11,9 @@ concurrency:
 
 env:
   IMAGE_NAME: ghcr.io/giangdq202/vmarble-warehouse-management-service
-  STACK: vwms-be
 
 jobs:
-  deploy:
+  build-and-deploy:
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -22,11 +21,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Compute tag
-        id: meta
+      - name: Compute tags
+        id: vars
         run: |
-          SHORT=$(echo "${{ github.sha }}" | cut -c1-7)
-          echo "image=${IMAGE_NAME}:sha-${SHORT}" >> "$GITHUB_OUTPUT"
+          SHA_SHORT=$(echo "${{ github.sha }}" | cut -c1-7)
+          echo "sha_tag=${IMAGE_NAME}:sha-${SHA_SHORT}" >> "$GITHUB_OUTPUT"
+          echo "stg_tag=${IMAGE_NAME}:stg-latest" >> "$GITHUB_OUTPUT"
 
       - uses: docker/setup-buildx-action@v3
 
@@ -40,20 +40,12 @@ jobs:
         with:
           context: .
           push: true
-          tags: ${{ steps.meta.outputs.image }}
+          tags: |
+            ${{ steps.vars.outputs.sha_tag }}
+            ${{ steps.vars.outputs.stg_tag }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Deploy via SSH
-        env:
-          SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
-          SSH_HOST: 163.61.182.158
-          SSH_PORT: 2288
+      - name: Trigger Dokploy Redeploy Webhook
         run: |
-          mkdir -p ~/.ssh
-          echo "$SSH_KEY" > ~/.ssh/id_ed25519
-          chmod 600 ~/.ssh/id_ed25519
-          ssh-keyscan -p $SSH_PORT $SSH_HOST >> ~/.ssh/known_hosts 2>/dev/null
-          ssh -i ~/.ssh/id_ed25519 -p $SSH_PORT \
-            deploy@$SSH_HOST \
-            "$STACK ${{ steps.meta.outputs.image }}"
+          curl -sS -f -X POST "${{ secrets.DOKPLOY_BE_WEBHOOK_URL }}"
