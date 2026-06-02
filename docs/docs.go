@@ -8679,6 +8679,76 @@ const docTemplate = `{
                         }
                     }
                 }
+            },
+            "patch": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "catalog"
+                ],
+                "summary": "Update SKU export/shipping fields (BR-SKU02)",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "sku id (uuid)",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "payload",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_module_catalog.UpdateSKUInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_module_catalog.SKU"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
             }
         },
         "/api/v1/skus/{id}/bom": {
@@ -8786,6 +8856,210 @@ const docTemplate = `{
                         "schema": {
                             "$ref": "#/definitions/internal_module_catalog.BOM"
                         }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/skus/{id}/packing-units": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "catalog"
+                ],
+                "summary": "List packing units for a SKU",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "sku id (uuid)",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/internal_module_catalog.PackingUnit"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/skus/{id}/packing-units/{unit}": {
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "catalog"
+                ],
+                "summary": "Create or replace a packing unit for a SKU (BR-SKU04/05)",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "sku id (uuid)",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "unit: piece|set|carton",
+                        "name": "unit",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "payload",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_module_catalog.UpsertPackingUnitInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_module_catalog.PackingUnit"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "catalog"
+                ],
+                "summary": "Delete a packing unit for a SKU",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "sku id (uuid)",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "unit: piece|set|carton",
+                        "name": "unit",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
                     },
                     "400": {
                         "description": "Bad Request",
@@ -11356,9 +11630,29 @@ const docTemplate = `{
                 "MaterialTypeOther"
             ]
         },
+        "internal_module_catalog.PackingUnit": {
+            "type": "object",
+            "properties": {
+                "is_default": {
+                    "type": "boolean"
+                },
+                "pieces_per_unit": {
+                    "type": "integer"
+                },
+                "sku_id": {
+                    "type": "string"
+                },
+                "unit": {
+                    "type": "string"
+                }
+            }
+        },
         "internal_module_catalog.SKU": {
             "type": "object",
             "properties": {
+                "cbm_per_unit": {
+                    "type": "number"
+                },
                 "code": {
                     "type": "string"
                 },
@@ -11367,6 +11661,12 @@ const docTemplate = `{
                 },
                 "dimensions": {
                     "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.Dimension"
+                },
+                "height_mm": {
+                    "type": "integer"
+                },
+                "hs_code": {
+                    "type": "string"
                 },
                 "id": {
                     "type": "string"
@@ -11379,6 +11679,9 @@ const docTemplate = `{
                 },
                 "requires_metal": {
                     "type": "boolean"
+                },
+                "weight_kg": {
+                    "type": "number"
                 }
             }
         },
@@ -11404,6 +11707,40 @@ const docTemplate = `{
                 },
                 "min_remnant_width_mm": {
                     "type": "integer"
+                }
+            }
+        },
+        "internal_module_catalog.UpdateSKUInput": {
+            "type": "object",
+            "properties": {
+                "heightMM": {
+                    "type": "integer"
+                },
+                "hscode": {
+                    "type": "string"
+                },
+                "skuid": {
+                    "type": "string"
+                },
+                "weightKg": {
+                    "type": "number"
+                }
+            }
+        },
+        "internal_module_catalog.UpsertPackingUnitInput": {
+            "type": "object",
+            "properties": {
+                "is_default": {
+                    "type": "boolean"
+                },
+                "pieces_per_unit": {
+                    "type": "integer"
+                },
+                "sku_id": {
+                    "type": "string"
+                },
+                "unit": {
+                    "type": "string"
                 }
             }
         },
