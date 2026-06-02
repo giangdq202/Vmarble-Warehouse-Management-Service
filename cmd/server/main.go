@@ -981,7 +981,8 @@ func (a *salesSKUAdapter) GetSKU(ctx context.Context, skuID uuid.UUID) (sales.SK
 	if err != nil {
 		return sales.SKUInfo{}, err
 	}
-	return sales.SKUInfo{ID: s.ID, Code: s.Code, Name: s.Name}, nil
+	return sales.SKUInfo{ID: s.ID, Code: s.Code, Name: s.Name,
+		HeightMM: s.HeightMM, WeightKg: s.WeightKg, HSCode: s.HSCode}, nil
 }
 
 // salesProductionSplitterAdapter implements sales.ProductionSplitter. It

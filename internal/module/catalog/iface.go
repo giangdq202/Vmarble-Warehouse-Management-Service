@@ -52,6 +52,10 @@ type SKU struct {
 	Dimensions    domain.Dimension `json:"dimensions"`
 	RequiresMetal bool             `json:"requires_metal"`
 	IsActive      bool             `json:"is_active"`
+	HeightMM      *int             `json:"height_mm,omitempty"`
+	WeightKg      *float64         `json:"weight_kg,omitempty"`
+	HSCode        *string          `json:"hs_code,omitempty"`
+	CbmPerUnit    *float64         `json:"cbm_per_unit,omitempty"`
 	CreatedAt     time.Time        `json:"created_at"`
 }
 
@@ -60,6 +64,35 @@ type CreateSKUInput struct {
 	Name          string           `json:"name"`
 	Dimensions    domain.Dimension `json:"dimensions"`
 	RequiresMetal bool             `json:"requires_metal"`
+}
+
+// UpdateSKUInput carries export/shipping fields for PATCH /skus/:id.
+// Nil pointer means "leave unchanged". HeightMM/WeightKg/HSCode are nullable
+// in the DB (legacy SKUs keep NULL until explicitly set).
+type UpdateSKUInput struct {
+	SKUID    uuid.UUID
+	HeightMM *int
+	WeightKg *float64
+	HSCode   *string
+}
+
+// PackingUnit represents one row in sku_packing_units.
+// unit: piece | set | carton; pieces_per_unit >= 1.
+type PackingUnit struct {
+	SKUID         uuid.UUID `json:"sku_id"`
+	Unit          string    `json:"unit"`
+	PiecesPerUnit int       `json:"pieces_per_unit"`
+	IsDefault     bool      `json:"is_default"`
+}
+
+// UpsertPackingUnitInput creates or replaces one (sku_id, unit) row.
+// BR-SKU04: each SKU must have exactly one is_default=true row before it
+// can appear in SO lines or Excel parses.
+type UpsertPackingUnitInput struct {
+	SKUID         uuid.UUID `json:"sku_id"`
+	Unit          string    `json:"unit"`
+	PiecesPerUnit int       `json:"pieces_per_unit"`
+	IsDefault     bool      `json:"is_default"`
 }
 
 type BOMComponent struct {
@@ -111,6 +144,15 @@ type Service interface {
 	ListSKUs(ctx context.Context, p httpkit.PageParams) (httpkit.PagedResult[SKU], error)
 	GetSKU(ctx context.Context, skuID uuid.UUID) (SKU, error)
 	DeactivateSKU(ctx context.Context, skuID uuid.UUID) error
+	// UpdateSKU sets export/shipping fields (BR-SKU02 validates hs_code format).
+	UpdateSKU(ctx context.Context, in UpdateSKUInput) (SKU, error)
+
+	// UpsertPackingUnit creates or replaces a (sku_id, unit) row.
+	// Setting is_default=true automatically clears is_default on all other units
+	// for that SKU so the invariant "exactly one default" is maintained.
+	UpsertPackingUnit(ctx context.Context, in UpsertPackingUnitInput) (PackingUnit, error)
+	ListPackingUnits(ctx context.Context, skuID uuid.UUID) ([]PackingUnit, error)
+	DeletePackingUnit(ctx context.Context, skuID uuid.UUID, unit string) error
 
 	SetBOM(ctx context.Context, in SetBOMInput) (BOM, error)
 	GetBOM(ctx context.Context, skuID uuid.UUID) (BOM, error)

@@ -141,7 +141,7 @@ func (svc *service) CreateSO(ctx context.Context, in CreateSOInput) (SalesOrder,
 	if currency == "" {
 		currency = "VND"
 	}
-	if err := svc.validateSKUs(ctx, in.Lines); err != nil {
+	if err := svc.validateSKUs(ctx, in.Lines, in.Incoterm); err != nil {
 		return SalesOrder{}, err
 	}
 
@@ -260,7 +260,7 @@ func (svc *service) PatchSO(ctx context.Context, in PatchSOInput) (SalesOrder, e
 		if err := validateLines(newLines); err != nil {
 			return SalesOrder{}, err
 		}
-		if err := svc.validateSKUs(ctx, newLines); err != nil {
+		if err := svc.validateSKUs(ctx, newLines, so.Incoterm); err != nil {
 			return SalesOrder{}, err
 		}
 		if err := svc.s.deleteSOLinesBySO(ctx, so.ID); err != nil {
@@ -519,13 +519,30 @@ func validateLines(lines []CreateSOLineInput) error {
 	return nil
 }
 
-func (svc *service) validateSKUs(ctx context.Context, lines []CreateSOLineInput) error {
+func (svc *service) validateSKUs(ctx context.Context, lines []CreateSOLineInput, incoterm string) error {
 	if svc.skuChecker == nil {
 		return nil
 	}
+	isExport := strings.TrimSpace(incoterm) != ""
 	for _, l := range lines {
-		if _, err := svc.skuChecker.GetSKU(ctx, l.SKUID); err != nil {
+		info, err := svc.skuChecker.GetSKU(ctx, l.SKUID)
+		if err != nil {
 			return err
+		}
+		// BR-SKU01: export SOs require height_mm, weight_kg, hs_code on every SKU.
+		if isExport {
+			if info.HeightMM == nil || *info.HeightMM <= 0 {
+				return domain.NewBizError(domain.ErrInvalidInput,
+					"export SO: SKU "+info.Code+" missing height_mm (BR-SKU01)")
+			}
+			if info.WeightKg == nil || *info.WeightKg <= 0 {
+				return domain.NewBizError(domain.ErrInvalidInput,
+					"export SO: SKU "+info.Code+" missing weight_kg (BR-SKU01)")
+			}
+			if info.HSCode == nil || *info.HSCode == "" {
+				return domain.NewBizError(domain.ErrInvalidInput,
+					"export SO: SKU "+info.Code+" missing hs_code (BR-SKU01)")
+			}
 		}
 	}
 	return nil

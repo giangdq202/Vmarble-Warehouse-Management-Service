@@ -19,9 +19,12 @@ type SKUChecker interface {
 // adding fields here forces the cross-module adapter to grow, which we want
 // to keep visible.
 type SKUInfo struct {
-	ID   uuid.UUID
-	Code string
-	Name string
+	ID       uuid.UUID
+	Code     string
+	Name     string
+	HeightMM *int
+	WeightKg *float64
+	HSCode   *string
 }
 
 // ProductionSplitter creates a production plan plus the work orders that

@@ -28,6 +28,7 @@ func (h *Handler) Register(rg *gin.RouterGroup) {
 	rg.POST("/skus", auth.RequireRole(auth.RoleWarehouse, auth.RoleAdmin), h.createSKU)
 	rg.GET("/skus", h.listSKUs)
 	rg.GET("/skus/:id", h.getSKU)
+	rg.PATCH("/skus/:id", auth.RequireAdminOnly(), h.updateSKU)
 	rg.DELETE("/skus/:id", auth.RequireRole(auth.RoleAdmin), h.deleteSKU)
 
 	rg.PUT("/skus/:id/bom", auth.RequireRole(auth.RoleWarehouse, auth.RolePlanner, auth.RoleAdmin), h.setBOM)
@@ -35,6 +36,10 @@ func (h *Handler) Register(rg *gin.RouterGroup) {
 
 	rg.POST("/skus/:id/variants", auth.RequireRole(auth.RoleWarehouse, auth.RolePlanner, auth.RoleAdmin), h.createBOMVariant)
 	rg.GET("/skus/:id/variants", h.listBOMVariants)
+
+	rg.PUT("/skus/:id/packing-units/:unit", auth.RequireAdminOnly(), h.upsertPackingUnit)
+	rg.GET("/skus/:id/packing-units", h.listPackingUnits)
+	rg.DELETE("/skus/:id/packing-units/:unit", auth.RequireAdminOnly(), h.deletePackingUnit)
 }
 
 // createMaterial godoc
@@ -289,6 +294,128 @@ func (h *Handler) deleteSKU(c *gin.Context) {
 		return
 	}
 	if err := h.svc.DeactivateSKU(c.Request.Context(), id); err != nil {
+		httpkit.Error(c, err)
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
+// updateSKU godoc
+//
+// @Summary      Update SKU export/shipping fields (BR-SKU02)
+// @Tags         catalog
+// @Accept       json
+// @Produce      json
+// @Param        id    path      string          true  "sku id (uuid)"
+// @Param        body  body      UpdateSKUInput  true  "payload"
+// @Success      200   {object}  SKU
+// @Failure      400   {object}  map[string]string
+// @Failure      404   {object}  map[string]string
+// @Security     BearerAuth
+// @Failure      401   {object}  map[string]string
+// @Router       /api/v1/skus/{id} [patch]
+func (h *Handler) updateSKU(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+	var in UpdateSKUInput
+	if !httpkit.Bind(c, &in) {
+		return
+	}
+	in.SKUID = id
+	sku, err := h.svc.UpdateSKU(c.Request.Context(), in)
+	if err != nil {
+		httpkit.Error(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, sku)
+}
+
+// upsertPackingUnit godoc
+//
+// @Summary      Create or replace a packing unit for a SKU (BR-SKU04/05)
+// @Tags         catalog
+// @Accept       json
+// @Produce      json
+// @Param        id    path      string                 true  "sku id (uuid)"
+// @Param        unit  path      string                 true  "unit: piece|set|carton"
+// @Param        body  body      UpsertPackingUnitInput true  "payload"
+// @Success      200   {object}  PackingUnit
+// @Failure      400   {object}  map[string]string
+// @Failure      404   {object}  map[string]string
+// @Security     BearerAuth
+// @Failure      401   {object}  map[string]string
+// @Router       /api/v1/skus/{id}/packing-units/{unit} [put]
+func (h *Handler) upsertPackingUnit(c *gin.Context) {
+	skuID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+	unitParam := c.Param("unit")
+	var in UpsertPackingUnitInput
+	if !httpkit.Bind(c, &in) {
+		return
+	}
+	in.SKUID = skuID
+	in.Unit = unitParam
+	pu, err := h.svc.UpsertPackingUnit(c.Request.Context(), in)
+	if err != nil {
+		httpkit.Error(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, pu)
+}
+
+// listPackingUnits godoc
+//
+// @Summary      List packing units for a SKU
+// @Tags         catalog
+// @Produce      json
+// @Param        id   path      string  true  "sku id (uuid)"
+// @Success      200  {array}   PackingUnit
+// @Failure      400  {object}  map[string]string
+// @Failure      404  {object}  map[string]string
+// @Security     BearerAuth
+// @Failure      401  {object}  map[string]string
+// @Router       /api/v1/skus/{id}/packing-units [get]
+func (h *Handler) listPackingUnits(c *gin.Context) {
+	skuID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+	units, err := h.svc.ListPackingUnits(c.Request.Context(), skuID)
+	if err != nil {
+		httpkit.Error(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, units)
+}
+
+// deletePackingUnit godoc
+//
+// @Summary      Delete a packing unit for a SKU
+// @Tags         catalog
+// @Produce      json
+// @Param        id    path      string  true  "sku id (uuid)"
+// @Param        unit  path      string  true  "unit: piece|set|carton"
+// @Success      204
+// @Failure      400  {object}  map[string]string
+// @Failure      404  {object}  map[string]string
+// @Security     BearerAuth
+// @Failure      401  {object}  map[string]string
+// @Router       /api/v1/skus/{id}/packing-units/{unit} [delete]
+func (h *Handler) deletePackingUnit(c *gin.Context) {
+	skuID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+	unit := c.Param("unit")
+	if err := h.svc.DeletePackingUnit(c.Request.Context(), skuID, unit); err != nil {
 		httpkit.Error(c, err)
 		return
 	}

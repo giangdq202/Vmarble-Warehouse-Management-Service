@@ -746,14 +746,31 @@ definitions:
     - MaterialTypeGlue
     - MaterialTypeMetal
     - MaterialTypeOther
+  internal_module_catalog.PackingUnit:
+    properties:
+      is_default:
+        type: boolean
+      pieces_per_unit:
+        type: integer
+      sku_id:
+        type: string
+      unit:
+        type: string
+    type: object
   internal_module_catalog.SKU:
     properties:
+      cbm_per_unit:
+        type: number
       code:
         type: string
       created_at:
         type: string
       dimensions:
         $ref: '#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.Dimension'
+      height_mm:
+        type: integer
+      hs_code:
+        type: string
       id:
         type: string
       is_active:
@@ -762,6 +779,8 @@ definitions:
         type: string
       requires_metal:
         type: boolean
+      weight_kg:
+        type: number
     type: object
   internal_module_catalog.SetBOMInput:
     properties:
@@ -778,6 +797,28 @@ definitions:
         type: integer
       min_remnant_width_mm:
         type: integer
+    type: object
+  internal_module_catalog.UpdateSKUInput:
+    properties:
+      heightMM:
+        type: integer
+      hscode:
+        type: string
+      skuid:
+        type: string
+      weightKg:
+        type: number
+    type: object
+  internal_module_catalog.UpsertPackingUnitInput:
+    properties:
+      is_default:
+        type: boolean
+      pieces_per_unit:
+        type: integer
+      sku_id:
+        type: string
+      unit:
+        type: string
     type: object
   internal_module_costing.CostingAdjustment:
     properties:
@@ -8316,6 +8357,51 @@ paths:
       summary: Get SKU
       tags:
       - catalog
+    patch:
+      consumes:
+      - application/json
+      parameters:
+      - description: sku id (uuid)
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: payload
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_module_catalog.UpdateSKUInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_module_catalog.SKU'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Update SKU export/shipping fields (BR-SKU02)
+      tags:
+      - catalog
   /api/v1/skus/{id}/bom:
     get:
       parameters:
@@ -8401,6 +8487,137 @@ paths:
       security:
       - BearerAuth: []
       summary: Set BOM for SKU
+      tags:
+      - catalog
+  /api/v1/skus/{id}/packing-units:
+    get:
+      parameters:
+      - description: sku id (uuid)
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/internal_module_catalog.PackingUnit'
+            type: array
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: List packing units for a SKU
+      tags:
+      - catalog
+  /api/v1/skus/{id}/packing-units/{unit}:
+    delete:
+      parameters:
+      - description: sku id (uuid)
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: 'unit: piece|set|carton'
+        in: path
+        name: unit
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "204":
+          description: No Content
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Delete a packing unit for a SKU
+      tags:
+      - catalog
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: sku id (uuid)
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: 'unit: piece|set|carton'
+        in: path
+        name: unit
+        required: true
+        type: string
+      - description: payload
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_module_catalog.UpsertPackingUnitInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_module_catalog.PackingUnit'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Create or replace a packing unit for a SKU (BR-SKU04/05)
       tags:
       - catalog
   /api/v1/skus/{id}/variants:
