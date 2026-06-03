@@ -102,4 +102,5 @@ docker-push:
     - docker push "${IMAGE_NAME}:sha-${CI_COMMIT_SHORT_SHA}"
     - docker push "${IMAGE_NAME}:stg-latest"
     # ── Dokploy webhook trigger ──────────────────────────────────────────
+    - apk add --no-cache curl
     - curl -sS -f -X POST "$DOKPLOY_BE_WEBHOOK_URL"
