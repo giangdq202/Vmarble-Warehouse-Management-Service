@@ -1201,6 +1201,31 @@ definitions:
       to_status:
         type: string
     type: object
+  internal_module_delivery.ContainerTransferAudit:
+    properties:
+      actor_id:
+        type: string
+      actor_role:
+        type: string
+      created_at:
+        type: string
+      id:
+        type: string
+      is_cross_plan:
+        type: boolean
+      line_id:
+        type: string
+      qty_transferred:
+        type: integer
+      reason:
+        type: string
+      sku_id:
+        type: string
+      source_container_id:
+        type: string
+      target_container_id:
+        type: string
+    type: object
   internal_module_delivery.CreateContainerInput:
     properties:
       container_type:
@@ -1338,6 +1363,8 @@ definitions:
         type: string
       qty:
         type: integer
+      reason:
+        type: string
       target_container_id:
         type: string
       weight_kg_total:
@@ -1345,6 +1372,8 @@ definitions:
     type: object
   internal_module_delivery.TransferLineResult:
     properties:
+      audit:
+        $ref: '#/definitions/internal_module_delivery.ContainerTransferAudit'
       source_line:
         allOf:
         - $ref: '#/definitions/internal_module_delivery.ContainerLine'

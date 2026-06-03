@@ -12323,6 +12323,44 @@ const docTemplate = `{
                 }
             }
         },
+        "internal_module_delivery.ContainerTransferAudit": {
+            "type": "object",
+            "properties": {
+                "actor_id": {
+                    "type": "string"
+                },
+                "actor_role": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "is_cross_plan": {
+                    "type": "boolean"
+                },
+                "line_id": {
+                    "type": "string"
+                },
+                "qty_transferred": {
+                    "type": "integer"
+                },
+                "reason": {
+                    "type": "string"
+                },
+                "sku_id": {
+                    "type": "string"
+                },
+                "source_container_id": {
+                    "type": "string"
+                },
+                "target_container_id": {
+                    "type": "string"
+                }
+            }
+        },
         "internal_module_delivery.CreateContainerInput": {
             "type": "object",
             "properties": {
@@ -12532,6 +12570,9 @@ const docTemplate = `{
                 "qty": {
                     "type": "integer"
                 },
+                "reason": {
+                    "type": "string"
+                },
                 "target_container_id": {
                     "type": "string"
                 },
@@ -12543,6 +12584,9 @@ const docTemplate = `{
         "internal_module_delivery.TransferLineResult": {
             "type": "object",
             "properties": {
+                "audit": {
+                    "$ref": "#/definitions/internal_module_delivery.ContainerTransferAudit"
+                },
                 "source_line": {
                     "description": "nil when the source line was fully consumed",
                     "allOf": [

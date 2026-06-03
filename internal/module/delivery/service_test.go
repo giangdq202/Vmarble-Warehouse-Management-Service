@@ -106,6 +106,12 @@ type mockTxStore struct {
 	listLinesForSealErr   error
 	sumLinesAggregatesErr error
 
+	// transfer audit (#308)
+	hasApprovedLoadingPlanResult bool
+	hasApprovedLoadingPlanErr    error
+	insertedTransferAudit        *ContainerTransferAudit
+	insertTransferAuditErr       error
+
 	// call captures
 	insertedLines  []ContainerLine
 	statusUpdates  []updateStatusInput
@@ -309,6 +315,19 @@ func (t *mockTxStore) updateContainerStatus(_ context.Context, in updateStatusIn
 	}
 	t.containersByID[in.ContainerID] = c
 	return c, nil
+}
+
+func (t *mockTxStore) insertTransferAudit(_ context.Context, a ContainerTransferAudit) error {
+	if t.insertTransferAuditErr != nil {
+		return t.insertTransferAuditErr
+	}
+	cp := a
+	t.insertedTransferAudit = &cp
+	return nil
+}
+
+func (t *mockTxStore) hasApprovedLoadingPlan(_ context.Context, _ uuid.UUID) (bool, error) {
+	return t.hasApprovedLoadingPlanResult, t.hasApprovedLoadingPlanErr
 }
 
 // ── mock cross-module deps ──────────────────────────────────────────────────
@@ -694,7 +713,8 @@ func TestTransferLine_FullMove(t *testing.T) {
 	svc := newSvc(st, nil, nil, nil)
 
 	res, err := svc.TransferLine(context.Background(), TransferLineInput{
-		ContainerID: srcID, TargetContainerID: tgtID, LineID: lineID, ActorID: uuid.New(),
+		ContainerID: srcID, TargetContainerID: tgtID, LineID: lineID,
+		Reason: "delay on ship A, moving to B", ActorID: uuid.New(),
 	})
 	if err != nil {
 		t.Fatalf("unexpected: %v", err)
@@ -734,7 +754,7 @@ func TestTransferLine_PartialQty_DecrementsSource(t *testing.T) {
 	res, err := svc.TransferLine(context.Background(), TransferLineInput{
 		ContainerID: srcID, TargetContainerID: tgtID, LineID: lineID,
 		Qty: 3, CBMTotal: 1.5, WeightKGTotal: 30,
-		ActorID: uuid.New(),
+		Reason: "delay on ship A, moving to B", ActorID: uuid.New(),
 	})
 	if err != nil {
 		t.Fatalf("unexpected: %v", err)
@@ -765,7 +785,7 @@ func TestTransferLine_SealedSource_Rejected(t *testing.T) {
 	svc := newSvc(st, nil, nil, nil)
 	_, err := svc.TransferLine(context.Background(), TransferLineInput{
 		ContainerID: srcID, TargetContainerID: tgtID, LineID: uuid.New(),
-		ActorID: uuid.New(),
+		Reason: "moving due to vessel change", ActorID: uuid.New(),
 	})
 	if !errors.Is(err, domain.ErrInvalidTransition) {
 		t.Errorf("expected ErrInvalidTransition, got %v", err)
@@ -795,7 +815,8 @@ func TestTransferLine_PartialQtyExceedsLine_Rejected(t *testing.T) {
 	svc := newSvc(st, nil, nil, nil)
 	_, err := svc.TransferLine(context.Background(), TransferLineInput{
 		ContainerID: srcID, TargetContainerID: tgtID, LineID: lineID,
-		Qty: 6, CBMTotal: 1, WeightKGTotal: 10, ActorID: uuid.New(),
+		Qty: 6, CBMTotal: 1, WeightKGTotal: 10,
+		Reason: "capacity rebalance", ActorID: uuid.New(),
 	})
 	if !errors.Is(err, domain.ErrInvalidInput) {
 		t.Errorf("expected ErrInvalidInput, got %v", err)
@@ -814,10 +835,135 @@ func TestTransferLine_PartialMissingCBMWeight_Rejected(t *testing.T) {
 	svc := newSvc(st, nil, nil, nil)
 	_, err := svc.TransferLine(context.Background(), TransferLineInput{
 		ContainerID: srcID, TargetContainerID: tgtID, LineID: lineID,
-		Qty: 2, ActorID: uuid.New(),
+		Qty: 2, Reason: "capacity rebalance", ActorID: uuid.New(),
 	})
 	if !errors.Is(err, domain.ErrInvalidInput) {
 		t.Errorf("expected ErrInvalidInput, got %v", err)
+	}
+}
+
+// ── TransferLine: BR-D07 / BR-D16 / BR-D17 ──────────────────────────────────
+
+// BR-D07: reason is mandatory.
+func TestTransferLine_EmptyReason_Rejected(t *testing.T) {
+	srcID := uuid.New()
+	tgtID := uuid.New()
+	lineID := uuid.New()
+	tx := newMockTx()
+	tx.containersByID[srcID] = Container{ID: srcID, Status: ContainerStatusLoading, MaxCBM: 33, MaxPayloadKG: 28000}
+	tx.containersByID[tgtID] = Container{ID: tgtID, Status: ContainerStatusLoading, MaxCBM: 33, MaxPayloadKG: 28000}
+	tx.linesByID[lineID] = ContainerLine{ID: lineID, ContainerID: srcID, Qty: 2, CBMTotal: 1, WeightKGTotal: 20}
+	svc := newSvc(&mockStore{tx: tx}, nil, nil, nil)
+
+	_, err := svc.TransferLine(context.Background(), TransferLineInput{
+		ContainerID: srcID, TargetContainerID: tgtID, LineID: lineID,
+		Reason: "", ActorID: uuid.New(),
+	})
+	if !errors.Is(err, domain.ErrInvalidInput) {
+		t.Errorf("BR-D07: empty reason must return ErrInvalidInput, got %v", err)
+	}
+}
+
+// BR-D07: audit row written on successful transfer.
+func TestTransferLine_AuditRowWritten(t *testing.T) {
+	srcID := uuid.New()
+	tgtID := uuid.New()
+	lineID := uuid.New()
+	tx := newMockTx()
+	tx.containersByID[srcID] = Container{ID: srcID, Status: ContainerStatusLoading, MaxCBM: 33, MaxPayloadKG: 28000}
+	tx.containersByID[tgtID] = Container{ID: tgtID, Status: ContainerStatusLoading, MaxCBM: 33, MaxPayloadKG: 28000}
+	tx.linesByID[lineID] = ContainerLine{ID: lineID, ContainerID: srcID, Qty: 4, CBMTotal: 2, WeightKGTotal: 40}
+	svc := newSvc(&mockStore{tx: tx}, nil, nil, nil)
+
+	actorID := uuid.New()
+	res, err := svc.TransferLine(context.Background(), TransferLineInput{
+		ContainerID: srcID, TargetContainerID: tgtID, LineID: lineID,
+		Reason: "delay on vessel A", ActorID: actorID, ActorRole: "warehouse",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if tx.insertedTransferAudit == nil {
+		t.Fatal("BR-D07: expected audit row to be written")
+	}
+	a := tx.insertedTransferAudit
+	if a.Reason != "delay on vessel A" {
+		t.Errorf("audit.Reason = %q, want %q", a.Reason, "delay on vessel A")
+	}
+	if a.QtyTransferred != 4 {
+		t.Errorf("audit.QtyTransferred = %d, want 4", a.QtyTransferred)
+	}
+	if a.IsCrossPlan {
+		t.Errorf("BR-D16: no approved plan, IsCrossPlan must be false")
+	}
+	if res.Audit.ID == (uuid.UUID{}) {
+		t.Errorf("result.Audit must be populated")
+	}
+}
+
+// BR-D16: source has no approved plan → worker role allowed.
+func TestTransferLine_SamePlan_WorkerAllowed(t *testing.T) {
+	srcID := uuid.New()
+	tgtID := uuid.New()
+	lineID := uuid.New()
+	tx := newMockTx()
+	tx.containersByID[srcID] = Container{ID: srcID, Status: ContainerStatusLoading, MaxCBM: 33, MaxPayloadKG: 28000}
+	tx.containersByID[tgtID] = Container{ID: tgtID, Status: ContainerStatusLoading, MaxCBM: 33, MaxPayloadKG: 28000}
+	tx.linesByID[lineID] = ContainerLine{ID: lineID, ContainerID: srcID, Qty: 2, CBMTotal: 1, WeightKGTotal: 10}
+	tx.hasApprovedLoadingPlanResult = false // no approved plan
+	svc := newSvc(&mockStore{tx: tx}, nil, nil, nil)
+
+	_, err := svc.TransferLine(context.Background(), TransferLineInput{
+		ContainerID: srcID, TargetContainerID: tgtID, LineID: lineID,
+		Reason: "rebalance", ActorID: uuid.New(), ActorRole: "warehouse",
+	})
+	if err != nil {
+		t.Errorf("BR-D16: worker must be allowed when no approved plan, got %v", err)
+	}
+}
+
+// BR-D17: source has APPROVED plan + worker role → 412.
+func TestTransferLine_CrossPlan_WorkerRejected(t *testing.T) {
+	srcID := uuid.New()
+	tgtID := uuid.New()
+	lineID := uuid.New()
+	tx := newMockTx()
+	tx.containersByID[srcID] = Container{ID: srcID, Status: ContainerStatusLoading, MaxCBM: 33, MaxPayloadKG: 28000}
+	tx.containersByID[tgtID] = Container{ID: tgtID, Status: ContainerStatusLoading, MaxCBM: 33, MaxPayloadKG: 28000}
+	tx.linesByID[lineID] = ContainerLine{ID: lineID, ContainerID: srcID, Qty: 2, CBMTotal: 1, WeightKGTotal: 10}
+	tx.hasApprovedLoadingPlanResult = true // approved plan exists
+	svc := newSvc(&mockStore{tx: tx}, nil, nil, nil)
+
+	_, err := svc.TransferLine(context.Background(), TransferLineInput{
+		ContainerID: srcID, TargetContainerID: tgtID, LineID: lineID,
+		Reason: "rebalance", ActorID: uuid.New(), ActorRole: "warehouse",
+	})
+	if !errors.Is(err, domain.ErrPreconditionFailed) {
+		t.Errorf("BR-D17: worker on cross-plan must return ErrPreconditionFailed, got %v", err)
+	}
+}
+
+// BR-D17: source has APPROVED plan + planner role → allowed.
+func TestTransferLine_CrossPlan_PlannerAllowed(t *testing.T) {
+	srcID := uuid.New()
+	tgtID := uuid.New()
+	lineID := uuid.New()
+	tx := newMockTx()
+	tx.containersByID[srcID] = Container{ID: srcID, Status: ContainerStatusLoading, MaxCBM: 33, MaxPayloadKG: 28000}
+	tx.containersByID[tgtID] = Container{ID: tgtID, Status: ContainerStatusLoading, MaxCBM: 33, MaxPayloadKG: 28000}
+	tx.linesByID[lineID] = ContainerLine{ID: lineID, ContainerID: srcID, Qty: 2, CBMTotal: 1, WeightKGTotal: 10}
+	tx.hasApprovedLoadingPlanResult = true // approved plan exists
+	svc := newSvc(&mockStore{tx: tx}, nil, nil, nil)
+
+	_, err := svc.TransferLine(context.Background(), TransferLineInput{
+		ContainerID: srcID, TargetContainerID: tgtID, LineID: lineID,
+		Reason: "vessel schedule change", ActorID: uuid.New(), ActorRole: "planner",
+	})
+	if err != nil {
+		t.Errorf("BR-D17: planner must be allowed on cross-plan transfer, got %v", err)
+	}
+	if tx.insertedTransferAudit == nil || !tx.insertedTransferAudit.IsCrossPlan {
+		t.Errorf("BR-D17: audit row must have IsCrossPlan=true")
 	}
 }
 

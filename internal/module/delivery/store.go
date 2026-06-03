@@ -118,6 +118,16 @@ type txStore interface {
 	// matching container_status_log row in the same statement. Returns the
 	// updated container.
 	updateContainerStatus(ctx context.Context, in updateStatusInput) (Container, error)
+
+	// insertTransferAudit writes the BR-D07 mandatory audit row inside the
+	// transfer transaction so the audit is atomically consistent with the
+	// line move.
+	insertTransferAudit(ctx context.Context, a ContainerTransferAudit) error
+
+	// hasApprovedLoadingPlan returns true when the container has at least one
+	// loading_plan row with status = 'APPROVED'. Used by BR-D17 to decide
+	// whether the transfer is cross-plan and therefore requires a planner.
+	hasApprovedLoadingPlan(ctx context.Context, containerID uuid.UUID) (bool, error)
 }
 
 type updateStatusInput struct {
