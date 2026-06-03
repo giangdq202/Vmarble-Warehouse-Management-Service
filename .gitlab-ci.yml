@@ -13,6 +13,7 @@ stages:
   - test
   - lint
   - build
+  - push
 
 variables:
   IMAGE_NAME: registry.gitlab.com/529-stu/vmarble-warehouse-management-service
@@ -78,16 +79,15 @@ go-build:
   script:
     - go build ./...
 
-# ── Docker build — push to dev ────────────────────────────────────────────
+# ── Docker build + push — push to dev ────────────────────────────────────
 
-docker-build:
-  stage: build
+docker-push:
+  stage: push
   image: docker:26
   services:
     - name: docker:26-dind
       alias: docker
   variables:
-    # Disable TLS for simplicity in CI; enable + set DOCKER_TLS_CERTDIR for prod runners
     DOCKER_TLS_CERTDIR: ""
     DOCKER_HOST: tcp://docker:2375
     DOCKER_DRIVER: overlay2
@@ -98,9 +98,8 @@ docker-build:
         -t "${IMAGE_NAME}:sha-${CI_COMMIT_SHORT_SHA}"
         -t "${IMAGE_NAME}:stg-latest"
         .
-    # ── TODO: uncomment when registry credentials are configured ──────────
-    # - docker login -u $CI_REGISTRY_USER -p $CI_JOB_TOKEN $CI_REGISTRY
-    # - docker push "${IMAGE_NAME}:sha-${CI_COMMIT_SHORT_SHA}"
-    # - docker push "${IMAGE_NAME}:stg-latest"
+    - docker login -u $CI_REGISTRY_USER -p $CI_JOB_TOKEN $CI_REGISTRY
+    - docker push "${IMAGE_NAME}:sha-${CI_COMMIT_SHORT_SHA}"
+    - docker push "${IMAGE_NAME}:stg-latest"
     # ── TODO: uncomment when Dokploy webhook variable is set ──────────────
     # - curl -sS -f -X POST "$DOKPLOY_BE_WEBHOOK_URL"
