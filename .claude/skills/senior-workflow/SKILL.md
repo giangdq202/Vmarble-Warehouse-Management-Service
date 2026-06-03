@@ -15,6 +15,24 @@ description: >
 Run these 6 phases in order. Mark each one done before moving to the next.
 Never skip Phase 5 — it is the gate before PR.
 
+## Phase 0 - Git Sync (MANDATORY before anything else)
+
+Before reading any file, designing, or writing code:
+
+```bash
+git fetch origin
+git log HEAD..origin/dev --oneline   # must be empty — if not, pull first
+git log origin/dev..HEAD --oneline   # how far ahead is local branch?
+git status
+```
+
+Rules:
+- If `HEAD..origin/dev` is non-empty → your base is stale. Run `git checkout dev && git pull` then re-branch.
+- Always create feature branches FROM a fresh local `dev` that matches `origin/dev`.
+- Never branch off an unsynced `dev` — you will silently miss migrations, schema changes, or iface.go changes that cause merge conflicts later.
+
+Only proceed to Phase 1 after `HEAD..origin/dev` is empty.
+
 ## Phase 1 - Requirements Clarification
 
 Before writing a single line of code, understand the why.
