@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/vmarble/warehouse-management-service/internal/domain"
+	"github.com/vmarble/warehouse-management-service/internal/platform/auth"
 	"github.com/vmarble/warehouse-management-service/internal/platform/httpkit"
 )
 
@@ -347,6 +348,11 @@ func (svc *service) TransferLine(ctx context.Context, in TransferLineInput) (Tra
 		return TransferLineResult{}, domain.NewBizError(domain.ErrInvalidInput,
 			"qty must be non-negative")
 	}
+	// BR-D07: reason is mandatory for every transfer.
+	if reasonBlank(in.Reason) {
+		return TransferLineResult{}, domain.NewBizError(domain.ErrInvalidInput,
+			"reason is required for a container line transfer")
+	}
 
 	first, second := orderUUIDs(in.ContainerID, in.TargetContainerID)
 	var result TransferLineResult
@@ -371,6 +377,18 @@ func (svc *service) TransferLine(ctx context.Context, in TransferLineInput) (Tra
 		if !canHoldLines(src.Status) || !canHoldLines(target.Status) {
 			return domain.NewBizError(domain.ErrInvalidTransition,
 				"source and target containers must both be OPEN or LOADING")
+		}
+
+		// BR-D17: cross-plan transfer requires planner tier.
+		// A transfer is cross-plan when the source container has an APPROVED
+		// loading plan (i.e. a version-locked plan that workers scan against).
+		isCrossPlan, err := tx.hasApprovedLoadingPlan(ctx, src.ID)
+		if err != nil {
+			return err
+		}
+		if isCrossPlan && !isPlannerOrAbove(in.ActorRole) {
+			return domain.NewBizError(domain.ErrPreconditionFailed,
+				"transferring lines out of a container with an approved loading plan requires the planner role or above")
 		}
 
 		line, err := tx.lockLineForUpdate(ctx, in.LineID)
@@ -409,7 +427,23 @@ func (svc *service) TransferLine(ctx context.Context, in TransferLineInput) (Tra
 			if err := svc.flipToLoadingIfOpen(ctx, tx, target, in.ActorID); err != nil {
 				return err
 			}
-			result = TransferLineResult{TargetLine: newLine}
+			audit := ContainerTransferAudit{
+				ID:                uuid.New(),
+				SourceContainerID: src.ID,
+				TargetContainerID: target.ID,
+				LineID:            line.ID,
+				SKUID:             line.SKUID,
+				QtyTransferred:    line.Qty,
+				Reason:            in.Reason,
+				IsCrossPlan:       isCrossPlan,
+				ActorID:           in.ActorID,
+				ActorRole:         in.ActorRole,
+				CreatedAt:         now,
+			}
+			if err := tx.insertTransferAudit(ctx, audit); err != nil {
+				return err
+			}
+			result = TransferLineResult{TargetLine: newLine, Audit: audit}
 			return nil
 		}
 
@@ -455,18 +489,44 @@ func (svc *service) TransferLine(ctx context.Context, in TransferLineInput) (Tra
 		if err := svc.flipToLoadingIfOpen(ctx, tx, target, in.ActorID); err != nil {
 			return err
 		}
+		audit := ContainerTransferAudit{
+			ID:                uuid.New(),
+			SourceContainerID: src.ID,
+			TargetContainerID: target.ID,
+			LineID:            line.ID,
+			SKUID:             line.SKUID,
+			QtyTransferred:    moveQty,
+			Reason:            in.Reason,
+			IsCrossPlan:       isCrossPlan,
+			ActorID:           in.ActorID,
+			ActorRole:         in.ActorRole,
+			CreatedAt:         now,
+		}
+		if err := tx.insertTransferAudit(ctx, audit); err != nil {
+			return err
+		}
 		// Source line stays in place with reduced qty.
 		updated := line
 		updated.Qty = remainingQty
 		updated.CBMTotal = remainingCBM
 		updated.WeightKGTotal = remainingWeight
-		result = TransferLineResult{SourceLine: &updated, TargetLine: newLine}
+		result = TransferLineResult{SourceLine: &updated, TargetLine: newLine, Audit: audit}
 		return nil
 	})
 	if err != nil {
 		return TransferLineResult{}, err
 	}
 	return result, nil
+}
+
+// isPlannerOrAbove returns true for the planner and admin persona tiers.
+// Used by BR-D17 to gate cross-plan transfers.
+func isPlannerOrAbove(roleStr string) bool {
+	switch auth.Role(roleStr) {
+	case auth.RolePlanner, auth.RoleAccountant, auth.RoleAdmin:
+		return true
+	}
+	return false
 }
 
 // ── State transitions ───────────────────────────────────────────────────────

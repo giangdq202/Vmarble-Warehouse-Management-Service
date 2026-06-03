@@ -115,6 +115,9 @@ type AddLineInput struct {
 // the service cannot derive them: the original snapshot was for `line.qty`,
 // not the new `Qty` slice. For a full transfer (Qty == 0) they are ignored
 // and the source line's snapshot is reused unchanged.
+//
+// Reason is mandatory (BR-D07). ActorRole drives the BR-D17 cross-plan gate —
+// the handler sets it from the auth identity role string.
 type TransferLineInput struct {
 	ContainerID       uuid.UUID `json:"-"`
 	LineID            uuid.UUID `json:"line_id"`
@@ -122,12 +125,30 @@ type TransferLineInput struct {
 	Qty               int       `json:"qty,omitempty"`
 	CBMTotal          float64   `json:"cbm_total,omitempty"`
 	WeightKGTotal     float64   `json:"weight_kg_total,omitempty"`
+	Reason            string    `json:"reason"`
 	ActorID           uuid.UUID `json:"-"`
+	ActorRole         string    `json:"-"` // set by handler from auth.Identity.Role
+}
+
+// ContainerTransferAudit is the BR-D07 audit row written for every transfer.
+type ContainerTransferAudit struct {
+	ID                uuid.UUID `json:"id"`
+	SourceContainerID uuid.UUID `json:"source_container_id"`
+	TargetContainerID uuid.UUID `json:"target_container_id"`
+	LineID            uuid.UUID `json:"line_id"`
+	SKUID             uuid.UUID `json:"sku_id"`
+	QtyTransferred    int       `json:"qty_transferred"`
+	Reason            string    `json:"reason"`
+	IsCrossPlan       bool      `json:"is_cross_plan"`
+	ActorID           uuid.UUID `json:"actor_id"`
+	ActorRole         string    `json:"actor_role"`
+	CreatedAt         time.Time `json:"created_at"`
 }
 
 type TransferLineResult struct {
-	SourceLine *ContainerLine `json:"source_line,omitempty"` // nil when the source line was fully consumed
-	TargetLine ContainerLine  `json:"target_line"`
+	SourceLine *ContainerLine         `json:"source_line,omitempty"` // nil when the source line was fully consumed
+	TargetLine ContainerLine          `json:"target_line"`
+	Audit      ContainerTransferAudit `json:"audit"`
 }
 
 // SealInput carries the actor for the audit row. BR-D05: sealing flips the

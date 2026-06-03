@@ -390,6 +390,30 @@ func scanLoadingPlan(r rowScanner) (LoadingPlan, error) {
 	return p, nil
 }
 
+func (t *pgTxStore) insertTransferAudit(ctx context.Context, a ContainerTransferAudit) error {
+	_, err := t.tx.Exec(ctx,
+		`INSERT INTO container_transfer_audit
+		    (id, source_container_id, target_container_id, line_id, sku_id,
+		     qty_transferred, reason, is_cross_plan, actor_id, actor_role, created_at)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+		a.ID, a.SourceContainerID, a.TargetContainerID, a.LineID, a.SKUID,
+		a.QtyTransferred, a.Reason, a.IsCrossPlan, a.ActorID, a.ActorRole, a.CreatedAt,
+	)
+	return err
+}
+
+func (t *pgTxStore) hasApprovedLoadingPlan(ctx context.Context, containerID uuid.UUID) (bool, error) {
+	var exists bool
+	err := t.tx.QueryRow(ctx,
+		`SELECT EXISTS(
+		    SELECT 1 FROM loading_plans
+		     WHERE container_id = $1 AND status = 'APPROVED'
+		 )`,
+		containerID,
+	).Scan(&exists)
+	return exists, err
+}
+
 func mapLoadingPlanPgError(err error) error {
 	var pgErr *pgconn.PgError
 	if !errors.As(err, &pgErr) {

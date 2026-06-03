@@ -30,7 +30,7 @@ func (h *Handler) Register(rg *gin.RouterGroup) {
 
 	rg.POST("/containers/:id/lines", auth.RequireWorkerUp(), h.addLine)
 	rg.DELETE("/containers/:id/lines/:line_id", auth.RequireWorkerUp(), h.deleteLine)
-	rg.POST("/containers/:id/transfer-line", auth.RequirePlannerUp(), h.transferLine)
+	rg.POST("/containers/:id/transfer-line", auth.RequireWorkerUp(), h.transferLine)
 
 	rg.POST("/containers/:id/seal", auth.RequirePlannerUp(), h.seal)
 	rg.POST("/containers/:id/reopen", auth.RequireAdminOnly(), h.reopen)
@@ -239,6 +239,9 @@ func (h *Handler) transferLine(c *gin.Context) {
 	}
 	in.ContainerID = id
 	in.ActorID = callerID(c)
+	if identity, ok := auth.FromContext(c); ok {
+		in.ActorRole = string(identity.Role)
+	}
 	out, err := h.svc.TransferLine(c.Request.Context(), in)
 	if err != nil {
 		httpkit.Error(c, err)
