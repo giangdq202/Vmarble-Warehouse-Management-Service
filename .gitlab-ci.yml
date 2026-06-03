@@ -37,6 +37,8 @@ variables:
 
 test:
   extends: .go_base
+  # Override to Debian image — alpine lacks gcc, which -race requires (CGO)
+  image: golang:1.25
   stage: test
   rules:
     - if: >
