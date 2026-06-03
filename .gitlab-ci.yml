@@ -101,5 +101,5 @@ docker-push:
     - docker login -u $CI_REGISTRY_USER -p $CI_JOB_TOKEN $CI_REGISTRY
     - docker push "${IMAGE_NAME}:sha-${CI_COMMIT_SHORT_SHA}"
     - docker push "${IMAGE_NAME}:stg-latest"
-    # ── TODO: uncomment when Dokploy webhook variable is set ──────────────
-    # - curl -sS -f -X POST "$DOKPLOY_BE_WEBHOOK_URL"
+    # ── Dokploy webhook trigger ──────────────────────────────────────────
+    - curl -sS -f -X POST "$DOKPLOY_BE_WEBHOOK_URL"
