@@ -924,11 +924,7 @@ func (svc *service) BoostWOPriority(ctx context.Context, in BoostWOPriorityInput
 	if _, err := svc.s.selectWorkOrderByID(ctx, in.WOID); err != nil {
 		return BoostWOPriorityResult{}, err
 	}
-	auditID, boostedAt, err := svc.s.setPriorityBoostAtomically(ctx, setPriorityBoostOp{
-		WOID:    in.WOID,
-		Reason:  in.Reason,
-		ActorID: in.ActorID,
-	})
+	auditID, boostedAt, err := svc.s.setPriorityBoostAtomically(ctx, setPriorityBoostOp(in))
 	if err != nil {
 		return BoostWOPriorityResult{}, err
 	}
