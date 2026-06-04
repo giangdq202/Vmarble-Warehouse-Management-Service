@@ -12383,6 +12383,9 @@ const docTemplate = `{
                 "created_by": {
                     "type": "string"
                 },
+                "cutoff_date": {
+                    "type": "string"
+                },
                 "fill_pct_cbm": {
                     "type": "number"
                 },
@@ -12422,6 +12425,9 @@ const docTemplate = `{
                 },
                 "used_weight_kg": {
                     "type": "number"
+                },
+                "vessel_id": {
+                    "type": "string"
                 }
             }
         },

@@ -1104,6 +1104,8 @@ definitions:
         type: string
       created_by:
         type: string
+      cutoff_date:
+        type: string
       fill_pct_cbm:
         type: number
       fill_pct_mass:
@@ -1133,6 +1135,8 @@ definitions:
         type: number
       used_weight_kg:
         type: number
+      vessel_id:
+        type: string
     type: object
   internal_module_delivery.ContainerLine:
     properties:

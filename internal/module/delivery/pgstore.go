@@ -345,7 +345,7 @@ func (t *pgTxStore) updateContainerStatus(ctx context.Context, in updateStatusIn
 
 const selectContainerCols = `
 SELECT id, code, container_type, max_cbm, max_payload_kg,
-       status, sealed_at, sealed_by, note, created_by, created_at
+       status, sealed_at, sealed_by, note, vessel_id, cutoff_date, created_by, created_at
   FROM containers`
 
 type rowScanner interface {
@@ -356,7 +356,7 @@ func scanContainer(r rowScanner) (Container, error) {
 	var c Container
 	var note *string
 	if err := r.Scan(&c.ID, &c.Code, &c.ContainerType, &c.MaxCBM, &c.MaxPayloadKG,
-		&c.Status, &c.SealedAt, &c.SealedBy, &note, &c.CreatedBy, &c.CreatedAt); err != nil {
+		&c.Status, &c.SealedAt, &c.SealedBy, &note, &c.VesselID, &c.CutoffDate, &c.CreatedBy, &c.CreatedAt); err != nil {
 		return Container{}, err
 	}
 	c.Note = stringFromPtr(note)
