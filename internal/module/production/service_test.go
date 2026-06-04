@@ -215,6 +215,21 @@ func (m *mockStore) cancelPlannedByPlan(_ context.Context, _ uuid.UUID) (int64, 
 	m.cancelPlannedByPlanCalled = true
 	return m.cancelPlannedByPlanResult, m.cancelPlannedByPlanErr
 }
+func (m *mockStore) selectWOWithPlanDeadline(_ context.Context, _ uuid.UUID) (woFeasibilityData, error) {
+	return woFeasibilityData{}, nil
+}
+func (m *mockStore) selectFeasibilitySuggestions(_ context.Context, _ uuid.UUID, _ uuid.UUID, _ int) ([]woSuggestionRow, error) {
+	return nil, nil
+}
+func (m *mockStore) setPriorityBoostAtomically(_ context.Context, _ setPriorityBoostOp) (uuid.UUID, time.Time, error) {
+	return uuid.Nil, time.Time{}, nil
+}
+func (m *mockStore) selectPreemptCandidates(_ context.Context, _ uuid.UUID) ([]preemptCandidateRow, error) {
+	return nil, nil
+}
+func (m *mockStore) preemptAtomically(_ context.Context, _ preemptOp) (uuid.UUID, time.Time, int, error) {
+	return uuid.Nil, time.Time{}, 0, nil
+}
 
 // mockPlanChecker satisfies PlanChecker.
 type mockPlanChecker struct {

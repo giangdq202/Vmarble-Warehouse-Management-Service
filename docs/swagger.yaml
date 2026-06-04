@@ -2103,6 +2103,13 @@ definitions:
     required:
     - barcode_id
     type: object
+  internal_module_planning.BoostPriorityResult:
+    properties:
+      audit_id:
+        type: string
+      boosted_at:
+        type: string
+    type: object
   internal_module_planning.CreatePlanInput:
     properties:
       deadline:
@@ -2114,6 +2121,30 @@ definitions:
       po_id:
         type: string
       sales_order_id:
+        type: string
+    type: object
+  internal_module_planning.FeasibilityResult:
+    properties:
+      feasible:
+        type: boolean
+      reason:
+        type: string
+      suggestions:
+        items:
+          $ref: '#/definitions/internal_module_planning.FeasibilitySuggestion'
+        type: array
+    type: object
+  internal_module_planning.FeasibilitySuggestion:
+    properties:
+      days_to_due:
+        type: integer
+      freed_qty:
+        type: integer
+      score:
+        type: number
+      sku_code:
+        type: string
+      wo_id:
         type: string
     type: object
   internal_module_planning.Plan:
@@ -2180,8 +2211,42 @@ definitions:
       status:
         $ref: '#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.PlanStatus'
     type: object
+  internal_module_planning.PreemptCandidate:
+    properties:
+      current_so_code:
+        type: string
+      freed_qty:
+        type: integer
+      slack_days:
+        type: integer
+      status:
+        type: string
+      wo_id:
+        type: string
+    type: object
+  internal_module_planning.PreemptResult:
+    properties:
+      audit_id:
+        type: string
+      freed_qty:
+        type: integer
+      preempted_at:
+        type: string
+    type: object
+  internal_module_planning.boostPriorityRequest:
+    properties:
+      reason:
+        type: string
+    type: object
   internal_module_planning.cancelPlanRequest:
     properties:
+      reason:
+        type: string
+    type: object
+  internal_module_planning.preemptRequest:
+    properties:
+      from_wo_id:
+        type: string
       reason:
         type: string
     type: object
@@ -2397,6 +2462,11 @@ definitions:
         type: string
       plan_id:
         type: string
+      priority_boost:
+        description: |-
+          PriorityBoost marks that a planner has manually elevated this WO's
+          scheduling priority (BR-PL05). Set by BoostPriority; never cleared.
+        type: boolean
       quantity:
         type: integer
       sales_order_line_id:
@@ -6909,6 +6979,134 @@ paths:
       summary: Scan FG barcode at packing station
       tags:
       - packing
+  /api/v1/planning/work-orders/{id}/boost-priority:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: work order id (uuid)
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: reason
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_module_planning.boostPriorityRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_module_planning.BoostPriorityResult'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Boost work order priority
+      tags:
+      - planning
+  /api/v1/planning/work-orders/{id}/check-feasibility:
+    post:
+      parameters:
+      - description: work order id (uuid)
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_module_planning.FeasibilityResult'
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Check work order material feasibility
+      tags:
+      - planning
+  /api/v1/planning/work-orders/{id}/preempt:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: target work order id (uuid)
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: from_wo_id + reason
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_module_planning.preemptRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_module_planning.PreemptResult'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "412":
+          description: Precondition Failed
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Preempt a work order to free materials for another
+      tags:
+      - planning
+  /api/v1/planning/work-orders/{id}/preempt-candidates:
+    get:
+      parameters:
+      - description: work order id (uuid)
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/internal_module_planning.PreemptCandidate'
+            type: array
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: List preemption candidates for a work order
+      tags:
+      - planning
   /api/v1/plans:
     get:
       parameters:

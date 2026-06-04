@@ -88,4 +88,10 @@ type Service interface {
 	LookupPlans(ctx context.Context, in LookupPlansInput) (httpkit.PagedResult[PlanLookupItem], error)
 	ApprovePlan(ctx context.Context, planID uuid.UUID) error
 	CancelPlan(ctx context.Context, in CancelPlanInput) error
+
+	// Smart re-allocation (BR-PL01–BR-PL09, BE #2)
+	CheckFeasibility(ctx context.Context, woID uuid.UUID) (FeasibilityResult, error)
+	BoostWorkOrderPriority(ctx context.Context, in BoostPriorityInput) (BoostPriorityResult, error)
+	ListPreemptCandidates(ctx context.Context, woID uuid.UUID) ([]PreemptCandidate, error)
+	PreemptWorkOrder(ctx context.Context, in PreemptInput) (PreemptResult, error)
 }

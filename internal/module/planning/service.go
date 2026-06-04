@@ -12,6 +12,7 @@ import (
 type service struct {
 	s          store
 	woCanceler WorkOrderCanceller
+	woAdvisor  WorkOrderAdvisor
 }
 
 func NewService(s store) Service {
@@ -23,6 +24,12 @@ func NewService(s store) Service {
 // APPROVED cancel — useful for unit tests that exercise DRAFT-only flows.
 func NewServiceWithDeps(s store, wo WorkOrderCanceller) Service {
 	return &service{s: s, woCanceler: wo}
+}
+
+// NewServiceFull wires all optional deps: WorkOrderCanceller (cancel cascade)
+// and WorkOrderAdvisor (smart re-allocation, BE #2).
+func NewServiceFull(s store, wo WorkOrderCanceller, adv WorkOrderAdvisor) Service {
+	return &service{s: s, woCanceler: wo, woAdvisor: adv}
 }
 
 func (svc *service) CreatePlan(ctx context.Context, in CreatePlanInput) (Plan, error) {
@@ -190,4 +197,41 @@ func (svc *service) LookupPlans(ctx context.Context, in LookupPlansInput) (httpk
 
 	p := httpkit.PageParams{Page: page, Limit: limit}
 	return httpkit.NewPagedResult(items, total, p), nil
+}
+
+func (svc *service) CheckFeasibility(ctx context.Context, woID uuid.UUID) (FeasibilityResult, error) {
+	if svc.woAdvisor == nil {
+		return FeasibilityResult{}, domain.NewBizError(domain.ErrPreconditionFailed, "work order advisor is not configured")
+	}
+	return svc.woAdvisor.CheckFeasibility(ctx, woID)
+}
+
+func (svc *service) BoostWorkOrderPriority(ctx context.Context, in BoostPriorityInput) (BoostPriorityResult, error) {
+	if svc.woAdvisor == nil {
+		return BoostPriorityResult{}, domain.NewBizError(domain.ErrPreconditionFailed, "work order advisor is not configured")
+	}
+	if in.Reason == "" {
+		return BoostPriorityResult{}, domain.NewBizError(domain.ErrInvalidInput, "reason is required")
+	}
+	return svc.woAdvisor.BoostPriority(ctx, in)
+}
+
+func (svc *service) ListPreemptCandidates(ctx context.Context, woID uuid.UUID) ([]PreemptCandidate, error) {
+	if svc.woAdvisor == nil {
+		return nil, domain.NewBizError(domain.ErrPreconditionFailed, "work order advisor is not configured")
+	}
+	return svc.woAdvisor.ListPreemptCandidates(ctx, woID)
+}
+
+func (svc *service) PreemptWorkOrder(ctx context.Context, in PreemptInput) (PreemptResult, error) {
+	if svc.woAdvisor == nil {
+		return PreemptResult{}, domain.NewBizError(domain.ErrPreconditionFailed, "work order advisor is not configured")
+	}
+	if in.Reason == "" {
+		return PreemptResult{}, domain.NewBizError(domain.ErrInvalidInput, "reason is required")
+	}
+	if in.FromWOID == in.ToWOID {
+		return PreemptResult{}, domain.NewBizError(domain.ErrInvalidInput, "from_wo_id and target work order must differ")
+	}
+	return svc.woAdvisor.PreemptWorkOrder(ctx, in)
 }

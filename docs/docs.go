@@ -6373,6 +6373,210 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/planning/work-orders/{id}/boost-priority": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "planning"
+                ],
+                "summary": "Boost work order priority",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "work order id (uuid)",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "reason",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_module_planning.boostPriorityRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_module_planning.BoostPriorityResult"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/planning/work-orders/{id}/check-feasibility": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "planning"
+                ],
+                "summary": "Check work order material feasibility",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "work order id (uuid)",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_module_planning.FeasibilityResult"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/planning/work-orders/{id}/preempt": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "planning"
+                ],
+                "summary": "Preempt a work order to free materials for another",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "target work order id (uuid)",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "from_wo_id + reason",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_module_planning.preemptRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_module_planning.PreemptResult"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "412": {
+                        "description": "Precondition Failed",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/planning/work-orders/{id}/preempt-candidates": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "planning"
+                ],
+                "summary": "List preemption candidates for a work order",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "work order id (uuid)",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/internal_module_planning.PreemptCandidate"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/plans": {
             "get": {
                 "security": [
@@ -13679,6 +13883,17 @@ const docTemplate = `{
                 }
             }
         },
+        "internal_module_planning.BoostPriorityResult": {
+            "type": "object",
+            "properties": {
+                "audit_id": {
+                    "type": "string"
+                },
+                "boosted_at": {
+                    "type": "string"
+                }
+            }
+        },
         "internal_module_planning.CreatePlanInput": {
             "type": "object",
             "properties": {
@@ -13695,6 +13910,43 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "sales_order_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_module_planning.FeasibilityResult": {
+            "type": "object",
+            "properties": {
+                "feasible": {
+                    "type": "boolean"
+                },
+                "reason": {
+                    "type": "string"
+                },
+                "suggestions": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_module_planning.FeasibilitySuggestion"
+                    }
+                }
+            }
+        },
+        "internal_module_planning.FeasibilitySuggestion": {
+            "type": "object",
+            "properties": {
+                "days_to_due": {
+                    "type": "integer"
+                },
+                "freed_qty": {
+                    "type": "integer"
+                },
+                "score": {
+                    "type": "number"
+                },
+                "sku_code": {
+                    "type": "string"
+                },
+                "wo_id": {
                     "type": "string"
                 }
             }
@@ -13797,9 +14049,62 @@ const docTemplate = `{
                 }
             }
         },
+        "internal_module_planning.PreemptCandidate": {
+            "type": "object",
+            "properties": {
+                "current_so_code": {
+                    "type": "string"
+                },
+                "freed_qty": {
+                    "type": "integer"
+                },
+                "slack_days": {
+                    "type": "integer"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "wo_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_module_planning.PreemptResult": {
+            "type": "object",
+            "properties": {
+                "audit_id": {
+                    "type": "string"
+                },
+                "freed_qty": {
+                    "type": "integer"
+                },
+                "preempted_at": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_module_planning.boostPriorityRequest": {
+            "type": "object",
+            "properties": {
+                "reason": {
+                    "type": "string"
+                }
+            }
+        },
         "internal_module_planning.cancelPlanRequest": {
             "type": "object",
             "properties": {
+                "reason": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_module_planning.preemptRequest": {
+            "type": "object",
+            "properties": {
+                "from_wo_id": {
+                    "type": "string"
+                },
                 "reason": {
                     "type": "string"
                 }
@@ -14118,6 +14423,10 @@ const docTemplate = `{
                 },
                 "plan_id": {
                     "type": "string"
+                },
+                "priority_boost": {
+                    "description": "PriorityBoost marks that a planner has manually elevated this WO's\nscheduling priority (BR-PL05). Set by BoostPriority; never cleared.",
+                    "type": "boolean"
                 },
                 "quantity": {
                     "type": "integer"

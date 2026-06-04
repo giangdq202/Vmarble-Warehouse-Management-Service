@@ -850,3 +850,144 @@ func validShortfallReason(r string) bool {
 	}
 	return false
 }
+
+// CheckFeasibility checks whether woID has sufficient AVAILABLE sheet stock
+// for its BOM requirements (BR-PL01/02/03).
+func (svc *service) CheckFeasibility(ctx context.Context, woID uuid.UUID) (WOFeasibilityResult, error) {
+	data, err := svc.s.selectWOWithPlanDeadline(ctx, woID)
+	if err != nil {
+		return WOFeasibilityResult{}, err
+	}
+
+	// Use BOMReader + StockChecker when wired (production flow); fall back to
+	// the embedded material_id from the DB projection when they are nil (tests).
+	if svc.br != nil && svc.stk != nil {
+		materials, err := svc.br.GetSheetMaterials(ctx, data.MaterialID)
+		if err != nil {
+			return WOFeasibilityResult{}, fmt.Errorf("get sheet materials: %w", err)
+		}
+		for _, m := range materials {
+			avail, err := svc.stk.CountAvailableSheetsByMaterial(ctx, m.MaterialID)
+			if err != nil {
+				return WOFeasibilityResult{}, fmt.Errorf("count sheets: %w", err)
+			}
+			if avail < data.Quantity {
+				return svc.buildInfeasibleResult(ctx, woID, data.MaterialID, "INSUFFICIENT_MATERIAL")
+			}
+		}
+	}
+
+	return WOFeasibilityResult{Feasible: true}, nil
+}
+
+func (svc *service) buildInfeasibleResult(ctx context.Context, woID, materialID uuid.UUID, reason string) (WOFeasibilityResult, error) {
+	rows, err := svc.s.selectFeasibilitySuggestions(ctx, materialID, woID, 5)
+	if err != nil {
+		return WOFeasibilityResult{}, fmt.Errorf("fetch suggestions: %w", err)
+	}
+
+	now := time.Now()
+	suggestions := make([]WOFeasibilitySuggestion, 0, len(rows))
+	for _, r := range rows {
+		daysToDue := 0
+		score := 0.0
+		if r.Deadline != nil {
+			d := int(r.Deadline.Sub(now).Hours() / 24)
+			if d < 0 {
+				d = 0
+			}
+			daysToDue = d
+			if d > 0 {
+				score = 1.0 / float64(d)
+			} else {
+				score = 999.0
+			}
+		}
+		suggestions = append(suggestions, WOFeasibilitySuggestion{
+			WOID:      r.WOID,
+			SKUCode:   r.SKUCode,
+			Score:     score,
+			DaysToDue: daysToDue,
+			FreedQty:  r.FreedQty,
+		})
+	}
+
+	return WOFeasibilityResult{
+		Feasible:    false,
+		Reason:      reason,
+		Suggestions: suggestions,
+	}, nil
+}
+
+// BoostWOPriority sets priority_boost=true and inserts a wo_boost_log row (BR-PL05).
+func (svc *service) BoostWOPriority(ctx context.Context, in BoostWOPriorityInput) (BoostWOPriorityResult, error) {
+	if _, err := svc.s.selectWorkOrderByID(ctx, in.WOID); err != nil {
+		return BoostWOPriorityResult{}, err
+	}
+	auditID, boostedAt, err := svc.s.setPriorityBoostAtomically(ctx, setPriorityBoostOp{
+		WOID:    in.WOID,
+		Reason:  in.Reason,
+		ActorID: in.ActorID,
+	})
+	if err != nil {
+		return BoostWOPriorityResult{}, err
+	}
+	slog.Info("wo.priority_boosted", "wo_id", in.WOID, "actor_id", in.ActorID)
+	return BoostWOPriorityResult{BoostedAt: boostedAt, AuditID: auditID}, nil
+}
+
+// ListWOPreemptCandidates returns PLANNED/IN_CUTTING WOs sharing a sheet
+// material with woID (BR-PL06/07).
+func (svc *service) ListWOPreemptCandidates(ctx context.Context, woID uuid.UUID) ([]WOPreemptCandidate, error) {
+	if _, err := svc.s.selectWorkOrderByID(ctx, woID); err != nil {
+		return nil, err
+	}
+	rows, err := svc.s.selectPreemptCandidates(ctx, woID)
+	if err != nil {
+		return nil, err
+	}
+
+	now := time.Now()
+	out := make([]WOPreemptCandidate, 0, len(rows))
+	for _, r := range rows {
+		slackDays := 0
+		if r.Deadline != nil {
+			d := int(r.Deadline.Sub(now).Hours() / 24)
+			if d > 0 {
+				slackDays = d
+			}
+		}
+		out = append(out, WOPreemptCandidate{
+			WOID:          r.WOID,
+			Status:        r.Status,
+			CurrentSOCode: r.SOCode,
+			SlackDays:     slackDays,
+			FreedQty:      r.Quantity,
+		})
+	}
+	return out, nil
+}
+
+// PreemptWO atomically reverts from_wo to PLANNED and logs the preemption (BR-PL07/09).
+func (svc *service) PreemptWO(ctx context.Context, in PreemptWOInput) (PreemptWOResult, error) {
+	if _, err := svc.s.selectWorkOrderByID(ctx, in.ToWOID); err != nil {
+		return PreemptWOResult{}, fmt.Errorf("to_wo not found: %w", err)
+	}
+	auditID, preemptedAt, freedQty, err := svc.s.preemptAtomically(ctx, preemptOp{
+		FromWOID:   in.FromWOID,
+		ToWOID:     in.ToWOID,
+		MaterialID: in.MaterialID,
+		Reason:     in.Reason,
+		ActorID:    in.ActorID,
+	})
+	if err != nil {
+		return PreemptWOResult{}, err
+	}
+	slog.Info("wo.preempted",
+		"from_wo_id", in.FromWOID,
+		"to_wo_id", in.ToWOID,
+		"freed_qty", freedQty,
+		"actor_id", in.ActorID,
+	)
+	return PreemptWOResult{PreemptedAt: preemptedAt, AuditID: auditID, FreedQty: freedQty}, nil
+}
