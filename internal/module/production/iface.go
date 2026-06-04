@@ -55,7 +55,10 @@ type WorkOrder struct {
 	// MATERIAL_SHORTAGE | DEFECT | TIME_SHORTAGE | OTHER. Set together with
 	// ActualQty; both nil for full COMPLETED transitions.
 	ShortfallReason *string   `json:"shortfall_reason,omitempty"`
-	CreatedAt       time.Time `json:"created_at"`
+	// PriorityBoost marks that a planner has manually elevated this WO's
+	// scheduling priority (BR-PL05). Set by BoostPriority; never cleared.
+	PriorityBoost bool      `json:"priority_boost"`
+	CreatedAt     time.Time `json:"created_at"`
 }
 
 type WorkOrderListFilter struct {
@@ -310,4 +313,64 @@ type Service interface {
 	// CANCELED in a single SQL UPDATE and returns the affected row count.
 	// Intended only for the planning cascade-cancel flow.
 	CancelPlannedByPlan(ctx context.Context, planID uuid.UUID) (int64, error)
+
+	// Smart re-allocation (BE #2, BR-PL01–BR-PL09)
+	CheckFeasibility(ctx context.Context, woID uuid.UUID) (WOFeasibilityResult, error)
+	BoostWOPriority(ctx context.Context, in BoostWOPriorityInput) (BoostWOPriorityResult, error)
+	ListWOPreemptCandidates(ctx context.Context, woID uuid.UUID) ([]WOPreemptCandidate, error)
+	PreemptWO(ctx context.Context, in PreemptWOInput) (PreemptWOResult, error)
+}
+
+// WOFeasibilityResult is the production module's view of a feasibility check.
+type WOFeasibilityResult struct {
+	Feasible    bool
+	Reason      string
+	Suggestions []WOFeasibilitySuggestion
+}
+
+// WOFeasibilitySuggestion is one scored alternative WO (BR-PL02/03).
+type WOFeasibilitySuggestion struct {
+	WOID      uuid.UUID
+	SKUCode   string
+	Score     float64
+	DaysToDue int
+	FreedQty  int
+}
+
+// BoostWOPriorityInput carries the parameters for BoostWOPriority.
+type BoostWOPriorityInput struct {
+	WOID    uuid.UUID
+	Reason  string
+	ActorID uuid.UUID
+}
+
+// BoostWOPriorityResult is the audit stamp returned by BoostWOPriority.
+type BoostWOPriorityResult struct {
+	BoostedAt time.Time
+	AuditID   uuid.UUID
+}
+
+// WOPreemptCandidate is one work order that can be preempted.
+type WOPreemptCandidate struct {
+	WOID          uuid.UUID
+	Status        string
+	CurrentSOCode string
+	SlackDays     int
+	FreedQty      int
+}
+
+// PreemptWOInput carries the parameters for PreemptWO.
+type PreemptWOInput struct {
+	ToWOID     uuid.UUID
+	FromWOID   uuid.UUID
+	MaterialID uuid.UUID
+	Reason     string
+	ActorID    uuid.UUID
+}
+
+// PreemptWOResult is the audit stamp returned by PreemptWO.
+type PreemptWOResult struct {
+	PreemptedAt time.Time
+	AuditID     uuid.UUID
+	FreedQty    int
 }

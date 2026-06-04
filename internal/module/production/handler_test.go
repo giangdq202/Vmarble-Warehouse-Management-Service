@@ -94,6 +94,18 @@ func (stubService) ListStatusesByPlan(context.Context, uuid.UUID) ([]domain.Work
 func (stubService) CancelPlannedByPlan(context.Context, uuid.UUID) (int64, error) {
 	panic("unexpected call")
 }
+func (stubService) CheckFeasibility(context.Context, uuid.UUID) (WOFeasibilityResult, error) {
+	panic("unexpected call")
+}
+func (stubService) BoostWOPriority(context.Context, BoostWOPriorityInput) (BoostWOPriorityResult, error) {
+	panic("unexpected call")
+}
+func (stubService) ListWOPreemptCandidates(context.Context, uuid.UUID) ([]WOPreemptCandidate, error) {
+	panic("unexpected call")
+}
+func (stubService) PreemptWO(context.Context, PreemptWOInput) (PreemptWOResult, error) {
+	panic("unexpected call")
+}
 
 var _ Service = stubService{}
 

@@ -18,6 +18,12 @@ This file serves as the Dynamic Memory for the AI Agent. It records patterns, pi
 
 - [New Module Wiring] When wiring a new module in `main.go`, `cmd/server` is gitignored (pattern `server` matches). Use `git add -f cmd/server/main.go` to force-stage it. Consider adding `!cmd/server/` to .gitignore to prevent this confusion.
 
+- [Role Gate Pattern] For endpoints where the auth tier depends on runtime data (not just the caller's role), use RequireWorkerUp() on the route and do the elevated-role check inside service.go after reading the relevant rows. Example: BR-D17 cross-plan transfer — the route allows any worker, but once the service detects an approved loading plan on the source container, it enforces planner-or-above. This pattern keeps the HTTP layer thin and the business rule co-located with the data it depends on.
+
+- [Audit in TX] Write audit rows (transfer, rejection, status change) inside the same transaction as the data mutation. Never do best-effort post-commit audit for records that must be atomically consistent with the mutation. Best-effort (slog.Warn on failure) is only appropriate for side-effect hooks (SSE, notifications) that do NOT form part of the audit chain.
+
+- [txStore vs store] Add new table writes that happen inside a transaction to txStore, not store. Methods on pgTxStore receive the pgx.Tx from withTx. Methods on pgStore open their own tx — two different pools, two different receiver types. Mixing them causes silent no-ops or panics.
+
 - [Cross-module ReceiveStock] When purchasing drives inventory creation, the adapter returns only `lot.ID` (not sheet IDs) because `inventory.ReceiveStock` does not expose individual sheet IDs. Design PO item → lot relationship, not PO item → individual sheet. Individual sheets are queryable later via `inventory_lots` join.
 
 - [Cross-module Late-binding Cycle] When module A needs to check module B, but B also depends on A (A→B→A cycle), use a late-binding adapter with an empty `svc` field (like `woAdvanceAdapter`). Wire `adapter.svc = bSvc` after both services are constructed. Guard the adapter's method with `if a.svc == nil { return safeDefault }` to avoid nil panics during startup ordering edge cases.
@@ -39,6 +45,13 @@ This file serves as the Dynamic Memory for the AI Agent. It records patterns, pi
 - [Typed-nil params for optional SQL filters] For pgx queries with optional filters (`$1::uuid IS NULL OR col = $1`), declare the placeholder as `var userID any = nil` and reassign the concrete `uuid.UUID` / `time.Time` when set. Never pass a `uuid.UUID{}` zero-value — pgx will bind it as an all-zeros UUID and your `IS NULL` branch never fires. This pattern scales cleanly for 3–4 optional filters without resorting to dynamic SQL building.
 
 - [Guard placement with BR precedence] When adding a new compute-time guard (zero-cost, invalid state) to a service method that already has BR guards (finalized immutability, transition checks), **place the new guard AFTER the higher-precedence BR checks**. Otherwise a "nicer" VN error message leaks and masks the real violation. In `ComputeCost`: Finalized check must fire before the zero-cost guard so BR-C04 wins when both conditions hold. Add an explicit test `..._ZeroCost_ReturnsAlreadyFinalized` to lock this ordering.
+
+- [Delegated advisor pattern] When a feature crosses two modules (planning decides WHAT, production owns HOW), define the full interface in the requesting module's `deps.go` with its own DTO types. The production `Service` interface gets parallel concrete methods (`BoostWOPriority`, `PreemptWO`...). The adapter in `main.go` maps between the two type sets. This avoids a naming collision between `planning.BoostPriorityInput` and `production.BoostWOPriorityInput` and keeps both modules independently testable with their own mocks.
+
+- [Late-binding multi-dep cycle] When a new advisor adapter also needs to be nil-safe at construction time (cycle like planning → production → planning via planAdapter), use the same late-binding pattern: declare `planningWOAdvisor := &planningWOAdvisorAdapter{}` before productionSvc, then set `planningWOAdvisor.svc = productionSvc` after construction. Pass the shell into `planning.NewServiceFull`. Never guard with `if svc == nil` in the adapter — panic is the correct signal when wiring is wrong.
+
+- [scanWorkOrder column ordering] Adding a column to `selectWOCols` must be paired with adding the matching `Scan` target in `scanWorkOrder` at exactly the same position. A mismatch silently scans the wrong value (bool ← text, int ← uuid). Add the column to both the SQL const AND the Scan call in the same commit, and run `make test` immediately — any mismatch surfaces as a type assertion panic in the test.
+
 
 - [Test migration strategy when tightening a guard] When a new guard fails on pre-existing tests that were coincidentally zero-cost COMPLETED fixtures, do NOT dilute the guard with exceptions. Instead, identify which tests are testing the guarded condition vs. testing unrelated subjects (insert path, update path, error propagation) — migrate the unrelated ones to use `plannedWO` (exempt from the guard) so they keep focusing on their real subject. Only the handful of ACTUAL-specific tests need to be updated with real cost data.
 

@@ -46,7 +46,7 @@ func scanWorkOrder(row interface {
 		&wo.SKUDimensions.LengthMM, &wo.SKUDimensions.WidthMM,
 		&wo.Quantity, &wo.Status, &wo.AssignedTo, &wo.AssignedAt, &wo.CreatedAt,
 		&estimatedHours, &machineSlotID, &salesOrderLineID,
-		&actualQty, &parentWOID, &shortfallReason,
+		&actualQty, &parentWOID, &shortfallReason, &wo.PriorityBoost,
 	)
 	if estimatedHours.Valid {
 		wo.EstimatedHours = &estimatedHours.Float64
@@ -84,7 +84,7 @@ const selectWOCols = `
 	COALESCE(s.width_mm, 0)  AS sku_width_mm,
 	wo.quantity, wo.status, wo.assigned_to, wo.assigned_at, wo.created_at,
 	wo.estimated_hours, wo.machine_slot_id, wo.sales_order_line_id,
-	wo.actual_qty, wo.parent_wo_id, wo.shortfall_reason
+	wo.actual_qty, wo.parent_wo_id, wo.shortfall_reason, wo.priority_boost
 FROM work_orders wo
 LEFT JOIN skus s ON s.id = wo.sku_id`
 
@@ -809,4 +809,185 @@ func (s *pgStore) partialCompleteAtomically(ctx context.Context, op partialCompl
 		}
 	}
 	return parent, carry, nil
+}
+
+func (s *pgStore) selectWOWithPlanDeadline(ctx context.Context, woID uuid.UUID) (woFeasibilityData, error) {
+	var d woFeasibilityData
+	var soCode sql.NullString
+	err := s.pool.QueryRow(ctx, `
+		SELECT wo.id, wo.quantity, wo.status, pp.deadline,
+		       COALESCE(bc.material_id, '00000000-0000-0000-0000-000000000000'::uuid),
+		       COALESCE(sol.code, '')
+		FROM work_orders wo
+		JOIN production_plans pp ON pp.id = wo.plan_id
+		LEFT JOIN bom_components bc ON bc.sku_id = wo.sku_id AND bc.material_type = 'PLYWOOD'
+		LEFT JOIN sales_order_lines sol ON sol.id = wo.sales_order_line_id
+		WHERE wo.id = $1
+		LIMIT 1`, woID,
+	).Scan(&d.WOID, &d.Quantity, &d.Status, &d.Deadline, &d.MaterialID, &soCode)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return d, domain.ErrNotFound
+	}
+	if soCode.Valid {
+		d.SOCode = soCode.String
+	}
+	return d, err
+}
+
+func (s *pgStore) selectFeasibilitySuggestions(ctx context.Context, materialID uuid.UUID, excludeWOID uuid.UUID, limit int) ([]woSuggestionRow, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT wo.id, COALESCE(sk.code,'') AS sku_code, wo.quantity, pp.deadline
+		FROM work_orders wo
+		JOIN production_plans pp ON pp.id = wo.plan_id
+		JOIN bom_components bc ON bc.sku_id = wo.sku_id AND bc.material_type = 'PLYWOOD' AND bc.material_id = $1
+		LEFT JOIN skus sk ON sk.id = wo.sku_id
+		WHERE wo.status = 'PLANNED' AND wo.id <> $2
+		ORDER BY
+		  CASE WHEN pp.deadline IS NULL THEN 1 ELSE 0 END,
+		  pp.deadline ASC
+		LIMIT $3`, materialID, excludeWOID, limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []woSuggestionRow
+	for rows.Next() {
+		var r woSuggestionRow
+		if err := rows.Scan(&r.WOID, &r.SKUCode, &r.Quantity, &r.Deadline); err != nil {
+			return nil, err
+		}
+		r.FreedQty = r.Quantity
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+func (s *pgStore) setPriorityBoostAtomically(ctx context.Context, op setPriorityBoostOp) (uuid.UUID, time.Time, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return uuid.Nil, time.Time{}, fmt.Errorf("begin tx: %w", err)
+	}
+	defer func() {
+		if err != nil {
+			_ = tx.Rollback(ctx)
+		}
+	}()
+
+	if _, err = tx.Exec(ctx,
+		`UPDATE work_orders SET priority_boost = true WHERE id = $1`, op.WOID,
+	); err != nil {
+		return uuid.Nil, time.Time{}, fmt.Errorf("set priority_boost: %w", err)
+	}
+
+	auditID := uuid.New()
+	now := time.Now()
+	if _, err = tx.Exec(ctx,
+		`INSERT INTO wo_boost_log (id, wo_id, reason, actor_id, created_at)
+		 VALUES ($1, $2, $3, $4, $5)`,
+		auditID, op.WOID, op.Reason, op.ActorID, now,
+	); err != nil {
+		return uuid.Nil, time.Time{}, fmt.Errorf("insert boost log: %w", err)
+	}
+
+	if err = tx.Commit(ctx); err != nil {
+		return uuid.Nil, time.Time{}, fmt.Errorf("commit: %w", err)
+	}
+	return auditID, now, nil
+}
+
+func (s *pgStore) selectPreemptCandidates(ctx context.Context, woID uuid.UUID) ([]preemptCandidateRow, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT other.id, other.status, COALESCE(sol.code,''), pp.deadline, other.quantity
+		FROM work_orders other
+		JOIN production_plans pp ON pp.id = other.plan_id
+		JOIN bom_components bc_other ON bc_other.sku_id = other.sku_id AND bc_other.material_type = 'PLYWOOD'
+		JOIN bom_components bc_me   ON bc_me.sku_id = (SELECT sku_id FROM work_orders WHERE id = $1)
+		                           AND bc_me.material_type = 'PLYWOOD'
+		                           AND bc_me.material_id = bc_other.material_id
+		LEFT JOIN sales_order_lines sol ON sol.id = other.sales_order_line_id
+		WHERE other.status IN ('PLANNED','IN_CUTTING') AND other.id <> $1
+		ORDER BY pp.deadline ASC NULLS LAST
+		LIMIT 20`, woID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []preemptCandidateRow
+	for rows.Next() {
+		var r preemptCandidateRow
+		if err := rows.Scan(&r.WOID, &r.Status, &r.SOCode, &r.Deadline, &r.Quantity); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+func (s *pgStore) preemptAtomically(ctx context.Context, op preemptOp) (uuid.UUID, time.Time, int, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return uuid.Nil, time.Time{}, 0, fmt.Errorf("begin tx: %w", err)
+	}
+	defer func() {
+		if err != nil {
+			_ = tx.Rollback(ctx)
+		}
+	}()
+
+	// Lock both rows to prevent concurrent preemption.
+	var fromStatus string
+	var fromQty int
+	if lockErr := tx.QueryRow(ctx,
+		`SELECT status, quantity FROM work_orders WHERE id = $1 FOR UPDATE`, op.FromWOID,
+	).Scan(&fromStatus, &fromQty); lockErr != nil {
+		if errors.Is(lockErr, pgx.ErrNoRows) {
+			err = domain.ErrNotFound
+			return uuid.Nil, time.Time{}, 0, err
+		}
+		err = fmt.Errorf("lock from_wo: %w", lockErr)
+		return uuid.Nil, time.Time{}, 0, err
+	}
+	// Lock to_wo too (avoids deadlock by consistent lock ordering handled by caller passing lower UUID first — good-enough for MVP).
+	if _, lockErr := tx.Exec(ctx,
+		`SELECT 1 FROM work_orders WHERE id = $1 FOR UPDATE`, op.ToWOID,
+	); lockErr != nil {
+		err = fmt.Errorf("lock to_wo: %w", lockErr)
+		return uuid.Nil, time.Time{}, 0, err
+	}
+
+	// BR-PL07: refuse if from_wo progressed past IN_CUTTING.
+	switch fromStatus {
+	case string(domain.WOPlanned), string(domain.WOInCutting):
+		// allowed
+	default:
+		err = domain.NewBizError(domain.ErrPreconditionFailed,
+			fmt.Sprintf("cannot preempt work order in status %s: only PLANNED or IN_CUTTING is allowed", fromStatus))
+		return uuid.Nil, time.Time{}, 0, err
+	}
+
+	if _, execErr := tx.Exec(ctx,
+		`UPDATE work_orders SET status = $1 WHERE id = $2`,
+		string(domain.WOPlanned), op.FromWOID,
+	); execErr != nil {
+		err = fmt.Errorf("revert from_wo: %w", execErr)
+		return uuid.Nil, time.Time{}, 0, err
+	}
+
+	auditID := uuid.New()
+	now := time.Now()
+	if _, execErr := tx.Exec(ctx,
+		`INSERT INTO wo_preemption_log (id, from_wo_id, to_wo_id, material_id, freed_qty, reason, actor_id, created_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+		auditID, op.FromWOID, op.ToWOID, op.MaterialID, fromQty, op.Reason, op.ActorID, now,
+	); execErr != nil {
+		err = fmt.Errorf("insert preemption log: %w", execErr)
+		return uuid.Nil, time.Time{}, 0, err
+	}
+
+	if err = tx.Commit(ctx); err != nil {
+		return uuid.Nil, time.Time{}, 0, fmt.Errorf("commit: %w", err)
+	}
+	return auditID, now, fromQty, nil
 }

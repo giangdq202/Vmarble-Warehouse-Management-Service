@@ -104,7 +104,8 @@ func main() {
 	// avoidance, same pattern as woAdvance/costingChecker). It powers the
 	// APPROVED → CANCELED cascade introduced in #249.
 	planningWOCanceller := &planningWOCancellerAdapter{}
-	planningSvc := planning.NewServiceWithDeps(planningStore, planningWOCanceller)
+	planningWOAdvisor := &planningWOAdvisorAdapter{}
+	planningSvc := planning.NewServiceFull(planningStore, planningWOCanceller, planningWOAdvisor)
 	// woAdvanceAdapter is wired after productionSvc is constructed to avoid a
 	// construction-time cycle (inventory → production → inventory).
 	// costingChecker is similarly wired after costingSvc is constructed to avoid
@@ -142,6 +143,7 @@ func main() {
 	// Wire production into the advance adapter now that it exists.
 	woAdvance.svc = productionSvc
 	planningWOCanceller.svc = productionSvc
+	planningWOAdvisor.svc = productionSvc
 	barcodeGen.skuSvc = catalogSvc
 	barcodeGen.woSvc = productionSvc
 	barcodeGen.barcodeSvc = barcodeSvc
@@ -706,6 +708,62 @@ func (a *planningWOCancellerAdapter) ListStatusesByPlan(ctx context.Context, pla
 
 func (a *planningWOCancellerAdapter) CancelPlannedByPlan(ctx context.Context, planID uuid.UUID) (int64, error) {
 	return a.svc.CancelPlannedByPlan(ctx, planID)
+}
+
+// planningWOAdvisorAdapter bridges planning → production for smart re-allocation (BE #2).
+type planningWOAdvisorAdapter struct {
+	svc production.Service
+}
+
+func (a *planningWOAdvisorAdapter) CheckFeasibility(ctx context.Context, woID uuid.UUID) (planning.FeasibilityResult, error) {
+	r, err := a.svc.CheckFeasibility(ctx, woID)
+	if err != nil {
+		return planning.FeasibilityResult{}, err
+	}
+	sugg := make([]planning.FeasibilitySuggestion, len(r.Suggestions))
+	for i, s := range r.Suggestions {
+		sugg[i] = planning.FeasibilitySuggestion{
+			WOID: s.WOID, SKUCode: s.SKUCode, Score: s.Score,
+			DaysToDue: s.DaysToDue, FreedQty: s.FreedQty,
+		}
+	}
+	return planning.FeasibilityResult{Feasible: r.Feasible, Reason: r.Reason, Suggestions: sugg}, nil
+}
+
+func (a *planningWOAdvisorAdapter) BoostPriority(ctx context.Context, in planning.BoostPriorityInput) (planning.BoostPriorityResult, error) {
+	r, err := a.svc.BoostWOPriority(ctx, production.BoostWOPriorityInput{
+		WOID: in.WOID, Reason: in.Reason, ActorID: in.ActorID,
+	})
+	if err != nil {
+		return planning.BoostPriorityResult{}, err
+	}
+	return planning.BoostPriorityResult{BoostedAt: r.BoostedAt, AuditID: r.AuditID}, nil
+}
+
+func (a *planningWOAdvisorAdapter) ListPreemptCandidates(ctx context.Context, woID uuid.UUID) ([]planning.PreemptCandidate, error) {
+	rows, err := a.svc.ListWOPreemptCandidates(ctx, woID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]planning.PreemptCandidate, len(rows))
+	for i, r := range rows {
+		out[i] = planning.PreemptCandidate{
+			WOID: r.WOID, Status: r.Status, CurrentSOCode: r.CurrentSOCode,
+			SlackDays: r.SlackDays, FreedQty: r.FreedQty,
+		}
+	}
+	return out, nil
+}
+
+func (a *planningWOAdvisorAdapter) PreemptWorkOrder(ctx context.Context, in planning.PreemptInput) (planning.PreemptResult, error) {
+	r, err := a.svc.PreemptWO(ctx, production.PreemptWOInput{
+		ToWOID: in.ToWOID, FromWOID: in.FromWOID,
+		Reason: in.Reason, ActorID: in.ActorID,
+	})
+	if err != nil {
+		return planning.PreemptResult{}, err
+	}
+	return planning.PreemptResult{PreemptedAt: r.PreemptedAt, AuditID: r.AuditID, FreedQty: r.FreedQty}, nil
 }
 
 // laborDataAdapter implements costing.LaborDataReader by delegating to the
