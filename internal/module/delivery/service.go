@@ -578,6 +578,15 @@ func (svc *service) Seal(ctx context.Context, in SealInput) (Container, error) {
 				"only OPEN/LOADING containers can be sealed; got "+c.Status)
 		}
 
+		// BR-D08: cannot seal after vessel cutoff_date.
+		if c.CutoffDate != nil && svc.now().After(*c.CutoffDate) {
+			return domain.NewBizError(domain.ErrPreconditionFailed,
+				"cannot seal: vessel cutoff_date has passed").
+				WithDetails(map[string]any{
+					"cutoff_date": c.CutoffDate,
+				})
+		}
+
 		items, err := tx.listLinesForSeal(ctx, in.ContainerID)
 		if err != nil {
 			return err

@@ -42,6 +42,8 @@ type Container struct {
 	SealedAt      *time.Time `json:"sealed_at,omitempty"`
 	SealedBy      *uuid.UUID `json:"sealed_by,omitempty"`
 	Note          string     `json:"note,omitempty"`
+	VesselID      *uuid.UUID `json:"vessel_id,omitempty"`
+	CutoffDate    *time.Time `json:"cutoff_date,omitempty"`
 	CreatedBy     uuid.UUID  `json:"created_by"`
 	CreatedAt     time.Time  `json:"created_at"`
 
