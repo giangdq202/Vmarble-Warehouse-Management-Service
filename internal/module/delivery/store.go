@@ -124,6 +124,10 @@ type txStore interface {
 	// line move.
 	insertTransferAudit(ctx context.Context, a ContainerTransferAudit) error
 
+	// insertOverloadLog writes the BR-D18 admin override audit row atomically
+	// with the line insert when AllowOverload=true bypasses the capacity guard.
+	insertOverloadLog(ctx context.Context, l ContainerOverloadLog) error
+
 	// hasApprovedLoadingPlan returns true when the container has at least one
 	// loading_plan row with status = 'APPROVED'. Used by BR-D17 to decide
 	// whether the transfer is cross-plan and therefore requires a planner.

@@ -176,12 +176,15 @@ func (h *Handler) addLine(c *gin.Context) {
 	}
 	in.ContainerID = id
 	in.AddedBy = callerID(c)
-	line, err := h.svc.AddLine(c.Request.Context(), in)
+	if ident, ok := auth.FromContext(c); ok {
+		in.ActorRole = string(ident.Role)
+	}
+	result, err := h.svc.AddLine(c.Request.Context(), in)
 	if err != nil {
 		httpkit.Error(c, err)
 		return
 	}
-	c.JSON(http.StatusCreated, line)
+	c.JSON(http.StatusCreated, result)
 }
 
 // deleteLine godoc

@@ -12351,6 +12351,9 @@ const docTemplate = `{
         "internal_module_delivery.AddLineInput": {
             "type": "object",
             "properties": {
+                "allow_overload": {
+                    "type": "boolean"
+                },
                 "cbm_total": {
                     "type": "number"
                 },

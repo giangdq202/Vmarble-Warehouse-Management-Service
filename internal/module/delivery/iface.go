@@ -98,6 +98,11 @@ type CreateContainerInput struct {
 // these values from its own SKU registry. Once #294 lands, FE will compute
 // `sku.cbm * qty` and `sku.weight_kg * qty` and pass them through unchanged
 // — no service-side change required.
+//
+// AllowOverload lets an admin force-add a line even when the projected totals
+// exceed max_cbm / max_payload_kg (BR-D18 / BR-D20). The override is audit-
+// logged atomically. Non-admin callers that set AllowOverload=true receive
+// ErrPreconditionFailed. ActorRole is set by the handler from the auth claim.
 type AddLineInput struct {
 	ContainerID      uuid.UUID `json:"-"`
 	SKUID            uuid.UUID `json:"sku_id"`
@@ -106,6 +111,31 @@ type AddLineInput struct {
 	CBMTotal         float64   `json:"cbm_total"`
 	WeightKGTotal    float64   `json:"weight_kg_total"`
 	AddedBy          uuid.UUID `json:"-"`
+	AllowOverload    bool      `json:"allow_overload,omitempty"`
+	ActorRole        string    `json:"-"` // set by handler from auth.Identity.Role
+}
+
+// AddLineResult wraps the inserted line and a near-capacity warning flag.
+// NearCapacity is true when projected CBM or weight exceeds 90% of the
+// container max (BR-D19). The line is inserted regardless — NearCapacity is
+// advisory only.
+type AddLineResult struct {
+	Line         ContainerLine `json:"line"`
+	NearCapacity bool          `json:"near_capacity,omitempty"`
+}
+
+// ContainerOverloadLog is the audit record written when an admin force-adds a
+// line that would otherwise be rejected by the capacity guard (BR-D18/D20).
+type ContainerOverloadLog struct {
+	ID            uuid.UUID `json:"id"`
+	ContainerID   uuid.UUID `json:"container_id"`
+	LineID        uuid.UUID `json:"line_id"`
+	ProjectedCBM  float64   `json:"projected_cbm"`
+	MaxCBM        float64   `json:"max_cbm"`
+	ProjectedKG   float64   `json:"projected_kg"`
+	MaxKG         float64   `json:"max_kg"`
+	ActorID       uuid.UUID `json:"actor_id"`
+	Reason        string    `json:"reason"`
 }
 
 // TransferLineInput moves part or all of a line from the source container
@@ -314,7 +344,7 @@ type Service interface {
 	GetContainer(ctx context.Context, id uuid.UUID) (Container, error)
 	ListContainers(ctx context.Context, p httpkit.PageParams, f ContainerListFilter) (httpkit.PagedResult[Container], error)
 
-	AddLine(ctx context.Context, in AddLineInput) (ContainerLine, error)
+	AddLine(ctx context.Context, in AddLineInput) (AddLineResult, error)
 	DeleteLine(ctx context.Context, containerID, lineID uuid.UUID, actorID uuid.UUID) error
 	TransferLine(ctx context.Context, in TransferLineInput) (TransferLineResult, error)
 

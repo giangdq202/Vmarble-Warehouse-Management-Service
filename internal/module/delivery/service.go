@@ -170,51 +170,60 @@ func (svc *service) ListStatusLog(ctx context.Context, containerID uuid.UUID) ([
 // AddLine honours BR-D01 (status guard), BR-D02/D03 (capacity guard), plus
 // cross-module checks (SKU exists, SO line exists, qty fits within
 // qty_planned - qty_shipped on the underlying SO line).
-func (svc *service) AddLine(ctx context.Context, in AddLineInput) (ContainerLine, error) {
+// BR-D18/D20: hard capacity limit returns ErrInsufficientStock (422).
+// BR-D19: near-capacity warning at 90% sets AddLineResult.NearCapacity.
+// Admin override: AllowOverload=true bypasses the hard limit and writes an
+// audit row atomically (actor must be admin role).
+func (svc *service) AddLine(ctx context.Context, in AddLineInput) (AddLineResult, error) {
 	if in.Qty <= 0 {
-		return ContainerLine{}, domain.NewBizError(domain.ErrInvalidInput, "qty must be > 0")
+		return AddLineResult{}, domain.NewBizError(domain.ErrInvalidInput, "qty must be > 0")
 	}
 	if in.SKUID == uuid.Nil || in.SalesOrderLineID == uuid.Nil {
-		return ContainerLine{}, domain.NewBizError(domain.ErrInvalidInput,
+		return AddLineResult{}, domain.NewBizError(domain.ErrInvalidInput,
 			"sku_id and sales_order_line_id are required")
 	}
 	if in.CBMTotal < 0 || in.WeightKGTotal < 0 {
-		return ContainerLine{}, domain.NewBizError(domain.ErrInvalidInput,
+		return AddLineResult{}, domain.NewBizError(domain.ErrInvalidInput,
 			"cbm_total and weight_kg_total must be non-negative")
 	}
 	if in.AddedBy == uuid.Nil {
-		return ContainerLine{}, domain.NewBizError(domain.ErrInvalidInput, "added_by is required")
+		return AddLineResult{}, domain.NewBizError(domain.ErrInvalidInput, "added_by is required")
+	}
+	if in.AllowOverload && !isAdminRole(in.ActorRole) {
+		return AddLineResult{}, domain.NewBizError(domain.ErrPreconditionFailed,
+			"allow_overload requires admin role")
 	}
 
 	if svc.skuChecker != nil {
 		if _, err := svc.skuChecker.GetSKU(ctx, in.SKUID); err != nil {
-			return ContainerLine{}, err
+			return AddLineResult{}, err
 		}
 	}
 
 	if svc.soLineChecker != nil {
 		soLine, err := svc.soLineChecker.GetSOLine(ctx, in.SalesOrderLineID)
 		if err != nil {
-			return ContainerLine{}, err
+			return AddLineResult{}, err
 		}
 		if soLine.SKUID != in.SKUID {
-			return ContainerLine{}, domain.NewBizError(domain.ErrInvalidInput,
+			return AddLineResult{}, domain.NewBizError(domain.ErrInvalidInput,
 				"sku_id does not match the sales order line's SKU")
 		}
 		switch soLine.SOStatus {
 		case "CONFIRMED", "IN_PRODUCTION", "PARTIALLY_SHIPPED":
 			// allowed
 		default:
-			return ContainerLine{}, domain.NewBizError(domain.ErrInvalidTransition,
+			return AddLineResult{}, domain.NewBizError(domain.ErrInvalidTransition,
 				"sales order must be CONFIRMED or later before loading: got "+soLine.SOStatus)
 		}
 		if soLine.QtyShipped+in.Qty > soLine.QtyPlanned {
-			return ContainerLine{}, domain.NewBizError(domain.ErrInvalidInput,
+			return AddLineResult{}, domain.NewBizError(domain.ErrInvalidInput,
 				"qty exceeds remaining planned quantity for sales order line")
 		}
 	}
 
 	var line ContainerLine
+	var nearCapacity bool
 	err := svc.s.withTx(ctx, func(tx txStore, _ pgx.Tx) error {
 		c, err := tx.lockContainerForUpdate(ctx, in.ContainerID)
 		if err != nil {
@@ -232,9 +241,15 @@ func (svc *service) AddLine(ctx context.Context, in AddLineInput) (ContainerLine
 		if err != nil {
 			return err
 		}
-		if err := svc.checkCapacity(c, curCBM+in.CBMTotal, curWeight+in.WeightKGTotal); err != nil {
-			return err
+		projCBM := curCBM + in.CBMTotal
+		projWeight := curWeight + in.WeightKGTotal
+
+		capErr := svc.checkCapacity(c, projCBM, projWeight)
+		if capErr != nil && !in.AllowOverload {
+			return capErr
 		}
+
+		nearCapacity = svc.isNearCapacity(c, projCBM, projWeight)
 
 		now := svc.now()
 		line = ContainerLine{
@@ -250,6 +265,24 @@ func (svc *service) AddLine(ctx context.Context, in AddLineInput) (ContainerLine
 		}
 		if err := tx.insertLine(ctx, line); err != nil {
 			return err
+		}
+
+		// Write admin override audit atomically with the line insert.
+		if capErr != nil && in.AllowOverload {
+			overlog := ContainerOverloadLog{
+				ID:           uuid.New(),
+				ContainerID:  c.ID,
+				LineID:       line.ID,
+				ProjectedCBM: projCBM,
+				MaxCBM:       c.MaxCBM,
+				ProjectedKG:  projWeight,
+				MaxKG:        c.MaxPayloadKG,
+				ActorID:      in.AddedBy,
+				Reason:       "admin override",
+			}
+			if err := tx.insertOverloadLog(ctx, overlog); err != nil {
+				return err
+			}
 		}
 
 		// First line on an OPEN container flips it to LOADING. Subsequent
@@ -269,7 +302,7 @@ func (svc *service) AddLine(ctx context.Context, in AddLineInput) (ContainerLine
 		return nil
 	})
 	if err != nil {
-		return ContainerLine{}, err
+		return AddLineResult{}, err
 	}
 
 	// Best-effort FG reservation: flip qty matching AVAILABLE rows in the
@@ -292,7 +325,25 @@ func (svc *service) AddLine(ctx context.Context, in AddLineInput) (ContainerLine
 				"line_id", line.ID, "wanted", line.Qty, "reserved", reserved)
 		}
 	}
-	return line, nil
+	return AddLineResult{Line: line, NearCapacity: nearCapacity}, nil
+}
+
+// isNearCapacity returns true when projected CBM or weight exceeds 90% of
+// the container max (BR-D19 near-capacity warning threshold).
+func (svc *service) isNearCapacity(c Container, projCBM, projWeight float64) bool {
+	const nearPct = 0.90
+	if c.MaxCBM > 0 && projCBM > c.MaxCBM*nearPct {
+		return true
+	}
+	if c.MaxPayloadKG > 0 && projWeight > c.MaxPayloadKG*nearPct {
+		return true
+	}
+	return false
+}
+
+// isAdminRole returns true when the role string maps to the ADMIN persona.
+func isAdminRole(role string) bool {
+	return role == "admin"
 }
 
 func (svc *service) DeleteLine(ctx context.Context, containerID, lineID uuid.UUID, _ uuid.UUID) error {
@@ -763,11 +814,11 @@ func (svc *service) checkCapacity(c Container, projectedCBM, projectedWeight flo
 		overhead = 1
 	}
 	if projectedCBM > c.MaxCBM*overhead {
-		return domain.NewBizError(domain.ErrInvalidInput,
+		return domain.NewBizError(domain.ErrInsufficientStock,
 			"cbm capacity exceeded for container "+c.Code)
 	}
 	if projectedWeight > c.MaxPayloadKG*overhead {
-		return domain.NewBizError(domain.ErrInvalidInput,
+		return domain.NewBizError(domain.ErrInsufficientStock,
 			"weight capacity exceeded for container "+c.Code)
 	}
 	return nil
