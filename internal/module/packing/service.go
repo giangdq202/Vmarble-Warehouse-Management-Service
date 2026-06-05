@@ -18,6 +18,7 @@ type service struct {
 	cs         ContainerSuggester
 	clr        ContainerLineRemover
 	notifier   DefectNotifier
+	solChecker SOLineChecker
 	now        func() time.Time
 }
 
@@ -44,6 +45,12 @@ func NewService(
 		notifier:   notifier,
 		now:        time.Now,
 	}
+}
+
+// SetSOLineChecker wires the cross-module SOL validator after construction.
+// Called from main.go once salesSvc is available.
+func (svc *service) SetSOLineChecker(c SOLineChecker) {
+	svc.solChecker = c
 }
 
 // ── FG creation hook ────────────────────────────────────────────────────────
@@ -422,4 +429,84 @@ func validResolution(r string) bool {
 		return true
 	}
 	return false
+}
+
+// ReassignFG moves an FG's soft-allocation to a different SO line.
+// Allowed only when status is AVAILABLE or RESERVED (not LOADED/DEFECT/DISPOSED).
+// The target SOL must reference the same SKU.
+func (svc *service) ReassignFG(ctx context.Context, in ReassignFGInput) (ReassignFGResult, error) {
+	if in.FGID == uuid.Nil {
+		return ReassignFGResult{}, domain.NewBizError(domain.ErrInvalidInput, "fg_id is required")
+	}
+	if in.NewSOLineID == uuid.Nil {
+		return ReassignFGResult{}, domain.NewBizError(domain.ErrInvalidInput, "new_sales_order_line_id is required")
+	}
+	if in.Reason == "" {
+		return ReassignFGResult{}, domain.NewBizError(domain.ErrInvalidInput, "reason is required")
+	}
+	if in.ActorID == uuid.Nil {
+		return ReassignFGResult{}, domain.NewBizError(domain.ErrInvalidInput, "actor_id is required")
+	}
+
+	// Validate target SOL exists and get its SKU for mismatch check.
+	var targetSKUID uuid.UUID
+	if svc.solChecker != nil {
+		sol, err := svc.solChecker.GetSOLine(ctx, in.NewSOLineID)
+		if err != nil {
+			return ReassignFGResult{}, err
+		}
+		targetSKUID = sol.SKUID
+	}
+
+	var result ReassignFGResult
+	err := svc.s.withTx(ctx, func(tx txStore) error {
+		fg, err := tx.lockFGForUpdate(ctx, in.FGID)
+		if err != nil {
+			return err
+		}
+
+		switch fg.Status {
+		case FGStatusAvailable, FGStatusReserved:
+			// allowed
+		case FGStatusLoaded:
+			return domain.NewBizError(domain.ErrPreconditionFailed,
+				"cannot reassign FG already loaded in a sealed container")
+		default:
+			return domain.NewBizError(domain.ErrInvalidTransition,
+				"cannot reassign FG with status "+fg.Status)
+		}
+
+		// SKU mismatch check — only enforced when solChecker is wired.
+		if svc.solChecker != nil && targetSKUID != fg.SKUID {
+			return domain.NewBizError(domain.ErrInvalidInput,
+				"cannot reassign to a different SKU")
+		}
+
+		// No-op reassign to same SOL is allowed (idempotent).
+		if fg.SalesOrderLineID != nil && *fg.SalesOrderLineID == in.NewSOLineID {
+			result = ReassignFGResult{FG: fg}
+			return nil
+		}
+
+		now := svc.now()
+		log := FGReassignmentLog{
+			ID:           uuid.New(),
+			FGID:         fg.ID,
+			FromSOLID:    fg.SalesOrderLineID,
+			ToSOLID:      in.NewSOLineID,
+			ActorID:      in.ActorID,
+			Reason:       in.Reason,
+			ReassignedAt: now,
+		}
+		if err := tx.updateFGSOLine(ctx, fg.ID, &in.NewSOLineID); err != nil {
+			return err
+		}
+		if err := tx.insertReassignLog(ctx, log); err != nil {
+			return err
+		}
+		fg.SalesOrderLineID = &in.NewSOLineID
+		result = ReassignFGResult{FG: fg, Audit: log}
+		return nil
+	})
+	return result, err
 }

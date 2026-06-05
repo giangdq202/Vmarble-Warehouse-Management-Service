@@ -73,3 +73,14 @@ type DefectNotifier interface {
 	NotifyFGDefect(ctx context.Context, fgID uuid.UUID, skuCode, reason string) error
 	NotifyFGDefectResolved(ctx context.Context, fgID uuid.UUID, resolution string) error
 }
+
+// SOLineChecker returns the slim SOL projection packing needs to validate a
+// reassignment target. Wired in main.go to sales.Service.GetSOLine.
+type SOLineChecker interface {
+	GetSOLine(ctx context.Context, soLineID uuid.UUID) (SOLineInfo, error)
+}
+
+type SOLineInfo struct {
+	ID    uuid.UUID
+	SKUID uuid.UUID
+}

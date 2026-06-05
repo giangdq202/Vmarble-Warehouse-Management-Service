@@ -383,3 +383,21 @@ func (t *pgTxStore) updateDefectResolution(ctx context.Context, in updateResolut
 	}
 	return nil
 }
+
+func (t *pgTxStore) updateFGSOLine(ctx context.Context, fgID uuid.UUID, newSOLID *uuid.UUID) error {
+	_, err := t.tx.Exec(ctx,
+		`UPDATE fg_pool SET sales_order_line_id = $2 WHERE id = $1`,
+		fgID, newSOLID,
+	)
+	return err
+}
+
+func (t *pgTxStore) insertReassignLog(ctx context.Context, l FGReassignmentLog) error {
+	_, err := t.tx.Exec(ctx,
+		`INSERT INTO fg_reassignment_log
+		    (id, fg_id, from_sol_id, to_sol_id, actor_id, reason, reassigned_at)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+		l.ID, l.FGID, l.FromSOLID, l.ToSOLID, l.ActorID, l.Reason, l.ReassignedAt,
+	)
+	return err
+}

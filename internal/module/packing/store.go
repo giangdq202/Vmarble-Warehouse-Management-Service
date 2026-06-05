@@ -40,6 +40,8 @@ type txStore interface {
 	updateDefectResolution(ctx context.Context, in updateResolutionInput) error
 
 	rawTx() pgx.Tx
+	updateFGSOLine(ctx context.Context, fgID uuid.UUID, newSOLID *uuid.UUID) error
+	insertReassignLog(ctx context.Context, log FGReassignmentLog) error
 }
 
 type flipStatusInput struct {
