@@ -115,6 +115,27 @@ type ReportDefectInput struct {
 	DetectedBy uuid.UUID `json:"-"`
 }
 
+// ShortfallSuggestion is one actionable suggestion returned after a defect
+// creates a container shortfall. Type is REASSIGN (pool has a same-SKU FG
+// available) or CARRY_OVER_WO (pool empty, suggest new work order).
+type ShortfallSuggestion struct {
+	Type   string     `json:"type"`              // REASSIGN | CARRY_OVER_WO
+	Detail string     `json:"detail"`            // human-readable explanation
+	FGID   *uuid.UUID `json:"fg_id,omitempty"`   // for REASSIGN: candidate FG
+	SKUID  uuid.UUID  `json:"sku_id"`
+}
+
+const (
+	SuggestionReassign    = "REASSIGN"
+	SuggestionCarryOverWO = "CARRY_OVER_WO"
+)
+
+// DefectReportResult wraps the defect record and shortfall suggestions.
+type DefectReportResult struct {
+	Defect      FGDefect              `json:"defect"`
+	Suggestions []ShortfallSuggestion `json:"suggestions"`
+}
+
 type ResolveDefectInput struct {
 	DefectID   uuid.UUID `json:"-"`
 	Resolution string    `json:"resolution"`
@@ -148,7 +169,9 @@ type Service interface {
 	// FG was RESERVED, it is first released from its container_line via the
 	// ContainerLineRemover dep so the line stops counting toward the
 	// container's qty. BR-PK02 / BR-PK03.
-	ReportDefect(ctx context.Context, in ReportDefectInput) (FGDefect, error)
+	// After the defect is recorded, the suggestion engine checks the pool for
+	// same-SKU replacements (REASSIGN) or suggests a carry-over WO if empty.
+	ReportDefect(ctx context.Context, in ReportDefectInput) (DefectReportResult, error)
 
 	// ResolveDefect records the resolution + audit columns and flips fg_pool
 	// status: DISCARD/RETURN_NCC -> DISPOSED, REWORK -> AVAILABLE so the FG

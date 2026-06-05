@@ -201,6 +201,34 @@ func (s *pgStore) selectDefectByFGID(ctx context.Context, fgID uuid.UUID) (FGDef
 	return d, nil
 }
 
+// selectAvailableFGsBySKU returns up to `limit` AVAILABLE FGs matching the
+// given SKU, excluding the specified FG (typically the one just marked DEFECT).
+// Used by the shortfall suggestion engine — read-only, outside tx.
+func (s *pgStore) selectAvailableFGsBySKU(ctx context.Context, skuID, excludeID uuid.UUID, limit int) ([]FGPool, error) {
+	rows, err := s.pool.Query(ctx,
+		fgSelectCols+`
+		 WHERE fp.sku_id = $1
+		   AND fp.status = 'AVAILABLE'
+		   AND fp.id != $2
+		 ORDER BY fp.created_at ASC, fp.id
+		 LIMIT $3`,
+		skuID, excludeID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []FGPool
+	for rows.Next() {
+		fg, err := scanFG(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, fg)
+	}
+	return out, rows.Err()
+}
+
 // ── Tx surface ──────────────────────────────────────────────────────────────
 
 func (s *pgStore) withTx(ctx context.Context, fn func(tx txStore) error) error {

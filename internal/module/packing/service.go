@@ -179,19 +179,23 @@ func (svc *service) ScanBarcode(ctx context.Context, barcodeID, _ uuid.UUID) (Sc
 // ReportDefect flips the FG to DEFECT and inserts the defect row atomically.
 // If the FG was RESERVED on a container line, that line is removed first via
 // the ContainerLineRemover dep so the container's qty rebalances. BR-PK02 /
-// BR-PK03.
-func (svc *service) ReportDefect(ctx context.Context, in ReportDefectInput) (FGDefect, error) {
+// BR-PK03. After commit, the suggestion engine checks for same-SKU
+// replacements in the pool.
+func (svc *service) ReportDefect(ctx context.Context, in ReportDefectInput) (DefectReportResult, error) {
 	if in.BarcodeID == uuid.Nil || in.DetectedBy == uuid.Nil {
-		return FGDefect{}, domain.NewBizError(domain.ErrInvalidInput,
+		return DefectReportResult{}, domain.NewBizError(domain.ErrInvalidInput,
 			"barcode_id and detected_by are required")
 	}
 	if !validDefectReason(in.Reason) {
-		return FGDefect{}, domain.NewBizError(domain.ErrInvalidInput,
+		return DefectReportResult{}, domain.NewBizError(domain.ErrInvalidInput,
 			"invalid reason; expected BROKEN/WRONG_SIZE/MISSING_ACCESSORY/SCRATCHED/OTHER")
 	}
 
 	var defect FGDefect
 	var skuCode string
+	var hadContainerLine bool
+	var fgSKUID uuid.UUID
+	var fgID uuid.UUID
 	err := svc.s.withTx(ctx, func(tx txStore) error {
 		fg, err := tx.lockFGByBarcodeForUpdate(ctx, in.BarcodeID)
 		if err != nil {
@@ -216,6 +220,7 @@ func (svc *service) ReportDefect(ctx context.Context, in ReportDefectInput) (FGD
 			if err := svc.clr.DeleteLineForDefect(ctx, *fg.ContainerLineID, in.DetectedBy); err != nil {
 				return err
 			}
+			hadContainerLine = true
 		}
 
 		if err := tx.flipFGStatus(ctx, flipStatusInput{
@@ -240,17 +245,64 @@ func (svc *service) ReportDefect(ctx context.Context, in ReportDefectInput) (FGD
 			return err
 		}
 		skuCode = fg.SKUCode
+		fgSKUID = fg.SKUID
+		fgID = fg.ID
 		return nil
 	})
 	if err != nil {
-		return FGDefect{}, err
+		return DefectReportResult{}, err
 	}
 
 	if svc.notifier != nil {
 		// Best-effort: log via notifier impl, never fail the request.
 		_ = svc.notifier.NotifyFGDefect(ctx, defect.FGPoolID, skuCode, defect.Reason)
 	}
-	return defect, nil
+
+	// Shortfall suggestion engine: only when the FG was on a container
+	// (i.e. it had a container_line_id → was contributing to a shipment).
+	suggestions := svc.buildShortfallSuggestions(ctx, hadContainerLine, fgSKUID, fgID, skuCode)
+
+	return DefectReportResult{Defect: defect, Suggestions: suggestions}, nil
+}
+
+// buildShortfallSuggestions returns actionable suggestions after a defect.
+// If the FG was not on a container, there is no shortfall → empty.
+// Otherwise, check the pool for same-SKU AVAILABLE replacements.
+func (svc *service) buildShortfallSuggestions(ctx context.Context, hadContainerLine bool, skuID, excludeFGID uuid.UUID, skuCode string) []ShortfallSuggestion {
+	if !hadContainerLine {
+		return nil
+	}
+
+	const maxSuggestions = 5
+	candidates, err := svc.s.selectAvailableFGsBySKU(ctx, skuID, excludeFGID, maxSuggestions)
+	if err != nil {
+		// Best-effort: if the query fails, return carry-over suggestion.
+		return []ShortfallSuggestion{{
+			Type:   SuggestionCarryOverWO,
+			Detail: "Pool query failed; suggest carry-over WO for SKU " + skuCode,
+			SKUID:  skuID,
+		}}
+	}
+
+	if len(candidates) == 0 {
+		return []ShortfallSuggestion{{
+			Type:   SuggestionCarryOverWO,
+			Detail: "No available FG in pool for SKU " + skuCode + "; suggest new carry-over WO",
+			SKUID:  skuID,
+		}}
+	}
+
+	suggestions := make([]ShortfallSuggestion, 0, len(candidates))
+	for i := range candidates {
+		id := candidates[i].ID
+		suggestions = append(suggestions, ShortfallSuggestion{
+			Type:   SuggestionReassign,
+			Detail: "FG " + id.String()[:8] + " available (same SKU " + skuCode + ")",
+			FGID:   &id,
+			SKUID:  skuID,
+		})
+	}
+	return suggestions
 }
 
 // ResolveDefect records the resolution audit columns and flips the FG status:
