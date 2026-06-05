@@ -402,6 +402,18 @@ func (t *pgTxStore) insertTransferAudit(ctx context.Context, a ContainerTransfer
 	return err
 }
 
+func (t *pgTxStore) insertOverloadLog(ctx context.Context, l ContainerOverloadLog) error {
+	_, err := t.tx.Exec(ctx,
+		`INSERT INTO container_overload_log
+		    (id, container_id, line_id, projected_cbm, max_cbm,
+		     projected_kg, max_kg, actor_id, reason)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+		l.ID, l.ContainerID, l.LineID, l.ProjectedCBM, l.MaxCBM,
+		l.ProjectedKG, l.MaxKG, l.ActorID, l.Reason,
+	)
+	return err
+}
+
 func (t *pgTxStore) hasApprovedLoadingPlan(ctx context.Context, containerID uuid.UUID) (bool, error) {
 	var exists bool
 	err := t.tx.QueryRow(ctx,

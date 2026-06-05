@@ -326,6 +326,10 @@ func (t *mockTxStore) insertTransferAudit(_ context.Context, a ContainerTransfer
 	return nil
 }
 
+func (t *mockTxStore) insertOverloadLog(_ context.Context, _ ContainerOverloadLog) error {
+	return nil
+}
+
 func (t *mockTxStore) hasApprovedLoadingPlan(_ context.Context, _ uuid.UUID) (bool, error) {
 	return t.hasApprovedLoadingPlanResult, t.hasApprovedLoadingPlanErr
 }
@@ -472,8 +476,8 @@ func TestAddLine_HappyPath_FlipsOpenToLoading(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if line.Qty != 5 {
-		t.Errorf("Qty = %d, want 5", line.Qty)
+	if line.Line.Qty != 5 {
+		t.Errorf("Qty = %d, want 5", line.Line.Qty)
 	}
 	if len(tx.statusUpdates) != 1 || tx.statusUpdates[0].ToStatus != ContainerStatusLoading {
 		t.Errorf("expected OPEN→LOADING flip, got %+v", tx.statusUpdates)
@@ -542,8 +546,8 @@ func TestAddLine_CBMOverflow_Rejected(t *testing.T) {
 		CBMTotal:         5, WeightKGTotal: 100,
 		AddedBy: uuid.New(),
 	})
-	if !errors.Is(err, domain.ErrInvalidInput) {
-		t.Errorf("expected ErrInvalidInput on CBM overflow, got %v", err)
+	if !errors.Is(err, domain.ErrInsufficientStock) {
+		t.Errorf("expected ErrInsufficientStock on CBM overflow, got %v", err)
 	}
 }
 
@@ -584,8 +588,8 @@ func TestAddLine_WeightOverflow_Rejected(t *testing.T) {
 		ContainerID: containerID, SKUID: skuID, Qty: 1, SalesOrderLineID: soLine.ID,
 		CBMTotal: 1, WeightKGTotal: 200, AddedBy: uuid.New(),
 	})
-	if !errors.Is(err, domain.ErrInvalidInput) {
-		t.Errorf("expected ErrInvalidInput on weight overflow, got %v", err)
+	if !errors.Is(err, domain.ErrInsufficientStock) {
+		t.Errorf("expected ErrInsufficientStock on weight overflow, got %v", err)
 	}
 }
 
@@ -651,6 +655,94 @@ func TestAddLine_ZeroQty_Rejected(t *testing.T) {
 	})
 	if !errors.Is(err, domain.ErrInvalidInput) {
 		t.Errorf("expected ErrInvalidInput on qty=0, got %v", err)
+	}
+}
+
+func TestAddLine_NearCapacity_SetsWarning(t *testing.T) {
+	containerID := uuid.New()
+	skuID := uuid.New()
+	tx := newMockTx()
+	// max_cbm=10; current=8.5; adding 1.0 → projected=9.5 > 90% of 10
+	tx.containersByID[containerID] = Container{
+		ID: containerID, Status: ContainerStatusLoading,
+		MaxCBM: 10, MaxPayloadKG: 28000,
+	}
+	tx.aggregates[containerID] = [2]float64{8.5, 100}
+	soLine := validSOLineInfo(skuID, 10, 0)
+	svc := newSvc(&mockStore{tx: tx}, &mockSKU{}, &mockSOLine{info: soLine}, nil)
+
+	result, err := svc.AddLine(context.Background(), AddLineInput{
+		ContainerID: containerID, SKUID: skuID, Qty: 1, SalesOrderLineID: soLine.ID,
+		CBMTotal: 1.0, WeightKGTotal: 50, AddedBy: uuid.New(),
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result.NearCapacity {
+		t.Error("want NearCapacity=true when projected CBM > 90% of max")
+	}
+}
+
+func TestAddLine_BelowNearCapacity_NoWarning(t *testing.T) {
+	containerID := uuid.New()
+	skuID := uuid.New()
+	tx := newMockTx()
+	// max_cbm=10; current=5; adding 1 → projected=6 < 90%
+	tx.containersByID[containerID] = Container{
+		ID: containerID, Status: ContainerStatusLoading,
+		MaxCBM: 10, MaxPayloadKG: 28000,
+	}
+	tx.aggregates[containerID] = [2]float64{5, 100}
+	soLine := validSOLineInfo(skuID, 10, 0)
+	svc := newSvc(&mockStore{tx: tx}, &mockSKU{}, &mockSOLine{info: soLine}, nil)
+
+	result, err := svc.AddLine(context.Background(), AddLineInput{
+		ContainerID: containerID, SKUID: skuID, Qty: 1, SalesOrderLineID: soLine.ID,
+		CBMTotal: 1.0, WeightKGTotal: 50, AddedBy: uuid.New(),
+	})
+	if err != nil {
+		t.Fatalf("unexpected: %v", err)
+	}
+	if result.NearCapacity {
+		t.Error("want NearCapacity=false when projected CBM < 90% of max")
+	}
+}
+
+func TestAddLine_AdminOverload_BypassesHardLimit(t *testing.T) {
+	containerID := uuid.New()
+	skuID := uuid.New()
+	tx := newMockTx()
+	// max_cbm=10; current=10; adding 5 → would normally fail
+	tx.containersByID[containerID] = Container{
+		ID: containerID, Code: "CONT-X", Status: ContainerStatusLoading,
+		MaxCBM: 10, MaxPayloadKG: 28000,
+	}
+	tx.aggregates[containerID] = [2]float64{10, 100}
+	soLine := validSOLineInfo(skuID, 20, 0)
+	svc := newSvc(&mockStore{tx: tx}, &mockSKU{}, &mockSOLine{info: soLine}, nil)
+
+	result, err := svc.AddLine(context.Background(), AddLineInput{
+		ContainerID: containerID, SKUID: skuID, Qty: 1, SalesOrderLineID: soLine.ID,
+		CBMTotal: 5, WeightKGTotal: 50, AddedBy: uuid.New(),
+		AllowOverload: true, ActorRole: "admin",
+	})
+	if err != nil {
+		t.Fatalf("admin override should succeed, got %v", err)
+	}
+	if result.Line.Qty != 1 {
+		t.Errorf("want line inserted, got %+v", result.Line)
+	}
+}
+
+func TestAddLine_NonAdminOverload_Rejected(t *testing.T) {
+	svc := newSvc(&mockStore{}, nil, nil, nil)
+	_, err := svc.AddLine(context.Background(), AddLineInput{
+		ContainerID: uuid.New(), SKUID: uuid.New(), SalesOrderLineID: uuid.New(),
+		Qty: 1, CBMTotal: 1, WeightKGTotal: 1, AddedBy: uuid.New(),
+		AllowOverload: true, ActorRole: "warehouse",
+	})
+	if !errors.Is(err, domain.ErrPreconditionFailed) {
+		t.Errorf("want ErrPreconditionFailed for non-admin overload, got %v", err)
 	}
 }
 

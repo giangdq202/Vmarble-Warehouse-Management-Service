@@ -1083,6 +1083,8 @@ definitions:
     type: object
   internal_module_delivery.AddLineInput:
     properties:
+      allow_overload:
+        type: boolean
       cbm_total:
         type: number
       qty:
