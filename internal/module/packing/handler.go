@@ -28,6 +28,7 @@ func (h *Handler) Register(rg *gin.RouterGroup) {
 	rg.POST("/packing/scan", auth.RequireWorkerUp(), h.scan)
 	rg.POST("/packing/defect", auth.RequireWorkerUp(), h.reportDefect)
 	rg.POST("/packing/defect/:id/resolve", auth.RequirePlannerUp(), h.resolveDefect)
+	rg.POST("/fg-pool/:id/reassign", auth.RequirePlannerUp(), h.reassignFG)
 }
 
 // listFGPool godoc
@@ -209,6 +210,39 @@ type scanRequest struct {
 type resolveDefectBody struct {
 	Resolution string `json:"resolution" binding:"required"`
 	Note       string `json:"note,omitempty"`
+}
+
+type reassignFGBody struct {
+	NewSOLineID string `json:"new_sales_order_line_id" binding:"required"`
+	Reason      string `json:"reason" binding:"required"`
+}
+
+func (h *Handler) reassignFG(c *gin.Context) {
+	fgID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid fg id"})
+		return
+	}
+	var body reassignFGBody
+	if !httpkit.Bind(c, &body) {
+		return
+	}
+	newSOLID, err := uuid.Parse(body.NewSOLineID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid new_sales_order_line_id"})
+		return
+	}
+	result, err := h.svc.ReassignFG(c.Request.Context(), ReassignFGInput{
+		FGID:        fgID,
+		NewSOLineID: newSOLID,
+		Reason:      body.Reason,
+		ActorID:     callerID(c),
+	})
+	if err != nil {
+		httpkit.Error(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, result)
 }
 
 func callerID(c *gin.Context) uuid.UUID {

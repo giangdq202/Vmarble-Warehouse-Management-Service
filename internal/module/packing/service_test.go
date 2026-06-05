@@ -213,6 +213,20 @@ func (t *mockTxStore) updateDefectResolution(_ context.Context, in updateResolut
 	return nil
 }
 
+func (t *mockTxStore) updateFGSOLine(_ context.Context, fgID uuid.UUID, newSOLID *uuid.UUID) error {
+	fg, ok := t.ms.fgsByID[fgID]
+	if !ok {
+		return domain.NewBizError(domain.ErrNotFound, "fg not found")
+	}
+	fg.SalesOrderLineID = newSOLID
+	t.ms.fgsByID[fgID] = fg
+	return nil
+}
+
+func (t *mockTxStore) insertReassignLog(_ context.Context, _ FGReassignmentLog) error {
+	return nil
+}
+
 // ── Cross-module mocks ──────────────────────────────────────────────────────
 
 type mockBarcodeIssuer struct {
@@ -851,5 +865,150 @@ func TestValidResolution(t *testing.T) {
 	}
 	if validResolution("BURN") {
 		t.Error("want invalid for BURN")
+	}
+}
+
+// ── ReassignFG ────────────────────────────────────────────────────────────────
+
+type mockSOLineChecker struct {
+	lines map[uuid.UUID]SOLineInfo
+}
+
+func (m *mockSOLineChecker) GetSOLine(_ context.Context, id uuid.UUID) (SOLineInfo, error) {
+	sol, ok := m.lines[id]
+	if !ok {
+		return SOLineInfo{}, domain.NewBizError(domain.ErrNotFound, "sol not found")
+	}
+	return sol, nil
+}
+
+func newHarnessWithSOL() (*harness, *mockSOLineChecker) {
+	h := newHarness()
+	sol := &mockSOLineChecker{lines: map[uuid.UUID]SOLineInfo{}}
+	h.svc.(*service).solChecker = sol
+	return h, sol
+}
+
+func TestReassignFG_MissingFGID_Returns400(t *testing.T) {
+	h, _ := newHarnessWithSOL()
+	_, err := h.svc.ReassignFG(context.Background(), ReassignFGInput{
+		NewSOLineID: uuid.New(),
+		Reason:      "customer swap",
+		ActorID:     uuid.New(),
+	})
+	var biz *domain.BizError
+	if !errors.As(err, &biz) || !errors.Is(biz.Unwrap(), domain.ErrInvalidInput) {
+		t.Fatalf("want ErrInvalidInput, got %v", err)
+	}
+}
+
+func TestReassignFG_MissingSOLineID_Returns400(t *testing.T) {
+	h, _ := newHarnessWithSOL()
+	_, err := h.svc.ReassignFG(context.Background(), ReassignFGInput{
+		FGID:    uuid.New(),
+		Reason:  "customer swap",
+		ActorID: uuid.New(),
+	})
+	var biz *domain.BizError
+	if !errors.As(err, &biz) || !errors.Is(biz.Unwrap(), domain.ErrInvalidInput) {
+		t.Fatalf("want ErrInvalidInput, got %v", err)
+	}
+}
+
+func TestReassignFG_EmptyReason_Returns400(t *testing.T) {
+	h, _ := newHarnessWithSOL()
+	_, err := h.svc.ReassignFG(context.Background(), ReassignFGInput{
+		FGID:        uuid.New(),
+		NewSOLineID: uuid.New(),
+		ActorID:     uuid.New(),
+	})
+	var biz *domain.BizError
+	if !errors.As(err, &biz) || !errors.Is(biz.Unwrap(), domain.ErrInvalidInput) {
+		t.Fatalf("want ErrInvalidInput, got %v", err)
+	}
+}
+
+func TestReassignFG_LoadedFG_Returns412(t *testing.T) {
+	h, sol := newHarnessWithSOL()
+	skuID := uuid.New()
+	newSOLID := uuid.New()
+	sol.lines[newSOLID] = SOLineInfo{ID: newSOLID, SKUID: skuID}
+	fg := h.seedFG(uuid.New(), skuID, nil, FGStatusLoaded)
+
+	_, err := h.svc.ReassignFG(context.Background(), ReassignFGInput{
+		FGID:        fg.ID,
+		NewSOLineID: newSOLID,
+		Reason:      "swap",
+		ActorID:     uuid.New(),
+	})
+	var biz *domain.BizError
+	if !errors.As(err, &biz) || !errors.Is(biz.Unwrap(), domain.ErrPreconditionFailed) {
+		t.Fatalf("want ErrPreconditionFailed for LOADED fg, got %v", err)
+	}
+}
+
+func TestReassignFG_SKUMismatch_Returns422(t *testing.T) {
+	h, sol := newHarnessWithSOL()
+	skuA := uuid.New()
+	skuB := uuid.New()
+	newSOLID := uuid.New()
+	sol.lines[newSOLID] = SOLineInfo{ID: newSOLID, SKUID: skuB} // different SKU
+	fg := h.seedFG(uuid.New(), skuA, nil, FGStatusAvailable)
+
+	_, err := h.svc.ReassignFG(context.Background(), ReassignFGInput{
+		FGID:        fg.ID,
+		NewSOLineID: newSOLID,
+		Reason:      "swap",
+		ActorID:     uuid.New(),
+	})
+	var biz *domain.BizError
+	if !errors.As(err, &biz) || !errors.Is(biz.Unwrap(), domain.ErrInvalidInput) {
+		t.Fatalf("want ErrInvalidInput for SKU mismatch, got %v", err)
+	}
+}
+
+func TestReassignFG_HappyPath_UpdatesSOLAndWritesAudit(t *testing.T) {
+	h, sol := newHarnessWithSOL()
+	skuID := uuid.New()
+	oldSOLID := uuid.New()
+	newSOLID := uuid.New()
+	sol.lines[newSOLID] = SOLineInfo{ID: newSOLID, SKUID: skuID}
+	fg := h.seedFG(uuid.New(), skuID, &oldSOLID, FGStatusAvailable)
+
+	result, err := h.svc.ReassignFG(context.Background(), ReassignFGInput{
+		FGID:        fg.ID,
+		NewSOLineID: newSOLID,
+		Reason:      "customer swap",
+		ActorID:     uuid.New(),
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.FG.SalesOrderLineID == nil || *result.FG.SalesOrderLineID != newSOLID {
+		t.Errorf("fg.sales_order_line_id = %v, want %v", result.FG.SalesOrderLineID, newSOLID)
+	}
+	if result.Audit.FromSOLID == nil || *result.Audit.FromSOLID != oldSOLID {
+		t.Errorf("audit.from_sol_id = %v, want %v", result.Audit.FromSOLID, oldSOLID)
+	}
+	if result.Audit.ToSOLID != newSOLID {
+		t.Errorf("audit.to_sol_id = %v, want %v", result.Audit.ToSOLID, newSOLID)
+	}
+}
+
+func TestReassignFG_ReservedFG_Allowed(t *testing.T) {
+	h, sol := newHarnessWithSOL()
+	skuID := uuid.New()
+	newSOLID := uuid.New()
+	sol.lines[newSOLID] = SOLineInfo{ID: newSOLID, SKUID: skuID}
+	fg := h.seedFG(uuid.New(), skuID, nil, FGStatusReserved)
+
+	_, err := h.svc.ReassignFG(context.Background(), ReassignFGInput{
+		FGID:        fg.ID,
+		NewSOLineID: newSOLID,
+		Reason:      "swap",
+		ActorID:     uuid.New(),
+	})
+	if err != nil {
+		t.Fatalf("RESERVED fg should be reassignable, got %v", err)
 	}
 }

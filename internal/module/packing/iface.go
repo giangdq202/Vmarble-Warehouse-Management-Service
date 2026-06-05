@@ -171,6 +171,12 @@ type Service interface {
 	// fg_pool row whose container_line_id is on the sealed container to
 	// LOADED. Idempotent.
 	MarkLoadedOnSeal(ctx context.Context, containerID uuid.UUID) error
+
+	// ReassignFG changes the sales_order_line attribution of an FG in the
+	// pool. Allowed only when the FG is AVAILABLE or RESERVED (not sealed).
+	// The new SOL must reference the same SKU (soft-allocation invariant).
+	// Writes an audit row to fg_reassignment_log.
+	ReassignFG(ctx context.Context, in ReassignFGInput) (ReassignFGResult, error)
 }
 
 type ReserveInput struct {
@@ -178,4 +184,27 @@ type ReserveInput struct {
 	SalesOrderLineID uuid.UUID
 	Qty             int
 	ContainerLineID uuid.UUID
+}
+
+// FGReassignmentLog is the audit record written by ReassignFG.
+type FGReassignmentLog struct {
+	ID           uuid.UUID  `json:"id"`
+	FGID         uuid.UUID  `json:"fg_id"`
+	FromSOLID    *uuid.UUID `json:"from_sol_id,omitempty"`
+	ToSOLID      uuid.UUID  `json:"to_sol_id"`
+	ActorID      uuid.UUID  `json:"actor_id"`
+	Reason       string     `json:"reason"`
+	ReassignedAt time.Time  `json:"reassigned_at"`
+}
+
+type ReassignFGInput struct {
+	FGID          uuid.UUID `json:"-"`
+	NewSOLineID   uuid.UUID `json:"new_sales_order_line_id"`
+	Reason        string    `json:"reason"`
+	ActorID       uuid.UUID `json:"-"`
+}
+
+type ReassignFGResult struct {
+	FG    FGPool             `json:"fg"`
+	Audit FGReassignmentLog  `json:"audit"`
 }

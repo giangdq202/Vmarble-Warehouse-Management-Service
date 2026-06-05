@@ -226,6 +226,12 @@ func main() {
 	}); ok {
 		hooked.SetFGTracker(&deliveryFGTrackerAdapter{svc: packingSvc})
 	}
+	// Wire SOLineChecker for ReassignFG (BR soft-allocation SKU check).
+	if hooked, ok := packingSvc.(interface {
+		SetSOLineChecker(packing.SOLineChecker)
+	}); ok {
+		hooked.SetSOLineChecker(&packingSOLineCheckerAdapter{svc: salesSvc})
+	}
 	// Loading-plan parser (#301) needs to translate customer-facing SKU codes
 	// via sales.GetCustomerSKUMapping; audit hook records upload + approve.
 	if hooked, ok := deliverySvc.(interface {
@@ -1310,6 +1316,19 @@ func (a *packingDefectNotifierAdapter) NotifyFGDefect(ctx context.Context, fgID 
 
 func (a *packingDefectNotifierAdapter) NotifyFGDefectResolved(ctx context.Context, fgID uuid.UUID, resolution string) error {
 	return a.publisher.NotifyFGDefectResolved(ctx, fgID.String(), resolution)
+}
+
+// packingSOLineCheckerAdapter implements packing.SOLineChecker by delegating
+// to sales.Service. Needed by ReassignFG to validate SKU match on the target
+// SO line.
+type packingSOLineCheckerAdapter struct{ svc sales.Service }
+
+func (a *packingSOLineCheckerAdapter) GetSOLine(ctx context.Context, soLineID uuid.UUID) (packing.SOLineInfo, error) {
+	sol, _, err := a.svc.GetSOLine(ctx, soLineID)
+	if err != nil {
+		return packing.SOLineInfo{}, err
+	}
+	return packing.SOLineInfo{ID: sol.ID, SKUID: sol.SKUID}, nil
 }
 
 // productionFGHookAdapter implements production.FinishedGoodsHook by
