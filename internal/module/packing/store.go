@@ -21,6 +21,11 @@ type store interface {
 	selectDefectByID(ctx context.Context, id uuid.UUID) (FGDefect, error)
 	selectDefectByFGID(ctx context.Context, fgID uuid.UUID) (FGDefect, error)
 
+	// selectAvailableFGsBySKU returns up to `limit` AVAILABLE FG rows matching
+	// the given SKU, excluding `excludeID`. Used by the shortfall suggestion
+	// engine after a defect is recorded.
+	selectAvailableFGsBySKU(ctx context.Context, skuID, excludeID uuid.UUID, limit int) ([]FGPool, error)
+
 	withTx(ctx context.Context, fn func(tx txStore) error) error
 }
 

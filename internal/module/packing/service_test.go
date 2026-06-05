@@ -96,6 +96,20 @@ func (m *mockStore) selectDefectByFGID(_ context.Context, fgID uuid.UUID) (FGDef
 	return m.defectsByID[id], nil
 }
 
+func (m *mockStore) selectAvailableFGsBySKU(_ context.Context, skuID, excludeID uuid.UUID, limit int) ([]FGPool, error) {
+	var out []FGPool
+	for _, fg := range m.fgsByID {
+		if fg.SKUID != skuID || fg.Status != FGStatusAvailable || fg.ID == excludeID {
+			continue
+		}
+		out = append(out, fg)
+		if len(out) >= limit {
+			break
+		}
+	}
+	return out, nil
+}
+
 func (m *mockStore) withTx(ctx context.Context, fn func(tx txStore) error) error {
 	return fn(&mockTxStore{ms: m})
 }
@@ -536,14 +550,18 @@ func TestReportDefect_AvailableFG_FlipsToDefect(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected: %v", err)
 	}
-	if out.Reason != DefectReasonBroken {
-		t.Errorf("want reason BROKEN, got %s", out.Reason)
+	if out.Defect.Reason != DefectReasonBroken {
+		t.Errorf("want reason BROKEN, got %s", out.Defect.Reason)
 	}
 	if got := h.store.fgsByID[fg.ID].Status; got != FGStatusDefect {
 		t.Errorf("want fg status DEFECT, got %s", got)
 	}
 	if h.notif.defectCalls != 1 {
 		t.Errorf("want 1 notify call, got %d", h.notif.defectCalls)
+	}
+	// No container line → no shortfall → no suggestions
+	if len(out.Suggestions) != 0 {
+		t.Errorf("want 0 suggestions for AVAILABLE FG without container, got %d", len(out.Suggestions))
 	}
 }
 
@@ -627,7 +645,7 @@ func TestResolveDefect_Discard_DisposesFG(t *testing.T) {
 		t.Fatalf("seed defect: %v", err)
 	}
 	_, err = h.svc.ResolveDefect(context.Background(), ResolveDefectInput{
-		DefectID:   d.ID,
+		DefectID:   d.Defect.ID,
 		Resolution: DefectResolutionDiscard,
 		ResolvedBy: uuid.New(),
 	})
@@ -651,7 +669,7 @@ func TestResolveDefect_Rework_ReturnsToAvailable(t *testing.T) {
 		DetectedBy: uuid.New(),
 	})
 	_, err := h.svc.ResolveDefect(context.Background(), ResolveDefectInput{
-		DefectID:   d.ID,
+		DefectID:   d.Defect.ID,
 		Resolution: DefectResolutionRework,
 		ResolvedBy: uuid.New(),
 	})
@@ -672,7 +690,7 @@ func TestResolveDefect_ReturnNCC_DisposesFG(t *testing.T) {
 		DetectedBy: uuid.New(),
 	})
 	_, err := h.svc.ResolveDefect(context.Background(), ResolveDefectInput{
-		DefectID:   d.ID,
+		DefectID:   d.Defect.ID,
 		Resolution: DefectResolutionReturnNCC,
 		Note:       "kiện NCC lô 2026-05-22",
 		ResolvedBy: uuid.New(),
@@ -694,12 +712,12 @@ func TestResolveDefect_DoubleResolve_Rejected(t *testing.T) {
 		DetectedBy: uuid.New(),
 	})
 	_, _ = h.svc.ResolveDefect(context.Background(), ResolveDefectInput{
-		DefectID:   d.ID,
+		DefectID:   d.Defect.ID,
 		Resolution: DefectResolutionDiscard,
 		ResolvedBy: uuid.New(),
 	})
 	_, err := h.svc.ResolveDefect(context.Background(), ResolveDefectInput{
-		DefectID:   d.ID,
+		DefectID:   d.Defect.ID,
 		Resolution: DefectResolutionRework,
 		ResolvedBy: uuid.New(),
 	})
@@ -1010,5 +1028,136 @@ func TestReassignFG_ReservedFG_Allowed(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("RESERVED fg should be reassignable, got %v", err)
+	}
+}
+
+// ── Shortfall Suggestions ──────────────────────────────────────────────────
+
+func TestReportDefect_ReservedFG_PoolHasMatches_SuggestsReassign(t *testing.T) {
+	h := newHarness()
+	skuID := uuid.New()
+	soLineID := uuid.New()
+
+	// The FG that will be defected — RESERVED on a container line
+	fg := h.seedFG(uuid.New(), skuID, &soLineID, FGStatusReserved)
+	clID := uuid.New()
+	fg.ContainerLineID = &clID
+	h.store.fgsByID[fg.ID] = fg
+
+	// Seed 3 AVAILABLE FGs of same SKU as replacement candidates
+	cand1 := h.seedFG(uuid.New(), skuID, &soLineID, FGStatusAvailable)
+	cand2 := h.seedFG(uuid.New(), skuID, &soLineID, FGStatusAvailable)
+	cand3 := h.seedFG(uuid.New(), skuID, &soLineID, FGStatusAvailable)
+
+	out, err := h.svc.ReportDefect(context.Background(), ReportDefectInput{
+		BarcodeID:  fg.BarcodeID,
+		Reason:     DefectReasonBroken,
+		DetectedBy: uuid.New(),
+	})
+	if err != nil {
+		t.Fatalf("unexpected: %v", err)
+	}
+	if len(out.Suggestions) == 0 {
+		t.Fatal("want REASSIGN suggestions, got none")
+	}
+	for _, s := range out.Suggestions {
+		if s.Type != SuggestionReassign {
+			t.Errorf("want type REASSIGN, got %s", s.Type)
+		}
+		if s.FGID == nil {
+			t.Error("REASSIGN suggestion must have fg_id")
+		}
+		if s.SKUID != skuID {
+			t.Errorf("want sku_id=%v, got %v", skuID, s.SKUID)
+		}
+	}
+	_ = cand1
+	_ = cand2
+	_ = cand3
+}
+
+func TestReportDefect_ReservedFG_PoolEmpty_SuggestsCarryOverWO(t *testing.T) {
+	h := newHarness()
+	skuID := uuid.New()
+	soLineID := uuid.New()
+
+	// The FG that will be defected — RESERVED on a container line
+	fg := h.seedFG(uuid.New(), skuID, &soLineID, FGStatusReserved)
+	clID := uuid.New()
+	fg.ContainerLineID = &clID
+	h.store.fgsByID[fg.ID] = fg
+
+	// No other AVAILABLE FGs of the same SKU
+
+	out, err := h.svc.ReportDefect(context.Background(), ReportDefectInput{
+		BarcodeID:  fg.BarcodeID,
+		Reason:     DefectReasonWrongSize,
+		DetectedBy: uuid.New(),
+	})
+	if err != nil {
+		t.Fatalf("unexpected: %v", err)
+	}
+	if len(out.Suggestions) != 1 {
+		t.Fatalf("want 1 suggestion, got %d", len(out.Suggestions))
+	}
+	if out.Suggestions[0].Type != SuggestionCarryOverWO {
+		t.Errorf("want CARRY_OVER_WO, got %s", out.Suggestions[0].Type)
+	}
+	if out.Suggestions[0].SKUID != skuID {
+		t.Errorf("want sku_id=%v, got %v", skuID, out.Suggestions[0].SKUID)
+	}
+}
+
+func TestReportDefect_AvailableFG_NoContainerLine_NoSuggestions(t *testing.T) {
+	h := newHarness()
+	skuID := uuid.New()
+
+	// AVAILABLE FG not on any container — no shortfall
+	fg := h.seedFG(uuid.New(), skuID, nil, FGStatusAvailable)
+
+	// Seed another AVAILABLE of same SKU (should NOT appear in suggestions)
+	h.seedFG(uuid.New(), skuID, nil, FGStatusAvailable)
+
+	out, err := h.svc.ReportDefect(context.Background(), ReportDefectInput{
+		BarcodeID:  fg.BarcodeID,
+		Reason:     DefectReasonScratched,
+		DetectedBy: uuid.New(),
+	})
+	if err != nil {
+		t.Fatalf("unexpected: %v", err)
+	}
+	if len(out.Suggestions) != 0 {
+		t.Errorf("want 0 suggestions (no container shortfall), got %d", len(out.Suggestions))
+	}
+}
+
+func TestReportDefect_ReservedFG_PoolHasDifferentSKU_SuggestsCarryOver(t *testing.T) {
+	h := newHarness()
+	skuA := uuid.New()
+	skuB := uuid.New()
+	soLineID := uuid.New()
+
+	// Defected FG is SKU-A
+	fg := h.seedFG(uuid.New(), skuA, &soLineID, FGStatusReserved)
+	clID := uuid.New()
+	fg.ContainerLineID = &clID
+	h.store.fgsByID[fg.ID] = fg
+
+	// Pool only has SKU-B — not a match
+	h.seedFG(uuid.New(), skuB, nil, FGStatusAvailable)
+
+	out, err := h.svc.ReportDefect(context.Background(), ReportDefectInput{
+		BarcodeID:  fg.BarcodeID,
+		Reason:     DefectReasonBroken,
+		DetectedBy: uuid.New(),
+	})
+	if err != nil {
+		t.Fatalf("unexpected: %v", err)
+	}
+	if len(out.Suggestions) != 1 {
+		t.Fatalf("want 1 suggestion, got %d", len(out.Suggestions))
+	}
+	if out.Suggestions[0].Type != SuggestionCarryOverWO {
+		t.Errorf("want CARRY_OVER_WO (no same-SKU match), got %s", out.Suggestions[0].Type)
 	}
 }
