@@ -44,6 +44,10 @@ docs/demo-prototype-script.md
 docs/*demo-script*.md
 docs/customer-*.md
 docs/*-customer-*.md
-
+docs/RH PACKING LIST FOR APR-MAY-JUN 2026-30.3.2026.xlsx
+docs/*.xlsx
+docs/*.xls
+scripts/seed_demo.sql
 # Working memory cho Claude Code agents — local session state, không share team.
 docs/PROJECT_STATE.md
+
