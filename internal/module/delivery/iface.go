@@ -339,6 +339,30 @@ type LoadingPlanLineDiff struct {
 	NewQty          int       `json:"new_qty"`
 }
 
+// AtRiskRow is one row returned by GET /containers/at-risk. The endpoint
+// lists OPEN/LOADING containers with a cutoff within the requested window,
+// sorted by urgency (soonest cutoff first). DaysToCutoff is negative when
+// the cutoff has already passed (overdue) — those containers are included
+// because they are the most urgent.
+type AtRiskRow struct {
+	ContainerID   uuid.UUID  `json:"id"`
+	ContainerCode string     `json:"code"`
+	VesselName    *string    `json:"vessel_name,omitempty"`
+	CutoffDate    time.Time  `json:"cutoff_date"`
+	DaysToCutoff  int        `json:"days_to_cutoff"`
+	UsedCBM       float64    `json:"used_cbm"`
+	MaxCBM        float64    `json:"max_cbm"`
+	FillPctCBM    float64    `json:"fill_pct_cbm"` // 0–100, 0 when max_cbm=0
+	LineCount     int        `json:"line_count"`
+	RiskLevel     string     `json:"risk_level"` // RED | ORANGE
+}
+
+// Risk level labels for the at-risk dashboard.
+const (
+	RiskLevelRed    = "RED"    // days_to_cutoff < 3
+	RiskLevelOrange = "ORANGE" // 3 <= days_to_cutoff <= window
+)
+
 type Service interface {
 	CreateContainer(ctx context.Context, in CreateContainerInput) (Container, error)
 	GetContainer(ctx context.Context, id uuid.UUID) (Container, error)
@@ -399,6 +423,12 @@ type Service interface {
 	// optionally filtered by the plan that triggered the supersede. Newest
 	// supersede event first.
 	ListContainerLinesHistory(ctx context.Context, containerID uuid.UUID, planID *uuid.UUID) ([]ContainerLineHistoryEntry, error)
+
+	// ListAtRisk returns OPEN/LOADING containers whose cutoff_date falls within
+	// the next `days` calendar days (inclusive of overdue — days_to_cutoff < 0).
+	// Sorted by cutoff_date ASC so the most urgent row is first. When days <= 0
+	// the service defaults to 7.
+	ListAtRisk(ctx context.Context, days int) ([]AtRiskRow, error)
 }
 
 // DefaultCapacityForType returns the ISO defaults for a container type. When

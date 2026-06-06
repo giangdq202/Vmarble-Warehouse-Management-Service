@@ -1210,6 +1210,37 @@ func (svc *service) ListContainerLinesHistory(ctx context.Context, containerID u
 	return svc.s.selectContainerLinesHistory(ctx, containerID, planID)
 }
 
+const (
+	atRiskDefaultDays  = 7
+	atRiskRedThreshold = 3 // days_to_cutoff < 3 → RED
+)
+
+func (svc *service) ListAtRisk(ctx context.Context, days int) ([]AtRiskRow, error) {
+	if days <= 0 {
+		days = atRiskDefaultDays
+	}
+	now := svc.now()
+	before := now.AddDate(0, 0, days)
+	rows, err := svc.s.selectAtRiskContainers(ctx, before)
+	if err != nil {
+		return nil, err
+	}
+	for i := range rows {
+		r := &rows[i]
+		daysDiff := int(r.CutoffDate.Sub(now).Hours() / 24)
+		r.DaysToCutoff = daysDiff
+		if r.MaxCBM > 0 {
+			r.FillPctCBM = (r.UsedCBM / r.MaxCBM) * 100
+		}
+		if daysDiff < atRiskRedThreshold {
+			r.RiskLevel = RiskLevelRed
+		} else {
+			r.RiskLevel = RiskLevelOrange
+		}
+	}
+	return rows, nil
+}
+
 func (svc *service) logLoadingPlanAudit(ctx context.Context, in AuditLoadingPlanInput) {
 	if svc.lpAuditor == nil {
 		return
