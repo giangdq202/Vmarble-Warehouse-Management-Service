@@ -45,6 +45,7 @@ func (h *Handler) Register(rg *gin.RouterGroup) {
 	rg.POST("/containers/:id/loading-plan", auth.RequirePlannerUp(), h.uploadLoadingPlan)
 	rg.GET("/containers/:id/loading-plan", h.getActiveLoadingPlan)
 	rg.GET("/containers/:id/lines-history", h.listLinesHistory)
+	rg.GET("/containers/:id/packing-list", auth.RequirePlannerUp(), h.exportPackingList)
 	rg.GET("/loading-plans/:id", h.getLoadingPlan)
 	rg.GET("/loading-plans/:id/diff", h.diffLoadingPlan)
 	rg.POST("/loading-plans/:id/approve", auth.RequireAdminOnly(), h.approveLoadingPlan)
@@ -668,4 +669,36 @@ func (h *Handler) listAtRisk(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, rows)
+}
+
+// exportPackingList godoc
+//
+// @Summary      Download packing list as Excel for a SEALED container
+// @Description  Returns a .xlsx file with container metadata and all loaded lines.
+// @Description  Returns 412 when the container is not yet SEALED.
+// @Tags         delivery
+// @Produce      application/vnd.openxmlformats-officedocument.spreadsheetml.sheet
+// @Param        id  path  string  true  "container id (uuid)"
+// @Success      200
+// @Failure      404  {object}  map[string]string
+// @Failure      412  {object}  map[string]string
+// @Security     BearerAuth
+// @Router       /api/v1/containers/{id}/packing-list [get]
+func (h *Handler) exportPackingList(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+	c.Header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+	c.Header("Content-Disposition", "attachment; filename=packing-list.xlsx")
+	if err := h.svc.ExportPackingList(c.Request.Context(), id, c.Writer); err != nil {
+		// Headers already sent — httpkit.Error would write a second body.
+		// Only set error headers when nothing was written yet. In practice
+		// ExportPackingList checks preconditions before writing any bytes,
+		// so errors arrive before the stream starts.
+		c.Header("Content-Type", "application/json")
+		c.Header("Content-Disposition", "")
+		httpkit.Error(c, err)
+	}
 }

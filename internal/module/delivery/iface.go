@@ -429,6 +429,11 @@ type Service interface {
 	// Sorted by cutoff_date ASC so the most urgent row is first. When days <= 0
 	// the service defaults to 7.
 	ListAtRisk(ctx context.Context, days int) ([]AtRiskRow, error)
+
+	// ExportPackingList writes the packing list for a SEALED container as an
+	// Excel (.xlsx) workbook to w. Returns ErrPreconditionFailed when the
+	// container is not yet SEALED, ErrNotFound when it does not exist.
+	ExportPackingList(ctx context.Context, id uuid.UUID, w io.Writer) error
 }
 
 // DefaultCapacityForType returns the ISO defaults for a container type. When

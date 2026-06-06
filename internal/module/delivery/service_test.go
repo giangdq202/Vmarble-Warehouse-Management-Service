@@ -1860,3 +1860,82 @@ func TestListAtRisk_DefaultDays_UsedWhenZero(t *testing.T) {
 		t.Errorf("before = %v, want %v (default %d days)", st.atRiskBefore, wantBefore, atRiskDefaultDays)
 	}
 }
+
+// ── ExportPackingList (#18) ──────────────────────────────────────────────────
+
+func TestExportPackingList_HappyPath_WritesXLSX(t *testing.T) {
+	skuID := uuid.New()
+	sealed := time.Date(2026, 6, 1, 8, 0, 0, 0, time.UTC)
+	st := &mockStore{
+		selectByIDResult: Container{
+			ID: uuid.New(), Code: "CONT20260601-001",
+			Status: ContainerStatusSealed, SealedAt: &sealed,
+		},
+		selectLinesResult: []ContainerLine{
+			{ID: uuid.New(), SKUID: skuID, SKUCode: "SKU-001", SKUName: "Test SKU", Qty: 10, CBMTotal: 1.5, WeightKGTotal: 30},
+		},
+	}
+	svc := newSvc(st, nil, nil, nil)
+
+	var buf bytes.Buffer
+	if err := svc.ExportPackingList(context.Background(), st.selectByIDResult.ID, &buf); err != nil {
+		t.Fatalf("ExportPackingList: %v", err)
+	}
+	if buf.Len() == 0 {
+		t.Error("expected non-empty xlsx bytes")
+	}
+	// Verify it's a valid xlsx (PK zip magic bytes)
+	b := buf.Bytes()
+	if len(b) < 4 || b[0] != 0x50 || b[1] != 0x4B {
+		t.Errorf("output doesn't look like a zip/xlsx file")
+	}
+}
+
+func TestExportPackingList_NotSealed_ReturnsPreconditionFailed(t *testing.T) {
+	st := &mockStore{
+		selectByIDResult: Container{
+			ID: uuid.New(), Code: "CONT-OPEN", Status: ContainerStatusOpen,
+		},
+	}
+	svc := newSvc(st, nil, nil, nil)
+
+	var buf bytes.Buffer
+	err := svc.ExportPackingList(context.Background(), st.selectByIDResult.ID, &buf)
+	if err == nil {
+		t.Fatal("expected error for non-SEALED container")
+	}
+	if !errors.Is(err, domain.ErrPreconditionFailed) {
+		t.Errorf("expected ErrPreconditionFailed, got %v", err)
+	}
+}
+
+func TestExportPackingList_NotFound_ReturnsNotFound(t *testing.T) {
+	st := &mockStore{selectByIDErr: domain.ErrNotFound}
+	svc := newSvc(st, nil, nil, nil)
+
+	var buf bytes.Buffer
+	err := svc.ExportPackingList(context.Background(), uuid.New(), &buf)
+	if !errors.Is(err, domain.ErrNotFound) {
+		t.Errorf("expected ErrNotFound, got %v", err)
+	}
+}
+
+func TestExportPackingList_EmptyLines_WritesValidXLSX(t *testing.T) {
+	sealed := time.Date(2026, 6, 1, 8, 0, 0, 0, time.UTC)
+	st := &mockStore{
+		selectByIDResult: Container{
+			ID: uuid.New(), Code: "CONT-EMPTY",
+			Status: ContainerStatusSealed, SealedAt: &sealed,
+		},
+		selectLinesResult: nil,
+	}
+	svc := newSvc(st, nil, nil, nil)
+
+	var buf bytes.Buffer
+	if err := svc.ExportPackingList(context.Background(), st.selectByIDResult.ID, &buf); err != nil {
+		t.Fatalf("ExportPackingList (empty lines): %v", err)
+	}
+	if buf.Len() == 0 {
+		t.Error("expected non-empty xlsx even with no lines")
+	}
+}

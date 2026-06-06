@@ -3813,6 +3813,39 @@ paths:
       summary: Upload customer packing-list Excel as a loading plan (PARSED)
       tags:
       - delivery
+  /api/v1/containers/{id}/packing-list:
+    get:
+      description: |-
+        Returns a .xlsx file with container metadata and all loaded lines.
+        Returns 412 when the container is not yet SEALED.
+      parameters:
+      - description: container id (uuid)
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/vnd.openxmlformats-officedocument.spreadsheetml.sheet
+      responses:
+        "200":
+          description: OK
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "412":
+          description: Precondition Failed
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Download packing list as Excel for a SEALED container
+      tags:
+      - delivery
   /api/v1/containers/{id}/reopen:
     post:
       consumes:
