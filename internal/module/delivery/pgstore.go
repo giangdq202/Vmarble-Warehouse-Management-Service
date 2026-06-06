@@ -347,7 +347,9 @@ func (t *pgTxStore) updateContainerStatus(ctx context.Context, in updateStatusIn
 
 const selectContainerCols = `
 SELECT id, code, container_type, max_cbm, max_payload_kg,
-       status, sealed_at, sealed_by, note, vessel_id, cutoff_date, loader_id, created_by, created_at
+       status, sealed_at, sealed_by, note, vessel_id, cutoff_date,
+       COALESCE(destination_code, ''), COALESCE(destination_name, ''),
+       loader_id, created_by, created_at
   FROM containers`
 
 type rowScanner interface {
@@ -358,7 +360,9 @@ func scanContainer(r rowScanner) (Container, error) {
 	var c Container
 	var note *string
 	if err := r.Scan(&c.ID, &c.Code, &c.ContainerType, &c.MaxCBM, &c.MaxPayloadKG,
-		&c.Status, &c.SealedAt, &c.SealedBy, &note, &c.VesselID, &c.CutoffDate, &c.LoaderID, &c.CreatedBy, &c.CreatedAt); err != nil {
+		&c.Status, &c.SealedAt, &c.SealedBy, &note, &c.VesselID, &c.CutoffDate,
+		&c.DestinationCode, &c.DestinationName,
+		&c.LoaderID, &c.CreatedBy, &c.CreatedAt); err != nil {
 		return Container{}, err
 	}
 	c.Note = stringFromPtr(note)
@@ -994,6 +998,81 @@ func (s *pgStore) selectLoaderLog(ctx context.Context, containerID uuid.UUID) ([
 		var l ContainerLoaderLog
 		if err := rows.Scan(&l.ID, &l.ContainerID, &l.FromLoaderID, &l.ToLoaderID,
 			&l.Reason, &l.AssignedBy, &l.AssignedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, l)
+	}
+	return out, rows.Err()
+}
+
+// ── Destination reassignment (#17) ─────────────────────────────────────────
+
+func (s *pgStore) changeDestinationTx(ctx context.Context, containerID uuid.UUID, destCode, destName string, clearVessel bool, log ContainerRouteChangeLog) error {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+
+	if clearVessel {
+		if _, err := tx.Exec(ctx,
+			`UPDATE containers
+			    SET destination_code = NULLIF($1, ''),
+			        destination_name = NULLIF($2, ''),
+			        vessel_id        = NULL,
+			        cutoff_date      = NULL
+			  WHERE id = $3`,
+			destCode, destName, containerID,
+		); err != nil {
+			return err
+		}
+	} else {
+		if _, err := tx.Exec(ctx,
+			`UPDATE containers
+			    SET destination_code = NULLIF($1, ''),
+			        destination_name = NULLIF($2, '')
+			  WHERE id = $3`,
+			destCode, destName, containerID,
+		); err != nil {
+			return err
+		}
+	}
+
+	if _, err := tx.Exec(ctx,
+		`INSERT INTO container_route_change_log
+		    (id, container_id, from_dc, to_dc, from_dest, to_dest,
+		     reason, actor_id, changed_at)
+		 VALUES ($1,$2,NULLIF($3,''),$4,NULLIF($5,''),NULLIF($6,''),
+		         NULLIF($7,''),$8,$9)`,
+		log.ID, log.ContainerID, log.FromDC, log.ToDC,
+		log.FromDest, log.ToDest, log.Reason, log.ActorID, log.ChangedAt,
+	); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+func (s *pgStore) selectRouteLog(ctx context.Context, containerID uuid.UUID) ([]ContainerRouteChangeLog, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT id, container_id,
+		        COALESCE(from_dc, ''), to_dc,
+		        COALESCE(from_dest, ''), COALESCE(to_dest, ''),
+		        COALESCE(reason, ''), actor_id, changed_at
+		   FROM container_route_change_log
+		  WHERE container_id = $1
+		  ORDER BY changed_at DESC, id DESC`,
+		containerID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []ContainerRouteChangeLog
+	for rows.Next() {
+		var l ContainerRouteChangeLog
+		if err := rows.Scan(&l.ID, &l.ContainerID, &l.FromDC, &l.ToDC,
+			&l.FromDest, &l.ToDest, &l.Reason, &l.ActorID, &l.ChangedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, l)

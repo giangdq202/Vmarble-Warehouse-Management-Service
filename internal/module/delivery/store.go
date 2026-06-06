@@ -101,6 +101,15 @@ type store interface {
 	// selectLoaderLog returns container_loader_log rows for one container,
 	// newest first.
 	selectLoaderLog(ctx context.Context, containerID uuid.UUID) ([]ContainerLoaderLog, error)
+
+	// changeDestinationTx atomically: updates destination_code/name, clears
+	// vessel_id + cutoff_date when clearVessel=true, and inserts the BR-D24
+	// audit row — all in a single transaction.
+	changeDestinationTx(ctx context.Context, containerID uuid.UUID, destCode, destName string, clearVessel bool, log ContainerRouteChangeLog) error
+
+	// selectRouteLog returns container_route_change_log rows for one container,
+	// newest first.
+	selectRouteLog(ctx context.Context, containerID uuid.UUID) ([]ContainerRouteChangeLog, error)
 }
 
 // txStore is the subset of operations safe to call from inside a transaction.

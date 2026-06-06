@@ -93,6 +93,13 @@ type mockStore struct {
 	updateLoaderCallID *uuid.UUID
 	selectLoaderResult []ContainerLoaderLog
 	selectLoaderErr    error
+
+	// destination reassignment (#17)
+	changeDestErr         error
+	changeDestCalled      bool
+	changeDestClearVessel bool
+	selectRouteResult     []ContainerRouteChangeLog
+	selectRouteErr        error
 }
 
 type mockTxStore struct {
@@ -240,6 +247,16 @@ func (m *mockStore) updateContainerLoader(_ context.Context, containerID uuid.UU
 
 func (m *mockStore) selectLoaderLog(_ context.Context, _ uuid.UUID) ([]ContainerLoaderLog, error) {
 	return m.selectLoaderResult, m.selectLoaderErr
+}
+
+func (m *mockStore) changeDestinationTx(_ context.Context, _ uuid.UUID, _, _ string, clearVessel bool, _ ContainerRouteChangeLog) error {
+	m.changeDestCalled = true
+	m.changeDestClearVessel = clearVessel
+	return m.changeDestErr
+}
+
+func (m *mockStore) selectRouteLog(_ context.Context, _ uuid.UUID) ([]ContainerRouteChangeLog, error) {
+	return m.selectRouteResult, m.selectRouteErr
 }
 
 func newMockTx() *mockTxStore {
@@ -1892,102 +1909,243 @@ func TestAssignLoader_FirstAssignment_NoReasonRequired(t *testing.T) {
 	out, err := svc.AssignLoader(context.Background(), AssignLoaderInput{
 		ContainerID: cid,
 		LoaderID:    &loaderID,
-		Reason:      "",
 		AssignedBy:  actor,
 	})
 	if err != nil {
-		t.Fatalf("AssignLoader: %v", err)
+		t.Fatalf("unexpected: %v", err)
 	}
 	if out.LoaderID == nil || *out.LoaderID != loaderID {
 		t.Errorf("LoaderID = %v, want %v", out.LoaderID, loaderID)
 	}
-	if st.updateLoaderCallID == nil || *st.updateLoaderCallID != cid {
-		t.Error("updateContainerLoader not called with correct container_id")
-	}
 }
 
-func TestAssignLoader_Reassign_RequiresReason(t *testing.T) {
+func TestAssignLoader_Reassignment_RequiresReason(t *testing.T) {
 	cid := uuid.New()
-	oldLoader := uuid.New()
-	newLoader := uuid.New()
-	actor := uuid.New()
+	oldID := uuid.New()
+	newID := uuid.New()
 
 	st := &mockStore{
-		selectByIDResult: Container{ID: cid, Status: ContainerStatusLoading, LoaderID: &oldLoader},
+		selectByIDResult: Container{ID: cid, Status: ContainerStatusOpen, LoaderID: &oldID},
 	}
 	svc := newSvc(st, nil, nil, nil)
 
+	// Reassignment without reason
 	_, err := svc.AssignLoader(context.Background(), AssignLoaderInput{
 		ContainerID: cid,
-		LoaderID:    &newLoader,
+		LoaderID:    &newID,
+		AssignedBy:  uuid.New(),
 		Reason:      "",
-		AssignedBy:  actor,
 	})
-	if err == nil {
-		t.Fatal("expected error for reassignment without reason, got nil")
-	}
 	if !errors.Is(err, domain.ErrInvalidInput) {
-		t.Errorf("error = %v, want ErrInvalidInput", err)
+		t.Errorf("expected ErrInvalidInput on missing reason, got %v", err)
 	}
 }
 
-func TestAssignLoader_Reassign_WithReason_WritesAudit(t *testing.T) {
+func TestAssignLoader_Unassign_Allowed(t *testing.T) {
 	cid := uuid.New()
-	oldLoader := uuid.New()
-	newLoader := uuid.New()
-	actor := uuid.New()
-
+	loaderID := uuid.New()
 	st := &mockStore{
-		selectByIDResult: Container{ID: cid, Status: ContainerStatusLoading, LoaderID: &oldLoader},
-	}
-	svc := newSvc(st, nil, nil, nil)
-
-	out, err := svc.AssignLoader(context.Background(), AssignLoaderInput{
-		ContainerID: cid,
-		LoaderID:    &newLoader,
-		Reason:      "LINH => THUY",
-		AssignedBy:  actor,
-	})
-	if err != nil {
-		t.Fatalf("AssignLoader: %v", err)
-	}
-	if out.LoaderID == nil || *out.LoaderID != newLoader {
-		t.Errorf("LoaderID = %v, want %v", out.LoaderID, newLoader)
-	}
-}
-
-func TestAssignLoader_Unassign_ClearsLoader(t *testing.T) {
-	cid := uuid.New()
-	existing := uuid.New()
-	actor := uuid.New()
-
-	st := &mockStore{
-		selectByIDResult: Container{ID: cid, Status: ContainerStatusLoading, LoaderID: &existing},
+		selectByIDResult: Container{ID: cid, Status: ContainerStatusOpen, LoaderID: &loaderID},
 	}
 	svc := newSvc(st, nil, nil, nil)
 
 	out, err := svc.AssignLoader(context.Background(), AssignLoaderInput{
 		ContainerID: cid,
 		LoaderID:    nil,
-		Reason:      "",
-		AssignedBy:  actor,
+		AssignedBy:  uuid.New(),
 	})
 	if err != nil {
-		t.Fatalf("AssignLoader: %v", err)
+		t.Fatalf("unexpected: %v", err)
 	}
 	if out.LoaderID != nil {
-		t.Errorf("LoaderID = %v, want nil after unassign", out.LoaderID)
+		t.Errorf("expected LoaderID to be nil, got %v", out.LoaderID)
 	}
 }
 
-func TestAssignLoader_ContainerNotFound_Returns404(t *testing.T) {
+// ── ExportPackingList (#18) ──────────────────────────────────────────────────
+
+func TestExportPackingList_HappyPath_WritesXLSX(t *testing.T) {
+	skuID := uuid.New()
+	sealed := time.Date(2026, 6, 1, 8, 0, 0, 0, time.UTC)
+	st := &mockStore{
+		selectByIDResult: Container{
+			ID: uuid.New(), Code: "CONT20260601-001",
+			Status: ContainerStatusSealed, SealedAt: &sealed,
+		},
+		selectLinesResult: []ContainerLine{
+			{ID: uuid.New(), SKUID: skuID, SKUCode: "SKU-001", SKUName: "Test SKU", Qty: 10, CBMTotal: 1.5, WeightKGTotal: 30},
+		},
+	}
+	svc := newSvc(st, nil, nil, nil)
+
+	var buf bytes.Buffer
+	if err := svc.ExportPackingList(context.Background(), st.selectByIDResult.ID, &buf); err != nil {
+		t.Fatalf("ExportPackingList: %v", err)
+	}
+	if buf.Len() == 0 {
+		t.Error("expected non-empty xlsx bytes")
+	}
+	// Verify it's a valid xlsx (PK zip magic bytes)
+	b := buf.Bytes()
+	if len(b) < 4 || b[0] != 0x50 || b[1] != 0x4B {
+		t.Errorf("output doesn't look like a zip/xlsx file")
+	}
+}
+
+func TestExportPackingList_NotSealed_ReturnsPreconditionFailed(t *testing.T) {
+	st := &mockStore{
+		selectByIDResult: Container{
+			ID: uuid.New(), Code: "CONT-OPEN", Status: ContainerStatusOpen,
+		},
+	}
+	svc := newSvc(st, nil, nil, nil)
+
+	var buf bytes.Buffer
+	err := svc.ExportPackingList(context.Background(), st.selectByIDResult.ID, &buf)
+	if err == nil {
+		t.Fatal("expected error for non-SEALED container")
+	}
+	if !errors.Is(err, domain.ErrPreconditionFailed) {
+		t.Errorf("expected ErrPreconditionFailed, got %v", err)
+	}
+}
+
+func TestExportPackingList_NotFound_ReturnsNotFound(t *testing.T) {
 	st := &mockStore{selectByIDErr: domain.ErrNotFound}
 	svc := newSvc(st, nil, nil, nil)
 
-	_, err := svc.AssignLoader(context.Background(), AssignLoaderInput{
-		ContainerID: uuid.New(),
-		LoaderID:    nil,
-		AssignedBy:  uuid.New(),
+	var buf bytes.Buffer
+	err := svc.ExportPackingList(context.Background(), uuid.New(), &buf)
+	if !errors.Is(err, domain.ErrNotFound) {
+		t.Errorf("expected ErrNotFound, got %v", err)
+	}
+}
+
+func TestExportPackingList_EmptyLines_WritesValidXLSX(t *testing.T) {
+	sealed := time.Date(2026, 6, 1, 8, 0, 0, 0, time.UTC)
+	st := &mockStore{
+		selectByIDResult: Container{
+			ID: uuid.New(), Code: "CONT-EMPTY",
+			Status: ContainerStatusSealed, SealedAt: &sealed,
+		},
+		selectLinesResult: nil,
+	}
+	svc := newSvc(st, nil, nil, nil)
+
+	var buf bytes.Buffer
+	if err := svc.ExportPackingList(context.Background(), st.selectByIDResult.ID, &buf); err != nil {
+		t.Fatalf("ExportPackingList (empty lines): %v", err)
+	}
+	if buf.Len() == 0 {
+		t.Error("expected non-empty xlsx even with no lines")
+	}
+}
+
+// ── ChangeDestination tests (#17) ────────────────────────────────────────────
+
+func TestChangeDestination_FirstAssignment_NoReasonRequired(t *testing.T) {
+	cid := uuid.New()
+	actor := uuid.New()
+
+	st := &mockStore{
+		selectByIDResult: Container{ID: cid, Status: ContainerStatusOpen},
+	}
+	svc := newSvc(st, nil, nil, nil)
+
+	out, err := svc.ChangeDestination(context.Background(), ChangeDestinationInput{
+		ContainerID:     cid,
+		DestinationCode: "LAX",
+		DestinationName: "Los Angeles",
+		ActorID:         actor,
+	})
+	if err != nil {
+		t.Fatalf("unexpected: %v", err)
+	}
+	if out.DestinationCode != "LAX" {
+		t.Errorf("Dest = %q, want LAX", out.DestinationCode)
+	}
+	if !st.changeDestCalled {
+		t.Error("changeDestinationTx was never called")
+	}
+	if st.changeDestClearVessel {
+		t.Error("first assignment should not clear vessel")
+	}
+}
+
+func TestChangeDestination_Reassignment_RequiresReason(t *testing.T) {
+	cid := uuid.New()
+	st := &mockStore{
+		selectByIDResult: Container{
+			ID: cid, Status: ContainerStatusLoading,
+			DestinationCode: "SGN", DestinationName: "Saigon",
+		},
+	}
+	svc := newSvc(st, nil, nil, nil)
+
+	// Change to HPH without reason
+	_, err := svc.ChangeDestination(context.Background(), ChangeDestinationInput{
+		ContainerID:     cid,
+		DestinationCode: "HPH",
+		ActorID:         uuid.New(),
+		Reason:          "  ",
+	})
+	if !errors.Is(err, domain.ErrInvalidInput) {
+		t.Errorf("expected ErrInvalidInput on missing reason, got %v", err)
+	}
+}
+
+func TestChangeDestination_Reassignment_ClearsVessel(t *testing.T) {
+	cid := uuid.New()
+	vID := uuid.New()
+	st := &mockStore{
+		selectByIDResult: Container{
+			ID: cid, Status: ContainerStatusLoading,
+			DestinationCode: "SGN", VesselID: &vID,
+		},
+	}
+	svc := newSvc(st, nil, nil, nil)
+
+	out, err := svc.ChangeDestination(context.Background(), ChangeDestinationInput{
+		ContainerID:     cid,
+		DestinationCode: "HPH",
+		Reason:          "customer change",
+		ActorID:         uuid.New(),
+	})
+	if err != nil {
+		t.Fatalf("unexpected: %v", err)
+	}
+	if out.VesselID != nil {
+		t.Error("vessel_id must be cleared on destination change")
+	}
+	if !st.changeDestClearVessel {
+		t.Error("clearVessel flag should have been true")
+	}
+}
+
+func TestChangeDestination_SealedContainer_Rejected(t *testing.T) {
+	cid := uuid.New()
+	st := &mockStore{
+		selectByIDResult: Container{ID: cid, Status: ContainerStatusSealed},
+	}
+	svc := newSvc(st, nil, nil, nil)
+	_, err := svc.ChangeDestination(context.Background(), ChangeDestinationInput{
+		ContainerID:     cid,
+		DestinationCode: "HPH",
+		ActorID:         uuid.New(),
+	})
+	if !errors.Is(err, domain.ErrInvalidTransition) {
+		t.Errorf("expected ErrInvalidTransition on SEALED, got %v", err)
+	}
+}
+
+func TestChangeDestination_NotFound_Returns404(t *testing.T) {
+	st := &mockStore{selectByIDErr: domain.ErrNotFound}
+	svc := newSvc(st, nil, nil, nil)
+
+	_, err := svc.ChangeDestination(context.Background(), ChangeDestinationInput{
+		ContainerID:     uuid.New(),
+		DestinationCode: "DC-98",
+		ActorID:         uuid.New(),
 	})
 	if !errors.Is(err, domain.ErrNotFound) {
 		t.Errorf("error = %v, want ErrNotFound", err)

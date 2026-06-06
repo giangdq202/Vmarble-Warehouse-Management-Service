@@ -33,20 +33,23 @@ const (
 )
 
 type Container struct {
-	ID            uuid.UUID  `json:"id"`
-	Code          string     `json:"code"`
-	ContainerType string     `json:"container_type"`
-	MaxCBM        float64    `json:"max_cbm"`
-	MaxPayloadKG  float64    `json:"max_payload_kg"`
-	Status        string     `json:"status"`
-	SealedAt      *time.Time `json:"sealed_at,omitempty"`
-	SealedBy      *uuid.UUID `json:"sealed_by,omitempty"`
-	Note          string     `json:"note,omitempty"`
-	VesselID      *uuid.UUID `json:"vessel_id,omitempty"`
-	CutoffDate    *time.Time `json:"cutoff_date,omitempty"`
-	LoaderID      *uuid.UUID `json:"loader_id,omitempty"`
-	CreatedBy     uuid.UUID  `json:"created_by"`
-	CreatedAt     time.Time  `json:"created_at"`
+	ID              uuid.UUID  `json:"id"`
+	Code            string     `json:"code"`
+	ContainerType   string     `json:"container_type"`
+	MaxCBM          float64    `json:"max_cbm"`
+	MaxPayloadKG    float64    `json:"max_payload_kg"`
+	Status          string     `json:"status"`
+	SealedAt        *time.Time `json:"sealed_at,omitempty"`
+	SealedBy        *uuid.UUID `json:"sealed_by,omitempty"`
+	Note            string     `json:"note,omitempty"`
+	VesselID        *uuid.UUID `json:"vessel_id,omitempty"`
+	CutoffDate      *time.Time `json:"cutoff_date,omitempty"`
+	DestinationCode string     `json:"destination_code,omitempty"`
+	DestinationName string     `json:"destination_name,omitempty"`
+	LoaderID        *uuid.UUID `json:"loader_id,omitempty"`
+	CreatedBy       uuid.UUID  `json:"created_by"`
+	CreatedAt       time.Time  `json:"created_at"`
+
 
 	// Computed projections — populated by GetContainer; List does not hydrate
 	// these to keep the page query a single round-trip.
@@ -238,6 +241,32 @@ type ContainerLoaderLog struct {
 	Reason       string     `json:"reason,omitempty"`
 	AssignedBy   uuid.UUID  `json:"assigned_by"`
 	AssignedAt   time.Time  `json:"assigned_at"`
+}
+
+// ChangeDestinationInput drives POST /containers/:id/change-destination.
+// Reason is optional for first assignment and mandatory for reassignment
+// (when the container already has a destination_code). BR-D26: if the new
+// destination differs, the vessel booking (vessel_id + cutoff_date) is
+// cleared atomically so planners must rebook.
+type ChangeDestinationInput struct {
+	ContainerID     uuid.UUID `json:"-"`
+	DestinationCode string    `json:"destination_code"`
+	DestinationName string    `json:"destination_name,omitempty"`
+	Reason          string    `json:"reason,omitempty"`
+	ActorID         uuid.UUID `json:"-"`
+}
+
+// ContainerRouteChangeLog is one audit row from container_route_change_log (BR-D24).
+type ContainerRouteChangeLog struct {
+	ID          uuid.UUID `json:"id"`
+	ContainerID uuid.UUID `json:"container_id"`
+	FromDC      string    `json:"from_dc,omitempty"`
+	ToDC        string    `json:"to_dc"`
+	FromDest    string    `json:"from_dest,omitempty"`
+	ToDest      string    `json:"to_dest,omitempty"`
+	Reason      string    `json:"reason,omitempty"`
+	ActorID     uuid.UUID `json:"actor_id"`
+	ChangedAt   time.Time `json:"changed_at"`
 }
 
 // ── Loading plans (#301) ────────────────────────────────────────────────────
@@ -463,6 +492,23 @@ type Service interface {
 	// ListLoaderLog returns the full assignment audit trail for one container,
 	// newest entry first.
 	ListLoaderLog(ctx context.Context, containerID uuid.UUID) ([]ContainerLoaderLog, error)
+
+	// ExportPackingList writes the packing list for a SEALED container as an
+	// Excel (.xlsx) workbook to w. Returns ErrPreconditionFailed when the
+	// container is not yet SEALED, ErrNotFound when it does not exist.
+	ExportPackingList(ctx context.Context, id uuid.UUID, w io.Writer) error
+
+	// ChangeDestination updates destination_code/name on a container (BR-D24).
+	// Returns ErrInvalidTransition when the container is SEALED or SHIPPED
+	// (BR-D25). When the destination_code changes from a prior value, the
+	// vessel booking (vessel_id + cutoff_date) is cleared atomically and an
+	// audit row is written (BR-D26). Reason is required when reassigning to a
+	// different destination.
+	ChangeDestination(ctx context.Context, in ChangeDestinationInput) (Container, error)
+
+	// ListRouteLog returns the destination change audit trail for one container,
+	// newest entry first.
+	ListRouteLog(ctx context.Context, containerID uuid.UUID) ([]ContainerRouteChangeLog, error)
 }
 
 // DefaultCapacityForType returns the ISO defaults for a container type. When

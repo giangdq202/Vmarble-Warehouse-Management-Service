@@ -43,12 +43,17 @@ func (h *Handler) Register(rg *gin.RouterGroup) {
 	rg.POST("/containers/:id/assign-loader", auth.RequirePlannerUp(), h.assignLoader)
 	rg.GET("/containers/:id/loader-log", auth.RequirePlannerUp(), h.listLoaderLog)
 
+	// Destination reassignment (#17 / BR-D24/D25/D26).
+	rg.POST("/containers/:id/change-destination", auth.RequirePlannerUp(), h.changeDestination)
+	rg.GET("/containers/:id/route-log", auth.RequirePlannerUp(), h.listRouteLog)
+
 	// Loading plans (#301). Upload requires the planner persona; approve is
 	// admin-only because it locks the version that #291's VERIFY-mode kiosk
 	// reconciles scans against.
 	rg.POST("/containers/:id/loading-plan", auth.RequirePlannerUp(), h.uploadLoadingPlan)
 	rg.GET("/containers/:id/loading-plan", h.getActiveLoadingPlan)
 	rg.GET("/containers/:id/lines-history", h.listLinesHistory)
+	rg.GET("/containers/:id/packing-list", auth.RequirePlannerUp(), h.exportPackingList)
 	rg.GET("/loading-plans/:id", h.getLoadingPlan)
 	rg.GET("/loading-plans/:id/diff", h.diffLoadingPlan)
 	rg.POST("/loading-plans/:id/approve", auth.RequireAdminOnly(), h.approveLoadingPlan)
@@ -741,4 +746,94 @@ func (h *Handler) listLoaderLog(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, entries)
+}
+
+// changeDestination godoc
+//
+// @Summary      Change container destination — clears vessel booking if DC changes (BR-D24/D25/D26)
+// @Tags         delivery
+// @Accept       json
+// @Produce      json
+// @Param        id    path      string                    true  "container id (uuid)"
+// @Param        body  body      ChangeDestinationInput    true  "payload"
+// @Success      200   {object}  Container
+// @Failure      400   {object}  map[string]string
+// @Failure      404   {object}  map[string]string
+// @Failure      409   {object}  map[string]string  "container is SEALED/SHIPPED"
+// @Security     BearerAuth
+// @Router       /api/v1/containers/{id}/change-destination [post]
+func (h *Handler) changeDestination(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+	var in ChangeDestinationInput
+	if !httpkit.Bind(c, &in) {
+		return
+	}
+	in.ContainerID = id
+	in.ActorID = callerID(c)
+	out, err := h.svc.ChangeDestination(c.Request.Context(), in)
+	if err != nil {
+		httpkit.Error(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, out)
+}
+
+// listRouteLog godoc
+//
+// @Summary      Destination change audit trail for a container
+// @Tags         delivery
+// @Produce      json
+// @Param        id   path      string  true  "container id (uuid)"
+// @Success      200  {array}   ContainerRouteChangeLog
+// @Failure      404  {object}  map[string]string
+// @Security     BearerAuth
+// @Router       /api/v1/containers/{id}/route-log [get]
+func (h *Handler) listRouteLog(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+	entries, err := h.svc.ListRouteLog(c.Request.Context(), id)
+	if err != nil {
+		httpkit.Error(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, entries)
+}
+
+// exportPackingList godoc
+//
+// @Summary      Download packing list as Excel for a SEALED container
+// @Description  Returns a .xlsx file with container metadata and all loaded lines.
+// @Description  Returns 412 when the container is not yet SEALED.
+// @Tags         delivery
+// @Produce      application/vnd.openxmlformats-officedocument.spreadsheetml.sheet
+// @Param        id  path  string  true  "container id (uuid)"
+// @Success      200
+// @Failure      404  {object}  map[string]string
+// @Failure      412  {object}  map[string]string
+// @Security     BearerAuth
+// @Router       /api/v1/containers/{id}/packing-list [get]
+func (h *Handler) exportPackingList(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+	c.Header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+	c.Header("Content-Disposition", "attachment; filename=packing-list.xlsx")
+	if err := h.svc.ExportPackingList(c.Request.Context(), id, c.Writer); err != nil {
+		// Headers already sent — httpkit.Error would write a second body.
+		// Only set error headers when nothing was written yet. In practice
+		// ExportPackingList checks preconditions before writing any bytes,
+		// so errors arrive before the stream starts.
+		c.Header("Content-Type", "application/json")
+		c.Header("Content-Disposition", "")
+		httpkit.Error(c, err)
+	}
 }

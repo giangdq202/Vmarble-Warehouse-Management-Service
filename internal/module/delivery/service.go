@@ -4,12 +4,15 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
+	"io"
 	"log/slog"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/xuri/excelize/v2"
 
 	"github.com/vmarble/warehouse-management-service/internal/domain"
 	"github.com/vmarble/warehouse-management-service/internal/platform/auth"
@@ -1307,4 +1310,182 @@ func (svc *service) ListLoaderLog(ctx context.Context, containerID uuid.UUID) ([
 		return nil, err
 	}
 	return svc.s.selectLoaderLog(ctx, containerID)
+}
+
+// ── Packing list Excel export (#18) ─────────────────────────────────────────
+
+func (svc *service) ExportPackingList(ctx context.Context, id uuid.UUID, w io.Writer) error {
+	if id == uuid.Nil {
+		return domain.NewBizError(domain.ErrInvalidInput, "container id is required")
+	}
+	c, err := svc.s.selectContainerByID(ctx, id)
+	if err != nil {
+		return err
+	}
+	if c.Status != ContainerStatusSealed {
+		return domain.NewBizError(domain.ErrPreconditionFailed,
+			fmt.Sprintf("packing list only available for SEALED containers (current status: %s)", c.Status))
+	}
+	lines, err := svc.s.selectContainerLines(ctx, id)
+	if err != nil {
+		return fmt.Errorf("select container lines: %w", err)
+	}
+	return buildPackingListXLSX(c, lines, w)
+}
+
+func buildPackingListXLSX(c Container, lines []ContainerLine, w io.Writer) error {
+	f := excelize.NewFile()
+	defer func() { _ = f.Close() }()
+
+	sheet := "Packing List"
+	if err := f.SetSheetName("Sheet1", sheet); err != nil {
+		return fmt.Errorf("rename sheet: %w", err)
+	}
+
+	bold, err := f.NewStyle(&excelize.Style{Font: &excelize.Font{Bold: true}})
+	if err != nil {
+		return fmt.Errorf("bold style: %w", err)
+	}
+
+	// ── Meta block (rows 1–4) ────────────────────────────────────────────
+	meta := []struct{ label, value string }{
+		{"Container", c.Code},
+		{"Vessel", containerVesselName(c)},
+		{"Cutoff Date", containerCutoffStr(c)},
+		{"Seal Date", containerSealDateStr(c)},
+	}
+	for i, m := range meta {
+		row := fmt.Sprintf("%d", i+1)
+		_ = f.SetCellStyle(sheet, "A"+row, "A"+row, bold)
+		_ = f.SetCellValue(sheet, "A"+row, m.label)
+		_ = f.SetCellValue(sheet, "B"+row, m.value)
+	}
+
+	// ── Column headers (row 6) ───────────────────────────────────────────
+	headers := []string{"No.", "SKU Code", "SKU Name", "Qty", "CBM Total", "Weight KG"}
+	for col, h := range headers {
+		cell, _ := excelize.CoordinatesToCellName(col+1, 6)
+		_ = f.SetCellStyle(sheet, cell, cell, bold)
+		_ = f.SetCellValue(sheet, cell, h)
+	}
+
+	// ── Data rows (from row 7) ───────────────────────────────────────────
+	for i, l := range lines {
+		row := i + 7
+		skuName := l.SKUName
+		if skuName == "" {
+			skuName = l.SKUCode
+		}
+		values := []any{i + 1, l.SKUCode, skuName, l.Qty, l.CBMTotal, l.WeightKGTotal}
+		for col, v := range values {
+			cell, _ := excelize.CoordinatesToCellName(col+1, row)
+			_ = f.SetCellValue(sheet, cell, v)
+		}
+	}
+
+	_ = f.SetColWidth(sheet, "A", "A", 6)
+	_ = f.SetColWidth(sheet, "B", "B", 16)
+	_ = f.SetColWidth(sheet, "C", "C", 32)
+	_ = f.SetColWidth(sheet, "D", "D", 8)
+	_ = f.SetColWidth(sheet, "E", "F", 14)
+
+	return f.Write(w)
+}
+
+func containerVesselName(c Container) string {
+	// VesselName is not on Container struct — vessel info is on the vessel row.
+	// cutoff_date is denormalized; vessel name is not. Return the vessel ID
+	// string as a fallback when the FE has it from context.
+	if c.VesselID != nil {
+		return c.VesselID.String()
+	}
+	return ""
+}
+
+func containerCutoffStr(c Container) string {
+	if c.CutoffDate == nil {
+		return ""
+	}
+	return c.CutoffDate.Format("2006-01-02")
+}
+
+func containerSealDateStr(c Container) string {
+	if c.SealedAt == nil {
+		return ""
+	}
+	return c.SealedAt.Format("2006-01-02")
+}
+
+// ── Destination reassignment (#17) ─────────────────────────────────────────
+
+// ChangeDestination updates destination_code/name on a container (BR-D24).
+// BR-D25: SEALED/SHIPPED containers refuse the change.
+// BR-D26: when destination_code changes, vessel_id + cutoff_date are cleared
+// atomically so planners must rebook — a cleared booking is surfaced by
+// the at-risk dashboard (no cutoff = no risk window = invisible to at-risk).
+// Reason is required when the container already has a destination and the new
+// code differs from the current one.
+func (svc *service) ChangeDestination(ctx context.Context, in ChangeDestinationInput) (Container, error) {
+	if in.ContainerID == uuid.Nil {
+		return Container{}, domain.NewBizError(domain.ErrInvalidInput, "container_id is required")
+	}
+	if in.ActorID == uuid.Nil {
+		return Container{}, domain.NewBizError(domain.ErrInvalidInput, "actor_id is required")
+	}
+	if reasonBlank(in.DestinationCode) {
+		return Container{}, domain.NewBizError(domain.ErrInvalidInput, "destination_code is required")
+	}
+
+	c, err := svc.s.selectContainerByID(ctx, in.ContainerID)
+	if err != nil {
+		return Container{}, err
+	}
+
+	// BR-D25: sealed/shipped containers must not have destination changed.
+	switch c.Status {
+	case ContainerStatusSealed, ContainerStatusShipped:
+		return Container{}, domain.NewBizError(domain.ErrInvalidTransition,
+			"cannot change destination after container is "+c.Status+" (BR-D25)")
+	}
+
+	// BR-D26: destination change → auto-clear vessel booking.
+	isReassign := c.DestinationCode != "" && c.DestinationCode != in.DestinationCode
+	if isReassign && reasonBlank(in.Reason) {
+		return Container{}, domain.NewBizError(domain.ErrInvalidInput,
+			"reason is required when changing destination (BR-D24)")
+	}
+	clearVessel := isReassign && (c.VesselID != nil)
+
+	entry := ContainerRouteChangeLog{
+		ID:          uuid.New(),
+		ContainerID: in.ContainerID,
+		FromDC:      c.DestinationCode,
+		ToDC:        in.DestinationCode,
+		FromDest:    c.DestinationName,
+		ToDest:      in.DestinationName,
+		Reason:      in.Reason,
+		ActorID:     in.ActorID,
+		ChangedAt:   svc.now(),
+	}
+	if err := svc.s.changeDestinationTx(ctx, in.ContainerID, in.DestinationCode, in.DestinationName, clearVessel, entry); err != nil {
+		return Container{}, err
+	}
+
+	c.DestinationCode = in.DestinationCode
+	c.DestinationName = in.DestinationName
+	if clearVessel {
+		c.VesselID = nil
+		c.CutoffDate = nil
+	}
+	return c, nil
+}
+
+func (svc *service) ListRouteLog(ctx context.Context, containerID uuid.UUID) ([]ContainerRouteChangeLog, error) {
+	if containerID == uuid.Nil {
+		return nil, domain.NewBizError(domain.ErrInvalidInput, "container_id is required")
+	}
+	if _, err := svc.s.selectContainerByID(ctx, containerID); err != nil {
+		return nil, err
+	}
+	return svc.s.selectRouteLog(ctx, containerID)
 }
