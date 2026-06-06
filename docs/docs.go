@@ -1069,6 +1069,78 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/containers/{id}/change-destination": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "delivery"
+                ],
+                "summary": "Change container destination — clears vessel booking if DC changes (BR-D24/D25/D26)",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "container id (uuid)",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "payload",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_module_delivery.ChangeDestinationInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_module_delivery.Container"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "container is SEALED/SHIPPED",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/containers/{id}/exceptions": {
             "get": {
                 "security": [
@@ -1586,6 +1658,51 @@ const docTemplate = `{
                     },
                     "409": {
                         "description": "Conflict",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/containers/{id}/route-log": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "delivery"
+                ],
+                "summary": "Destination change audit trail for a container",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "container id (uuid)",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/internal_module_delivery.ContainerRouteChangeLog"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -12493,6 +12610,20 @@ const docTemplate = `{
                 }
             }
         },
+        "internal_module_delivery.ChangeDestinationInput": {
+            "type": "object",
+            "properties": {
+                "destination_code": {
+                    "type": "string"
+                },
+                "destination_name": {
+                    "type": "string"
+                },
+                "reason": {
+                    "type": "string"
+                }
+            }
+        },
         "internal_module_delivery.Container": {
             "type": "object",
             "properties": {
@@ -12509,6 +12640,12 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "cutoff_date": {
+                    "type": "string"
+                },
+                "destination_code": {
+                    "type": "string"
+                },
+                "destination_name": {
                     "type": "string"
                 },
                 "fill_pct_cbm": {
@@ -12628,6 +12765,38 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "superseded_by_user": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_module_delivery.ContainerRouteChangeLog": {
+            "type": "object",
+            "properties": {
+                "actor_id": {
+                    "type": "string"
+                },
+                "changed_at": {
+                    "type": "string"
+                },
+                "container_id": {
+                    "type": "string"
+                },
+                "from_dc": {
+                    "type": "string"
+                },
+                "from_dest": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "reason": {
+                    "type": "string"
+                },
+                "to_dc": {
+                    "type": "string"
+                },
+                "to_dest": {
                     "type": "string"
                 }
             }
