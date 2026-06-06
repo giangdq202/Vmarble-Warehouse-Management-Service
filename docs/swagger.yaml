@@ -1096,6 +1096,31 @@ definitions:
       weight_kg_total:
         type: number
     type: object
+  internal_module_delivery.AtRiskRow:
+    properties:
+      code:
+        type: string
+      cutoff_date:
+        type: string
+      days_to_cutoff:
+        type: integer
+      fill_pct_cbm:
+        description: 0–100, 0 when max_cbm=0
+        type: number
+      id:
+        type: string
+      line_count:
+        type: integer
+      max_cbm:
+        type: number
+      risk_level:
+        description: RED | ORANGE
+        type: string
+      used_cbm:
+        type: number
+      vessel_name:
+        type: string
+    type: object
   internal_module_delivery.Container:
     properties:
       code:
@@ -3984,6 +4009,31 @@ paths:
       security:
       - BearerAuth: []
       summary: Transfer a line (full or partial) to another container
+      tags:
+      - delivery
+  /api/v1/containers/at-risk:
+    get:
+      description: |-
+        Returns containers whose cutoff_date is within the next `days`
+        calendar days (default 7). Overdue containers (cutoff in the past)
+        are included. Sorted by cutoff_date ASC (most urgent first).
+      parameters:
+      - description: look-ahead window in days (default 7)
+        in: query
+        name: days
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/internal_module_delivery.AtRiskRow'
+            type: array
+      security:
+      - BearerAuth: []
+      summary: List at-risk containers — OPEN/LOADING with cutoff within N days
       tags:
       - delivery
   /api/v1/costing:

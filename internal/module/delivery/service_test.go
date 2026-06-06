@@ -82,6 +82,11 @@ type mockStore struct {
 	linesHistoryResult []ContainerLineHistoryEntry
 	linesHistoryErr    error
 	linesHistoryFilter *uuid.UUID
+
+	// at-risk (#296)
+	atRiskResult []AtRiskRow
+	atRiskErr    error
+	atRiskBefore time.Time
 }
 
 type mockTxStore struct {
@@ -214,6 +219,11 @@ func (m *mockStore) selectContainerLinesHistory(_ context.Context, _ uuid.UUID, 
 
 func (m *mockStore) selectShortagesForContainer(_ context.Context, _ uuid.UUID) (ShortageReport, error) {
 	return ShortageReport{}, nil
+}
+
+func (m *mockStore) selectAtRiskContainers(_ context.Context, before time.Time) ([]AtRiskRow, error) {
+	m.atRiskBefore = before
+	return m.atRiskResult, m.atRiskErr
 }
 
 func newMockTx() *mockTxStore {
@@ -1732,5 +1742,121 @@ func TestListContainerLinesHistory_PlanFilterPropagated(t *testing.T) {
 	}
 	if st.linesHistoryFilter == nil || *st.linesHistoryFilter != planID {
 		t.Errorf("plan filter not propagated, got %v", st.linesHistoryFilter)
+	}
+}
+
+// ── ListAtRisk (#296) ────────────────────────────────────────────────────────
+
+func TestListAtRisk_HappyPath_ReturnsRowsWithRiskLevel(t *testing.T) {
+	now := time.Date(2026, 6, 1, 10, 0, 0, 0, time.UTC)
+	cutoffRed := now.Add(2 * 24 * time.Hour)    // 2 days → RED
+	cutoffOrange := now.Add(5 * 24 * time.Hour) // 5 days → ORANGE
+	vesselName := "EVER GIVEN"
+	maxCBM := 67.7
+
+	st := &mockStore{
+		atRiskResult: []AtRiskRow{
+			{ContainerID: uuid.New(), ContainerCode: "CONT20260601-001", VesselName: &vesselName, CutoffDate: cutoffRed, UsedCBM: 30, MaxCBM: maxCBM},
+			{ContainerID: uuid.New(), ContainerCode: "CONT20260601-002", VesselName: nil, CutoffDate: cutoffOrange, UsedCBM: 10, MaxCBM: maxCBM},
+		},
+	}
+	svc := newSvc(st, nil, nil, nil)
+	svc.now = func() time.Time { return now }
+
+	rows, err := svc.ListAtRisk(context.Background(), 7)
+	if err != nil {
+		t.Fatalf("ListAtRisk: %v", err)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("rows = %d, want 2", len(rows))
+	}
+
+	if rows[0].RiskLevel != RiskLevelRed {
+		t.Errorf("row[0] risk = %s, want RED", rows[0].RiskLevel)
+	}
+	if rows[1].RiskLevel != RiskLevelOrange {
+		t.Errorf("row[1] risk = %s, want ORANGE", rows[1].RiskLevel)
+	}
+}
+
+func TestListAtRisk_FillPct_ComputedCorrectly(t *testing.T) {
+	now := time.Date(2026, 6, 1, 10, 0, 0, 0, time.UTC)
+	cutoff := now.Add(4 * 24 * time.Hour)
+
+	st := &mockStore{
+		atRiskResult: []AtRiskRow{
+			{ContainerID: uuid.New(), ContainerCode: "CONT-X", CutoffDate: cutoff, UsedCBM: 50, MaxCBM: 100},
+		},
+	}
+	svc := newSvc(st, nil, nil, nil)
+	svc.now = func() time.Time { return now }
+
+	rows, err := svc.ListAtRisk(context.Background(), 7)
+	if err != nil {
+		t.Fatalf("ListAtRisk: %v", err)
+	}
+	if rows[0].FillPctCBM != 50.0 {
+		t.Errorf("FillPctCBM = %v, want 50.0", rows[0].FillPctCBM)
+	}
+}
+
+func TestListAtRisk_ZeroMaxCBM_FillPctIsZero(t *testing.T) {
+	now := time.Date(2026, 6, 1, 10, 0, 0, 0, time.UTC)
+	cutoff := now.Add(3 * 24 * time.Hour)
+
+	st := &mockStore{
+		atRiskResult: []AtRiskRow{
+			{ContainerID: uuid.New(), ContainerCode: "CONT-Y", CutoffDate: cutoff, UsedCBM: 10, MaxCBM: 0},
+		},
+	}
+	svc := newSvc(st, nil, nil, nil)
+	svc.now = func() time.Time { return now }
+
+	rows, err := svc.ListAtRisk(context.Background(), 7)
+	if err != nil {
+		t.Fatalf("ListAtRisk: %v", err)
+	}
+	if rows[0].FillPctCBM != 0 {
+		t.Errorf("FillPctCBM = %v, want 0 when max_cbm=0", rows[0].FillPctCBM)
+	}
+}
+
+func TestListAtRisk_OverdueContainer_IncludedAsRed(t *testing.T) {
+	now := time.Date(2026, 6, 1, 10, 0, 0, 0, time.UTC)
+	cutoff := now.Add(-1 * 24 * time.Hour) // already past
+
+	st := &mockStore{
+		atRiskResult: []AtRiskRow{
+			{ContainerID: uuid.New(), ContainerCode: "CONT-OLD", CutoffDate: cutoff, UsedCBM: 5, MaxCBM: 67.7},
+		},
+	}
+	svc := newSvc(st, nil, nil, nil)
+	svc.now = func() time.Time { return now }
+
+	rows, err := svc.ListAtRisk(context.Background(), 7)
+	if err != nil {
+		t.Fatalf("ListAtRisk: %v", err)
+	}
+	if rows[0].DaysToCutoff >= 0 {
+		t.Errorf("DaysToCutoff = %d, want negative for overdue", rows[0].DaysToCutoff)
+	}
+	if rows[0].RiskLevel != RiskLevelRed {
+		t.Errorf("overdue container risk = %s, want RED", rows[0].RiskLevel)
+	}
+}
+
+func TestListAtRisk_DefaultDays_UsedWhenZero(t *testing.T) {
+	now := time.Date(2026, 6, 1, 10, 0, 0, 0, time.UTC)
+	st := &mockStore{atRiskResult: nil}
+	svc := newSvc(st, nil, nil, nil)
+	svc.now = func() time.Time { return now }
+
+	_, err := svc.ListAtRisk(context.Background(), 0)
+	if err != nil {
+		t.Fatalf("ListAtRisk: %v", err)
+	}
+	wantBefore := now.AddDate(0, 0, atRiskDefaultDays)
+	if !st.atRiskBefore.Equal(wantBefore) {
+		t.Errorf("before = %v, want %v (default %d days)", st.atRiskBefore, wantBefore, atRiskDefaultDays)
 	}
 }

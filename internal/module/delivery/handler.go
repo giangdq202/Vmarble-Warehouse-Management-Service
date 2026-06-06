@@ -2,6 +2,7 @@ package delivery
 
 import (
 	"net/http"
+	"strconv"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -25,6 +26,7 @@ func NewHandler(s Service) *Handler {
 func (h *Handler) Register(rg *gin.RouterGroup) {
 	rg.POST("/containers", auth.RequirePlannerUp(), h.create)
 	rg.GET("/containers", h.list)
+	rg.GET("/containers/at-risk", auth.RequirePlannerUp(), h.listAtRisk)
 	rg.GET("/containers/:id", h.get)
 	rg.GET("/containers/:id/status-log", h.statusLog)
 
@@ -639,4 +641,31 @@ func (h *Handler) listLinesHistory(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, entries)
+}
+
+// listAtRisk godoc
+//
+// @Summary      List at-risk containers — OPEN/LOADING with cutoff within N days
+// @Description  Returns containers whose cutoff_date is within the next `days`
+// @Description  calendar days (default 7). Overdue containers (cutoff in the past)
+// @Description  are included. Sorted by cutoff_date ASC (most urgent first).
+// @Tags         delivery
+// @Produce      json
+// @Param        days  query  int  false  "look-ahead window in days (default 7)"
+// @Success      200   {array}   AtRiskRow
+// @Security     BearerAuth
+// @Router       /api/v1/containers/at-risk [get]
+func (h *Handler) listAtRisk(c *gin.Context) {
+	days := 0
+	if raw := c.Query("days"); raw != "" {
+		if n, err := strconv.Atoi(raw); err == nil {
+			days = n
+		}
+	}
+	rows, err := h.svc.ListAtRisk(c.Request.Context(), days)
+	if err != nil {
+		httpkit.Error(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, rows)
 }

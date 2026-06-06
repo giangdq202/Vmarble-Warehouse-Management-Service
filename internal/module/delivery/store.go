@@ -86,6 +86,12 @@ type store interface {
 	// SHORT_SHIPPED auto-creation (BR-D15). Returns an empty report (no
 	// active plan id) when the container has no non-SUPERSEDED plan.
 	selectShortagesForContainer(ctx context.Context, containerID uuid.UUID) (ShortageReport, error)
+
+	// selectAtRiskContainers returns OPEN/LOADING containers with a cutoff_date
+	// at or before (now + days). Overdue containers (cutoff in the past) are
+	// included because they are the most urgent. Each row carries the vessel
+	// name and the aggregated CBM/line_count from container_lines.
+	selectAtRiskContainers(ctx context.Context, before time.Time) ([]AtRiskRow, error)
 }
 
 // txStore is the subset of operations safe to call from inside a transaction.

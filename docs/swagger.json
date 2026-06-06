@@ -930,6 +930,42 @@
                 }
             }
         },
+        "/api/v1/containers/at-risk": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns containers whose cutoff_date is within the next `days`\ncalendar days (default 7). Overdue containers (cutoff in the past)\nare included. Sorted by cutoff_date ASC (most urgent first).",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "delivery"
+                ],
+                "summary": "List at-risk containers — OPEN/LOADING with cutoff within N days",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "look-ahead window in days (default 7)",
+                        "name": "days",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/internal_module_delivery.AtRiskRow"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/containers/{id}": {
             "get": {
                 "security": [
@@ -12360,6 +12396,43 @@
                 },
                 "weight_kg_total": {
                     "type": "number"
+                }
+            }
+        },
+        "internal_module_delivery.AtRiskRow": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "type": "string"
+                },
+                "cutoff_date": {
+                    "type": "string"
+                },
+                "days_to_cutoff": {
+                    "type": "integer"
+                },
+                "fill_pct_cbm": {
+                    "description": "0–100, 0 when max_cbm=0",
+                    "type": "number"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "line_count": {
+                    "type": "integer"
+                },
+                "max_cbm": {
+                    "type": "number"
+                },
+                "risk_level": {
+                    "description": "RED | ORANGE",
+                    "type": "string"
+                },
+                "used_cbm": {
+                    "type": "number"
+                },
+                "vessel_name": {
+                    "type": "string"
                 }
             }
         },

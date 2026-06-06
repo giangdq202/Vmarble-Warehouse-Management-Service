@@ -902,3 +902,45 @@ func (s *pgStore) selectContainerLinesHistory(ctx context.Context, containerID u
 	}
 	return out, rows.Err()
 }
+
+// ── At-risk dashboard (#296) ────────────────────────────────────────────────
+
+func (s *pgStore) selectAtRiskContainers(ctx context.Context, before time.Time) ([]AtRiskRow, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT
+		     c.id,
+		     c.code,
+		     v.name,
+		     c.cutoff_date,
+		     COALESCE(SUM(cl.cbm_total), 0) AS used_cbm,
+		     c.max_cbm,
+		     COUNT(cl.id)::int              AS line_count
+		   FROM containers c
+		   LEFT JOIN vessels v ON v.id = c.vessel_id
+		   LEFT JOIN container_lines cl ON cl.container_id = c.id
+		  WHERE c.status IN ('OPEN', 'LOADING')
+		    AND c.cutoff_date IS NOT NULL
+		    AND c.cutoff_date <= $1
+		  GROUP BY c.id, c.code, v.name, c.cutoff_date, c.max_cbm
+		  ORDER BY c.cutoff_date ASC, c.id`,
+		before,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []AtRiskRow
+	for rows.Next() {
+		var r AtRiskRow
+		if err := rows.Scan(
+			&r.ContainerID, &r.ContainerCode,
+			&r.VesselName, &r.CutoffDate,
+			&r.UsedCBM, &r.MaxCBM, &r.LineCount,
+		); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
