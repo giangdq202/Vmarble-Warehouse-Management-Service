@@ -39,6 +39,10 @@ func (h *Handler) Register(rg *gin.RouterGroup) {
 	rg.POST("/containers/:id/ship", auth.RequirePlannerUp(), h.ship)
 	rg.POST("/containers/:id/cancel", auth.RequirePlannerUp(), h.cancel)
 
+	// Destination reassignment (#17 / BR-D24/D25/D26).
+	rg.POST("/containers/:id/change-destination", auth.RequirePlannerUp(), h.changeDestination)
+	rg.GET("/containers/:id/route-log", auth.RequirePlannerUp(), h.listRouteLog)
+
 	// Loading plans (#301). Upload requires the planner persona; approve is
 	// admin-only because it locks the version that #291's VERIFY-mode kiosk
 	// reconciles scans against.
@@ -669,6 +673,64 @@ func (h *Handler) listAtRisk(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, rows)
+}
+
+// changeDestination godoc
+//
+// @Summary      Change container destination — clears vessel booking if DC changes (BR-D24/D25/D26)
+// @Tags         delivery
+// @Accept       json
+// @Produce      json
+// @Param        id    path      string                    true  "container id (uuid)"
+// @Param        body  body      ChangeDestinationInput    true  "payload"
+// @Success      200   {object}  Container
+// @Failure      400   {object}  map[string]string
+// @Failure      404   {object}  map[string]string
+// @Failure      409   {object}  map[string]string  "container is SEALED/SHIPPED"
+// @Security     BearerAuth
+// @Router       /api/v1/containers/{id}/change-destination [post]
+func (h *Handler) changeDestination(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+	var in ChangeDestinationInput
+	if !httpkit.Bind(c, &in) {
+		return
+	}
+	in.ContainerID = id
+	in.ActorID = callerID(c)
+	out, err := h.svc.ChangeDestination(c.Request.Context(), in)
+	if err != nil {
+		httpkit.Error(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, out)
+}
+
+// listRouteLog godoc
+//
+// @Summary      Destination change audit trail for a container
+// @Tags         delivery
+// @Produce      json
+// @Param        id   path      string  true  "container id (uuid)"
+// @Success      200  {array}   ContainerRouteChangeLog
+// @Failure      404  {object}  map[string]string
+// @Security     BearerAuth
+// @Router       /api/v1/containers/{id}/route-log [get]
+func (h *Handler) listRouteLog(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+	entries, err := h.svc.ListRouteLog(c.Request.Context(), id)
+	if err != nil {
+		httpkit.Error(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, entries)
 }
 
 // exportPackingList godoc

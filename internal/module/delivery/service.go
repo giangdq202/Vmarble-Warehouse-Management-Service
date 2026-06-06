@@ -1361,3 +1361,77 @@ func containerSealDateStr(c Container) string {
 	}
 	return c.SealedAt.Format("2006-01-02")
 }
+
+// ── Destination reassignment (#17) ─────────────────────────────────────────
+
+// ChangeDestination updates destination_code/name on a container (BR-D24).
+// BR-D25: SEALED/SHIPPED containers refuse the change.
+// BR-D26: when destination_code changes, vessel_id + cutoff_date are cleared
+// atomically so planners must rebook — a cleared booking is surfaced by
+// the at-risk dashboard (no cutoff = no risk window = invisible to at-risk).
+// Reason is required when the container already has a destination and the new
+// code differs from the current one.
+func (svc *service) ChangeDestination(ctx context.Context, in ChangeDestinationInput) (Container, error) {
+	if in.ContainerID == uuid.Nil {
+		return Container{}, domain.NewBizError(domain.ErrInvalidInput, "container_id is required")
+	}
+	if in.ActorID == uuid.Nil {
+		return Container{}, domain.NewBizError(domain.ErrInvalidInput, "actor_id is required")
+	}
+	if reasonBlank(in.DestinationCode) {
+		return Container{}, domain.NewBizError(domain.ErrInvalidInput, "destination_code is required")
+	}
+
+	c, err := svc.s.selectContainerByID(ctx, in.ContainerID)
+	if err != nil {
+		return Container{}, err
+	}
+
+	// BR-D25: sealed/shipped containers must not have destination changed.
+	switch c.Status {
+	case ContainerStatusSealed, ContainerStatusShipped:
+		return Container{}, domain.NewBizError(domain.ErrInvalidTransition,
+			"cannot change destination after container is "+c.Status+" (BR-D25)")
+	}
+
+	// BR-D26: destination change → auto-clear vessel booking.
+	isReassign := c.DestinationCode != "" && c.DestinationCode != in.DestinationCode
+	if isReassign && reasonBlank(in.Reason) {
+		return Container{}, domain.NewBizError(domain.ErrInvalidInput,
+			"reason is required when changing destination (BR-D24)")
+	}
+	clearVessel := isReassign && (c.VesselID != nil)
+
+	entry := ContainerRouteChangeLog{
+		ID:          uuid.New(),
+		ContainerID: in.ContainerID,
+		FromDC:      c.DestinationCode,
+		ToDC:        in.DestinationCode,
+		FromDest:    c.DestinationName,
+		ToDest:      in.DestinationName,
+		Reason:      in.Reason,
+		ActorID:     in.ActorID,
+		ChangedAt:   svc.now(),
+	}
+	if err := svc.s.changeDestinationTx(ctx, in.ContainerID, in.DestinationCode, in.DestinationName, clearVessel, entry); err != nil {
+		return Container{}, err
+	}
+
+	c.DestinationCode = in.DestinationCode
+	c.DestinationName = in.DestinationName
+	if clearVessel {
+		c.VesselID = nil
+		c.CutoffDate = nil
+	}
+	return c, nil
+}
+
+func (svc *service) ListRouteLog(ctx context.Context, containerID uuid.UUID) ([]ContainerRouteChangeLog, error) {
+	if containerID == uuid.Nil {
+		return nil, domain.NewBizError(domain.ErrInvalidInput, "container_id is required")
+	}
+	if _, err := svc.s.selectContainerByID(ctx, containerID); err != nil {
+		return nil, err
+	}
+	return svc.s.selectRouteLog(ctx, containerID)
+}

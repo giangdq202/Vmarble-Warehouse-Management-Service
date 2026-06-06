@@ -92,6 +92,15 @@ type store interface {
 	// included because they are the most urgent. Each row carries the vessel
 	// name and the aggregated CBM/line_count from container_lines.
 	selectAtRiskContainers(ctx context.Context, before time.Time) ([]AtRiskRow, error)
+
+	// changeDestinationTx atomically: updates destination_code/name, clears
+	// vessel_id + cutoff_date when clearVessel=true, and inserts the BR-D24
+	// audit row — all in a single transaction.
+	changeDestinationTx(ctx context.Context, containerID uuid.UUID, destCode, destName string, clearVessel bool, log ContainerRouteChangeLog) error
+
+	// selectRouteLog returns container_route_change_log rows for one container,
+	// newest first.
+	selectRouteLog(ctx context.Context, containerID uuid.UUID) ([]ContainerRouteChangeLog, error)
 }
 
 // txStore is the subset of operations safe to call from inside a transaction.

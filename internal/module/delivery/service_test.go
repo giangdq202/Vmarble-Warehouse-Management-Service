@@ -87,6 +87,13 @@ type mockStore struct {
 	atRiskResult []AtRiskRow
 	atRiskErr    error
 	atRiskBefore time.Time
+
+	// destination reassignment (#17)
+	changeDestErr        error
+	changeDestCalled     bool
+	changeDestClearVessel bool
+	selectRouteResult    []ContainerRouteChangeLog
+	selectRouteErr       error
 }
 
 type mockTxStore struct {
@@ -224,6 +231,16 @@ func (m *mockStore) selectShortagesForContainer(_ context.Context, _ uuid.UUID) 
 func (m *mockStore) selectAtRiskContainers(_ context.Context, before time.Time) ([]AtRiskRow, error) {
 	m.atRiskBefore = before
 	return m.atRiskResult, m.atRiskErr
+}
+
+func (m *mockStore) changeDestinationTx(_ context.Context, _ uuid.UUID, _, _ string, clearVessel bool, _ ContainerRouteChangeLog) error {
+	m.changeDestCalled = true
+	m.changeDestClearVessel = clearVessel
+	return m.changeDestErr
+}
+
+func (m *mockStore) selectRouteLog(_ context.Context, _ uuid.UUID) ([]ContainerRouteChangeLog, error) {
+	return m.selectRouteResult, m.selectRouteErr
 }
 
 func newMockTx() *mockTxStore {
@@ -1937,5 +1954,136 @@ func TestExportPackingList_EmptyLines_WritesValidXLSX(t *testing.T) {
 	}
 	if buf.Len() == 0 {
 		t.Error("expected non-empty xlsx even with no lines")
+	}
+}
+
+// ── ChangeDestination tests (#17) ────────────────────────────────────────────
+
+func TestChangeDestination_FirstAssignment_NoReasonRequired(t *testing.T) {
+	cid := uuid.New()
+	actor := uuid.New()
+
+	st := &mockStore{
+		selectByIDResult: Container{ID: cid, Status: ContainerStatusOpen},
+	}
+	svc := newSvc(st, nil, nil, nil)
+
+	out, err := svc.ChangeDestination(context.Background(), ChangeDestinationInput{
+		ContainerID:     cid,
+		DestinationCode: "DC-95",
+		DestinationName: "Patterson",
+		ActorID:         actor,
+	})
+	if err != nil {
+		t.Fatalf("ChangeDestination: %v", err)
+	}
+	if out.DestinationCode != "DC-95" {
+		t.Errorf("DestinationCode = %q, want DC-95", out.DestinationCode)
+	}
+	if !st.changeDestCalled {
+		t.Error("changeDestinationTx not called")
+	}
+	if st.changeDestClearVessel {
+		t.Error("clearVessel should be false for first assignment")
+	}
+}
+
+func TestChangeDestination_Reassign_RequiresReason(t *testing.T) {
+	cid := uuid.New()
+	actor := uuid.New()
+
+	st := &mockStore{
+		selectByIDResult: Container{
+			ID:              cid,
+			Status:          ContainerStatusLoading,
+			DestinationCode: "DC-95",
+		},
+	}
+	svc := newSvc(st, nil, nil, nil)
+
+	_, err := svc.ChangeDestination(context.Background(), ChangeDestinationInput{
+		ContainerID:     cid,
+		DestinationCode: "DC-98",
+		ActorID:         actor,
+	})
+	if err == nil {
+		t.Fatal("expected error when reassigning without reason, got nil")
+	}
+	if !errors.Is(err, domain.ErrInvalidInput) {
+		t.Errorf("error = %v, want ErrInvalidInput", err)
+	}
+}
+
+func TestChangeDestination_Reassign_WithVessel_ClearsBooking(t *testing.T) {
+	cid := uuid.New()
+	vid := uuid.New()
+	actor := uuid.New()
+	cutoff := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
+
+	st := &mockStore{
+		selectByIDResult: Container{
+			ID:              cid,
+			Status:          ContainerStatusLoading,
+			DestinationCode: "DC-95",
+			VesselID:        &vid,
+			CutoffDate:      &cutoff,
+		},
+	}
+	svc := newSvc(st, nil, nil, nil)
+
+	out, err := svc.ChangeDestination(context.Background(), ChangeDestinationInput{
+		ContainerID:     cid,
+		DestinationCode: "DC-98",
+		DestinationName: "Baltimore",
+		Reason:          "Patterson => Baltimore",
+		ActorID:         actor,
+	})
+	if err != nil {
+		t.Fatalf("ChangeDestination: %v", err)
+	}
+	if out.VesselID != nil {
+		t.Error("VesselID should be nil after destination change with vessel booking")
+	}
+	if out.CutoffDate != nil {
+		t.Error("CutoffDate should be nil after destination change")
+	}
+	if !st.changeDestClearVessel {
+		t.Error("clearVessel should be true when vessel was booked and DC changed")
+	}
+}
+
+func TestChangeDestination_SealedContainer_Rejected(t *testing.T) {
+	cid := uuid.New()
+	actor := uuid.New()
+
+	st := &mockStore{
+		selectByIDResult: Container{ID: cid, Status: ContainerStatusSealed},
+	}
+	svc := newSvc(st, nil, nil, nil)
+
+	_, err := svc.ChangeDestination(context.Background(), ChangeDestinationInput{
+		ContainerID:     cid,
+		DestinationCode: "DC-98",
+		ActorID:         actor,
+	})
+	if err == nil {
+		t.Fatal("expected error for sealed container, got nil")
+	}
+	if !errors.Is(err, domain.ErrInvalidTransition) {
+		t.Errorf("error = %v, want ErrInvalidTransition", err)
+	}
+}
+
+func TestChangeDestination_NotFound_Returns404(t *testing.T) {
+	st := &mockStore{selectByIDErr: domain.ErrNotFound}
+	svc := newSvc(st, nil, nil, nil)
+
+	_, err := svc.ChangeDestination(context.Background(), ChangeDestinationInput{
+		ContainerID:     uuid.New(),
+		DestinationCode: "DC-98",
+		ActorID:         uuid.New(),
+	})
+	if !errors.Is(err, domain.ErrNotFound) {
+		t.Errorf("error = %v, want ErrNotFound", err)
 	}
 }

@@ -1121,6 +1121,15 @@ definitions:
       vessel_name:
         type: string
     type: object
+  internal_module_delivery.ChangeDestinationInput:
+    properties:
+      destination_code:
+        type: string
+      destination_name:
+        type: string
+      reason:
+        type: string
+    type: object
   internal_module_delivery.Container:
     properties:
       code:
@@ -1132,6 +1141,10 @@ definitions:
       created_by:
         type: string
       cutoff_date:
+        type: string
+      destination_code:
+        type: string
+      destination_name:
         type: string
       fill_pct_cbm:
         type: number
@@ -1213,6 +1226,27 @@ definitions:
       superseded_by_plan:
         type: string
       superseded_by_user:
+        type: string
+    type: object
+  internal_module_delivery.ContainerRouteChangeLog:
+    properties:
+      actor_id:
+        type: string
+      changed_at:
+        type: string
+      container_id:
+        type: string
+      from_dc:
+        type: string
+      from_dest:
+        type: string
+      id:
+        type: string
+      reason:
+        type: string
+      to_dc:
+        type: string
+      to_dest:
         type: string
     type: object
   internal_module_delivery.ContainerStatusLogEntry:
@@ -3548,6 +3582,53 @@ paths:
       summary: Cancel an OPEN/LOADING container
       tags:
       - delivery
+  /api/v1/containers/{id}/change-destination:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: container id (uuid)
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: payload
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_module_delivery.ChangeDestinationInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_module_delivery.Container'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "409":
+          description: container is SEALED/SHIPPED
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Change container destination — clears vessel booking if DC changes
+        (BR-D24/D25/D26)
+      tags:
+      - delivery
   /api/v1/containers/{id}/exceptions:
     get:
       parameters:
@@ -3890,6 +3971,34 @@ paths:
       security:
       - BearerAuth: []
       summary: Reopen sealed container (admin only, requires reason)
+      tags:
+      - delivery
+  /api/v1/containers/{id}/route-log:
+    get:
+      parameters:
+      - description: container id (uuid)
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/internal_module_delivery.ContainerRouteChangeLog'
+            type: array
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Destination change audit trail for a container
       tags:
       - delivery
   /api/v1/containers/{id}/seal:
