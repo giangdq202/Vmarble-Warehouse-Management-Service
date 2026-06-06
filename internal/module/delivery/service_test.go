@@ -87,6 +87,12 @@ type mockStore struct {
 	atRiskResult []AtRiskRow
 	atRiskErr    error
 	atRiskBefore time.Time
+
+	// loader assignment (#16)
+	updateLoaderErr    error
+	updateLoaderCallID *uuid.UUID
+	selectLoaderResult []ContainerLoaderLog
+	selectLoaderErr    error
 }
 
 type mockTxStore struct {
@@ -224,6 +230,16 @@ func (m *mockStore) selectShortagesForContainer(_ context.Context, _ uuid.UUID) 
 func (m *mockStore) selectAtRiskContainers(_ context.Context, before time.Time) ([]AtRiskRow, error) {
 	m.atRiskBefore = before
 	return m.atRiskResult, m.atRiskErr
+}
+
+func (m *mockStore) updateContainerLoader(_ context.Context, containerID uuid.UUID, loaderID *uuid.UUID, _ ContainerLoaderLog) error {
+	m.updateLoaderCallID = &containerID
+	_ = loaderID
+	return m.updateLoaderErr
+}
+
+func (m *mockStore) selectLoaderLog(_ context.Context, _ uuid.UUID) ([]ContainerLoaderLog, error) {
+	return m.selectLoaderResult, m.selectLoaderErr
 }
 
 func newMockTx() *mockTxStore {
@@ -1858,5 +1874,122 @@ func TestListAtRisk_DefaultDays_UsedWhenZero(t *testing.T) {
 	wantBefore := now.AddDate(0, 0, atRiskDefaultDays)
 	if !st.atRiskBefore.Equal(wantBefore) {
 		t.Errorf("before = %v, want %v (default %d days)", st.atRiskBefore, wantBefore, atRiskDefaultDays)
+	}
+}
+
+// ── AssignLoader tests (#16) ─────────────────────────────────────────────────
+
+func TestAssignLoader_FirstAssignment_NoReasonRequired(t *testing.T) {
+	cid := uuid.New()
+	loaderID := uuid.New()
+	actor := uuid.New()
+
+	st := &mockStore{
+		selectByIDResult: Container{ID: cid, Status: ContainerStatusOpen},
+	}
+	svc := newSvc(st, nil, nil, nil)
+
+	out, err := svc.AssignLoader(context.Background(), AssignLoaderInput{
+		ContainerID: cid,
+		LoaderID:    &loaderID,
+		Reason:      "",
+		AssignedBy:  actor,
+	})
+	if err != nil {
+		t.Fatalf("AssignLoader: %v", err)
+	}
+	if out.LoaderID == nil || *out.LoaderID != loaderID {
+		t.Errorf("LoaderID = %v, want %v", out.LoaderID, loaderID)
+	}
+	if st.updateLoaderCallID == nil || *st.updateLoaderCallID != cid {
+		t.Error("updateContainerLoader not called with correct container_id")
+	}
+}
+
+func TestAssignLoader_Reassign_RequiresReason(t *testing.T) {
+	cid := uuid.New()
+	oldLoader := uuid.New()
+	newLoader := uuid.New()
+	actor := uuid.New()
+
+	st := &mockStore{
+		selectByIDResult: Container{ID: cid, Status: ContainerStatusLoading, LoaderID: &oldLoader},
+	}
+	svc := newSvc(st, nil, nil, nil)
+
+	_, err := svc.AssignLoader(context.Background(), AssignLoaderInput{
+		ContainerID: cid,
+		LoaderID:    &newLoader,
+		Reason:      "",
+		AssignedBy:  actor,
+	})
+	if err == nil {
+		t.Fatal("expected error for reassignment without reason, got nil")
+	}
+	if !errors.Is(err, domain.ErrInvalidInput) {
+		t.Errorf("error = %v, want ErrInvalidInput", err)
+	}
+}
+
+func TestAssignLoader_Reassign_WithReason_WritesAudit(t *testing.T) {
+	cid := uuid.New()
+	oldLoader := uuid.New()
+	newLoader := uuid.New()
+	actor := uuid.New()
+
+	st := &mockStore{
+		selectByIDResult: Container{ID: cid, Status: ContainerStatusLoading, LoaderID: &oldLoader},
+	}
+	svc := newSvc(st, nil, nil, nil)
+
+	out, err := svc.AssignLoader(context.Background(), AssignLoaderInput{
+		ContainerID: cid,
+		LoaderID:    &newLoader,
+		Reason:      "LINH => THUY",
+		AssignedBy:  actor,
+	})
+	if err != nil {
+		t.Fatalf("AssignLoader: %v", err)
+	}
+	if out.LoaderID == nil || *out.LoaderID != newLoader {
+		t.Errorf("LoaderID = %v, want %v", out.LoaderID, newLoader)
+	}
+}
+
+func TestAssignLoader_Unassign_ClearsLoader(t *testing.T) {
+	cid := uuid.New()
+	existing := uuid.New()
+	actor := uuid.New()
+
+	st := &mockStore{
+		selectByIDResult: Container{ID: cid, Status: ContainerStatusLoading, LoaderID: &existing},
+	}
+	svc := newSvc(st, nil, nil, nil)
+
+	out, err := svc.AssignLoader(context.Background(), AssignLoaderInput{
+		ContainerID: cid,
+		LoaderID:    nil,
+		Reason:      "",
+		AssignedBy:  actor,
+	})
+	if err != nil {
+		t.Fatalf("AssignLoader: %v", err)
+	}
+	if out.LoaderID != nil {
+		t.Errorf("LoaderID = %v, want nil after unassign", out.LoaderID)
+	}
+}
+
+func TestAssignLoader_ContainerNotFound_Returns404(t *testing.T) {
+	st := &mockStore{selectByIDErr: domain.ErrNotFound}
+	svc := newSvc(st, nil, nil, nil)
+
+	_, err := svc.AssignLoader(context.Background(), AssignLoaderInput{
+		ContainerID: uuid.New(),
+		LoaderID:    nil,
+		AssignedBy:  uuid.New(),
+	})
+	if !errors.Is(err, domain.ErrNotFound) {
+		t.Errorf("error = %v, want ErrNotFound", err)
 	}
 }

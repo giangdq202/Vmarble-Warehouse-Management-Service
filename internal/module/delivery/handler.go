@@ -39,6 +39,10 @@ func (h *Handler) Register(rg *gin.RouterGroup) {
 	rg.POST("/containers/:id/ship", auth.RequirePlannerUp(), h.ship)
 	rg.POST("/containers/:id/cancel", auth.RequirePlannerUp(), h.cancel)
 
+	// Loader assignment (#16 / BR-D21/22/23).
+	rg.POST("/containers/:id/assign-loader", auth.RequirePlannerUp(), h.assignLoader)
+	rg.GET("/containers/:id/loader-log", auth.RequirePlannerUp(), h.listLoaderLog)
+
 	// Loading plans (#301). Upload requires the planner persona; approve is
 	// admin-only because it locks the version that #291's VERIFY-mode kiosk
 	// reconciles scans against.
@@ -88,12 +92,21 @@ func (h *Handler) create(c *gin.Context) {
 // @Param        search          query  string  false  "ILIKE on container code"
 // @Param        status          query  string  false  "filter by status"
 // @Param        container_type  query  string  false  "20GP / 40GP / 40HC"
+// @Param        loader_id       query  string  false  "filter by assigned loader (uuid)"
 // @Success      200  {object}  httpkit.PagedResult[Container]
 // @Security     BearerAuth
 // @Router       /api/v1/containers [get]
 func (h *Handler) list(c *gin.Context) {
 	p := httpkit.BindPageParams(c)
 	f := ContainerListFilter{Status: c.Query("status"), ContainerType: c.Query("container_type")}
+	if raw := c.Query("loader_id"); raw != "" {
+		lid, err := uuid.Parse(raw)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid loader_id"})
+			return
+		}
+		f.LoaderID = &lid
+	}
 	res, err := h.svc.ListContainers(c.Request.Context(), p, f)
 	if err != nil {
 		httpkit.Error(c, err)
@@ -668,4 +681,64 @@ func (h *Handler) listAtRisk(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, rows)
+}
+
+// assignLoader godoc
+//
+// @Summary      Assign or reassign a loader to a container (BR-D21/D22/D23)
+// @Description  Sets loader_id on the container and writes an audit row. When the
+// @Description  container already has a different loader (reassignment), reason is
+// @Description  mandatory (BR-D22). Send loader_id=null to unassign.
+// @Tags         delivery
+// @Accept       json
+// @Produce      json
+// @Param        id    path      string             true  "container id (uuid)"
+// @Param        body  body      AssignLoaderInput  true  "payload"
+// @Success      200   {object}  Container
+// @Failure      400   {object}  map[string]string
+// @Failure      404   {object}  map[string]string
+// @Security     BearerAuth
+// @Router       /api/v1/containers/{id}/assign-loader [post]
+func (h *Handler) assignLoader(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+	var in AssignLoaderInput
+	if !httpkit.Bind(c, &in) {
+		return
+	}
+	in.ContainerID = id
+	in.AssignedBy = callerID(c)
+	out, err := h.svc.AssignLoader(c.Request.Context(), in)
+	if err != nil {
+		httpkit.Error(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, out)
+}
+
+// listLoaderLog godoc
+//
+// @Summary      Loader assignment audit trail for a container
+// @Tags         delivery
+// @Produce      json
+// @Param        id   path      string  true  "container id (uuid)"
+// @Success      200  {array}   ContainerLoaderLog
+// @Failure      404  {object}  map[string]string
+// @Security     BearerAuth
+// @Router       /api/v1/containers/{id}/loader-log [get]
+func (h *Handler) listLoaderLog(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+	entries, err := h.svc.ListLoaderLog(c.Request.Context(), id)
+	if err != nil {
+		httpkit.Error(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, entries)
 }

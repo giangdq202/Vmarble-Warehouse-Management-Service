@@ -106,8 +106,9 @@ func (s *pgStore) selectContainersPaged(ctx context.Context, p httpkit.PageParam
 		`SELECT COUNT(*) FROM containers
 		  WHERE ($1::text = '' OR status = $1)
 		    AND ($2::text = '' OR container_type = $2)
-		    AND ($3::text = '' OR code ILIKE $3)`,
-		f.Status, f.ContainerType, search,
+		    AND ($3::text = '' OR code ILIKE $3)
+		    AND ($4::uuid IS NULL OR loader_id = $4)`,
+		f.Status, f.ContainerType, search, f.LoaderID,
 	).Scan(&total); err != nil {
 		return nil, 0, err
 	}
@@ -117,9 +118,10 @@ func (s *pgStore) selectContainersPaged(ctx context.Context, p httpkit.PageParam
 		  WHERE ($1::text = '' OR status = $1)
 		    AND ($2::text = '' OR container_type = $2)
 		    AND ($3::text = '' OR code ILIKE $3)
+		    AND ($4::uuid IS NULL OR loader_id = $4)
 		  ORDER BY created_at DESC, id DESC
-		 LIMIT $4 OFFSET $5`,
-		f.Status, f.ContainerType, search, p.Limit, p.Offset(),
+		 LIMIT $5 OFFSET $6`,
+		f.Status, f.ContainerType, search, f.LoaderID, p.Limit, p.Offset(),
 	)
 	if err != nil {
 		return nil, 0, err
@@ -345,7 +347,7 @@ func (t *pgTxStore) updateContainerStatus(ctx context.Context, in updateStatusIn
 
 const selectContainerCols = `
 SELECT id, code, container_type, max_cbm, max_payload_kg,
-       status, sealed_at, sealed_by, note, vessel_id, cutoff_date, created_by, created_at
+       status, sealed_at, sealed_by, note, vessel_id, cutoff_date, loader_id, created_by, created_at
   FROM containers`
 
 type rowScanner interface {
@@ -356,7 +358,7 @@ func scanContainer(r rowScanner) (Container, error) {
 	var c Container
 	var note *string
 	if err := r.Scan(&c.ID, &c.Code, &c.ContainerType, &c.MaxCBM, &c.MaxPayloadKG,
-		&c.Status, &c.SealedAt, &c.SealedBy, &note, &c.VesselID, &c.CutoffDate, &c.CreatedBy, &c.CreatedAt); err != nil {
+		&c.Status, &c.SealedAt, &c.SealedBy, &note, &c.VesselID, &c.CutoffDate, &c.LoaderID, &c.CreatedBy, &c.CreatedAt); err != nil {
 		return Container{}, err
 	}
 	c.Note = stringFromPtr(note)
@@ -941,6 +943,60 @@ func (s *pgStore) selectAtRiskContainers(ctx context.Context, before time.Time) 
 			return nil, err
 		}
 		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// ── Loader assignment (#16) ─────────────────────────────────────────────────
+
+func (s *pgStore) updateContainerLoader(ctx context.Context, containerID uuid.UUID, loaderID *uuid.UUID, log ContainerLoaderLog) error {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+
+	if _, err := tx.Exec(ctx,
+		`UPDATE containers SET loader_id = $1 WHERE id = $2`,
+		loaderID, containerID,
+	); err != nil {
+		return err
+	}
+
+	if _, err := tx.Exec(ctx,
+		`INSERT INTO container_loader_log
+		    (id, container_id, from_loader_id, to_loader_id, reason, assigned_by, assigned_at)
+		 VALUES ($1,$2,$3,$4,NULLIF($5,''),$6,$7)`,
+		log.ID, log.ContainerID, log.FromLoaderID, log.ToLoaderID,
+		log.Reason, log.AssignedBy, log.AssignedAt,
+	); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+func (s *pgStore) selectLoaderLog(ctx context.Context, containerID uuid.UUID) ([]ContainerLoaderLog, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT id, container_id, from_loader_id, to_loader_id,
+		        COALESCE(reason, ''), assigned_by, assigned_at
+		   FROM container_loader_log
+		  WHERE container_id = $1
+		  ORDER BY assigned_at DESC, id DESC`,
+		containerID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []ContainerLoaderLog
+	for rows.Next() {
+		var l ContainerLoaderLog
+		if err := rows.Scan(&l.ID, &l.ContainerID, &l.FromLoaderID, &l.ToLoaderID,
+			&l.Reason, &l.AssignedBy, &l.AssignedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, l)
 	}
 	return out, rows.Err()
 }

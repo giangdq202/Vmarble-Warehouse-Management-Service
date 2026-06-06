@@ -1254,3 +1254,57 @@ func (svc *service) logLoadingPlanAudit(ctx context.Context, in AuditLoadingPlan
 		)
 	}
 }
+
+// ── Loader assignment (#16) ─────────────────────────────────────────────────
+
+// AssignLoader sets or clears the loader on a container (BR-D21). When the
+// container already has a different loader the call is treated as a
+// reassignment and writes a container_loader_log row (BR-D22). Assigning the
+// same loader that is already set is a no-op that still writes an audit row so
+// supervisors can see every explicit confirmation. Only planner+ may call this
+// endpoint (BR-D23) — enforced by the handler middleware, not re-checked here.
+func (svc *service) AssignLoader(ctx context.Context, in AssignLoaderInput) (Container, error) {
+	if in.ContainerID == uuid.Nil {
+		return Container{}, domain.NewBizError(domain.ErrInvalidInput, "container_id is required")
+	}
+	if in.AssignedBy == uuid.Nil {
+		return Container{}, domain.NewBizError(domain.ErrInvalidInput, "assigned_by is required")
+	}
+
+	c, err := svc.s.selectContainerByID(ctx, in.ContainerID)
+	if err != nil {
+		return Container{}, err
+	}
+
+	// BR-D22: reassignment requires a reason.
+	isReassign := c.LoaderID != nil && in.LoaderID != nil && *c.LoaderID != *in.LoaderID
+	if isReassign && reasonBlank(in.Reason) {
+		return Container{}, domain.NewBizError(domain.ErrInvalidInput,
+			"reason is required when reassigning a loader (BR-D22)")
+	}
+
+	entry := ContainerLoaderLog{
+		ID:           uuid.New(),
+		ContainerID:  in.ContainerID,
+		FromLoaderID: c.LoaderID,
+		ToLoaderID:   in.LoaderID,
+		Reason:       in.Reason,
+		AssignedBy:   in.AssignedBy,
+		AssignedAt:   svc.now(),
+	}
+	if err := svc.s.updateContainerLoader(ctx, in.ContainerID, in.LoaderID, entry); err != nil {
+		return Container{}, err
+	}
+	c.LoaderID = in.LoaderID
+	return c, nil
+}
+
+func (svc *service) ListLoaderLog(ctx context.Context, containerID uuid.UUID) ([]ContainerLoaderLog, error) {
+	if containerID == uuid.Nil {
+		return nil, domain.NewBizError(domain.ErrInvalidInput, "container_id is required")
+	}
+	if _, err := svc.s.selectContainerByID(ctx, containerID); err != nil {
+		return nil, err
+	}
+	return svc.s.selectLoaderLog(ctx, containerID)
+}

@@ -1096,6 +1096,14 @@ definitions:
       weight_kg_total:
         type: number
     type: object
+  internal_module_delivery.AssignLoaderInput:
+    properties:
+      loader_id:
+        description: nil = unassign
+        type: string
+      reason:
+        type: string
+    type: object
   internal_module_delivery.AtRiskRow:
     properties:
       code:
@@ -1146,6 +1154,8 @@ definitions:
         items:
           $ref: '#/definitions/internal_module_delivery.ContainerLine'
         type: array
+      loader_id:
+        type: string
       max_cbm:
         type: number
       max_payload_kg:
@@ -1213,6 +1223,23 @@ definitions:
       superseded_by_plan:
         type: string
       superseded_by_user:
+        type: string
+    type: object
+  internal_module_delivery.ContainerLoaderLog:
+    properties:
+      assigned_at:
+        type: string
+      assigned_by:
+        type: string
+      container_id:
+        type: string
+      from_loader_id:
+        type: string
+      id:
+        type: string
+      reason:
+        type: string
+      to_loader_id:
         type: string
     type: object
   internal_module_delivery.ContainerStatusLogEntry:
@@ -3443,6 +3470,10 @@ paths:
         in: query
         name: container_type
         type: string
+      - description: filter by assigned loader (uuid)
+        in: query
+        name: loader_id
+        type: string
       produces:
       - application/json
       responses:
@@ -3513,6 +3544,50 @@ paths:
       security:
       - BearerAuth: []
       summary: Get container with lines + fill_pct
+      tags:
+      - delivery
+  /api/v1/containers/{id}/assign-loader:
+    post:
+      consumes:
+      - application/json
+      description: |-
+        Sets loader_id on the container and writes an audit row. When the
+        container already has a different loader (reassignment), reason is
+        mandatory (BR-D22). Send loader_id=null to unassign.
+      parameters:
+      - description: container id (uuid)
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: payload
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_module_delivery.AssignLoaderInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_module_delivery.Container'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Assign or reassign a loader to a container (BR-D21/D22/D23)
       tags:
       - delivery
   /api/v1/containers/{id}/cancel:
@@ -3736,6 +3811,34 @@ paths:
       security:
       - BearerAuth: []
       summary: Remove a line from a container
+      tags:
+      - delivery
+  /api/v1/containers/{id}/loader-log:
+    get:
+      parameters:
+      - description: container id (uuid)
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/internal_module_delivery.ContainerLoaderLog'
+            type: array
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Loader assignment audit trail for a container
       tags:
       - delivery
   /api/v1/containers/{id}/loading-plan:

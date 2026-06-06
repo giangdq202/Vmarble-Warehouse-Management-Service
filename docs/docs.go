@@ -872,6 +872,12 @@ const docTemplate = `{
                         "description": "20GP / 40GP / 40HC",
                         "name": "container_type",
                         "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "filter by assigned loader (uuid)",
+                        "name": "loader_id",
+                        "in": "query"
                     }
                 ],
                 "responses": {
@@ -1002,6 +1008,70 @@ const docTemplate = `{
                         "description": "OK",
                         "schema": {
                             "$ref": "#/definitions/internal_module_delivery.Container"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/containers/{id}/assign-loader": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Sets loader_id on the container and writes an audit row. When the\ncontainer already has a different loader (reassignment), reason is\nmandatory (BR-D22). Send loader_id=null to unassign.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "delivery"
+                ],
+                "summary": "Assign or reassign a loader to a container (BR-D21/D22/D23)",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "container id (uuid)",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "payload",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_module_delivery.AssignLoaderInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_module_delivery.Container"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
                         }
                     },
                     "404": {
@@ -1348,6 +1418,51 @@ const docTemplate = `{
                     },
                     "409": {
                         "description": "Conflict",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/containers/{id}/loader-log": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "delivery"
+                ],
+                "summary": "Loader assignment audit trail for a container",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "container id (uuid)",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/internal_module_delivery.ContainerLoaderLog"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -12407,6 +12522,18 @@ const docTemplate = `{
                 }
             }
         },
+        "internal_module_delivery.AssignLoaderInput": {
+            "type": "object",
+            "properties": {
+                "loader_id": {
+                    "description": "nil = unassign",
+                    "type": "string"
+                },
+                "reason": {
+                    "type": "string"
+                }
+            }
+        },
         "internal_module_delivery.AtRiskRow": {
             "type": "object",
             "properties": {
@@ -12477,6 +12604,9 @@ const docTemplate = `{
                     "items": {
                         "$ref": "#/definitions/internal_module_delivery.ContainerLine"
                     }
+                },
+                "loader_id": {
+                    "type": "string"
                 },
                 "max_cbm": {
                     "type": "number"
@@ -12579,6 +12709,32 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "superseded_by_user": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_module_delivery.ContainerLoaderLog": {
+            "type": "object",
+            "properties": {
+                "assigned_at": {
+                    "type": "string"
+                },
+                "assigned_by": {
+                    "type": "string"
+                },
+                "container_id": {
+                    "type": "string"
+                },
+                "from_loader_id": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "reason": {
+                    "type": "string"
+                },
+                "to_loader_id": {
                     "type": "string"
                 }
             }

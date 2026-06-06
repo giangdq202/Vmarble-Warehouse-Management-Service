@@ -92,6 +92,15 @@ type store interface {
 	// included because they are the most urgent. Each row carries the vessel
 	// name and the aggregated CBM/line_count from container_lines.
 	selectAtRiskContainers(ctx context.Context, before time.Time) ([]AtRiskRow, error)
+
+	// updateContainerLoader sets containers.loader_id = loaderID (nil = unassign)
+	// and inserts an audit row into container_loader_log. Runs in a single tx
+	// so the update and audit are atomic (BR-D22).
+	updateContainerLoader(ctx context.Context, containerID uuid.UUID, loaderID *uuid.UUID, log ContainerLoaderLog) error
+
+	// selectLoaderLog returns container_loader_log rows for one container,
+	// newest first.
+	selectLoaderLog(ctx context.Context, containerID uuid.UUID) ([]ContainerLoaderLog, error)
 }
 
 // txStore is the subset of operations safe to call from inside a transaction.

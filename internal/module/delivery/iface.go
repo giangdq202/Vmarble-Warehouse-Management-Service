@@ -44,6 +44,7 @@ type Container struct {
 	Note          string     `json:"note,omitempty"`
 	VesselID      *uuid.UUID `json:"vessel_id,omitempty"`
 	CutoffDate    *time.Time `json:"cutoff_date,omitempty"`
+	LoaderID      *uuid.UUID `json:"loader_id,omitempty"`
 	CreatedBy     uuid.UUID  `json:"created_by"`
 	CreatedAt     time.Time  `json:"created_at"`
 
@@ -215,6 +216,28 @@ type CancelInput struct {
 type ContainerListFilter struct {
 	Status        string
 	ContainerType string
+	LoaderID      *uuid.UUID
+}
+
+// AssignLoaderInput drives POST /containers/:id/assign-loader.
+// Reason is optional for first assignment (BR-D21) and mandatory for
+// reassignment (BR-D22). The service enforces this distinction.
+type AssignLoaderInput struct {
+	ContainerID uuid.UUID  `json:"-"`
+	LoaderID    *uuid.UUID `json:"loader_id"` // nil = unassign
+	Reason      string     `json:"reason,omitempty"`
+	AssignedBy  uuid.UUID  `json:"-"`
+}
+
+// ContainerLoaderLog is one audit row from container_loader_log (BR-D22).
+type ContainerLoaderLog struct {
+	ID           uuid.UUID  `json:"id"`
+	ContainerID  uuid.UUID  `json:"container_id"`
+	FromLoaderID *uuid.UUID `json:"from_loader_id,omitempty"`
+	ToLoaderID   *uuid.UUID `json:"to_loader_id,omitempty"`
+	Reason       string     `json:"reason,omitempty"`
+	AssignedBy   uuid.UUID  `json:"assigned_by"`
+	AssignedAt   time.Time  `json:"assigned_at"`
 }
 
 // ── Loading plans (#301) ────────────────────────────────────────────────────
@@ -429,6 +452,17 @@ type Service interface {
 	// Sorted by cutoff_date ASC so the most urgent row is first. When days <= 0
 	// the service defaults to 7.
 	ListAtRisk(ctx context.Context, days int) ([]AtRiskRow, error)
+
+	// AssignLoader sets or clears the loader on a container (BR-D21). When
+	// the container already has a different loader, the call is treated as a
+	// reassignment and writes a container_loader_log row (BR-D22). Caller
+	// must hold PlannerUp role (BR-D23) — enforced by the handler middleware,
+	// not re-checked here.
+	AssignLoader(ctx context.Context, in AssignLoaderInput) (Container, error)
+
+	// ListLoaderLog returns the full assignment audit trail for one container,
+	// newest entry first.
+	ListLoaderLog(ctx context.Context, containerID uuid.UUID) ([]ContainerLoaderLog, error)
 }
 
 // DefaultCapacityForType returns the ISO defaults for a container type. When
