@@ -4,12 +4,15 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
+	"io"
 	"log/slog"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/xuri/excelize/v2"
 
 	"github.com/vmarble/warehouse-management-service/internal/domain"
 	"github.com/vmarble/warehouse-management-service/internal/platform/auth"
@@ -1253,4 +1256,108 @@ func (svc *service) logLoadingPlanAudit(ctx context.Context, in AuditLoadingPlan
 			"error", err,
 		)
 	}
+}
+
+// ── Packing list Excel export (#18) ─────────────────────────────────────────
+
+func (svc *service) ExportPackingList(ctx context.Context, id uuid.UUID, w io.Writer) error {
+	if id == uuid.Nil {
+		return domain.NewBizError(domain.ErrInvalidInput, "container id is required")
+	}
+	c, err := svc.s.selectContainerByID(ctx, id)
+	if err != nil {
+		return err
+	}
+	if c.Status != ContainerStatusSealed {
+		return domain.NewBizError(domain.ErrPreconditionFailed,
+			fmt.Sprintf("packing list only available for SEALED containers (current status: %s)", c.Status))
+	}
+	lines, err := svc.s.selectContainerLines(ctx, id)
+	if err != nil {
+		return fmt.Errorf("select container lines: %w", err)
+	}
+	return buildPackingListXLSX(c, lines, w)
+}
+
+func buildPackingListXLSX(c Container, lines []ContainerLine, w io.Writer) error {
+	f := excelize.NewFile()
+	defer func() { _ = f.Close() }()
+
+	sheet := "Packing List"
+	if err := f.SetSheetName("Sheet1", sheet); err != nil {
+		return fmt.Errorf("rename sheet: %w", err)
+	}
+
+	bold, err := f.NewStyle(&excelize.Style{Font: &excelize.Font{Bold: true}})
+	if err != nil {
+		return fmt.Errorf("bold style: %w", err)
+	}
+
+	// ── Meta block (rows 1–4) ────────────────────────────────────────────
+	meta := []struct{ label, value string }{
+		{"Container", c.Code},
+		{"Vessel", containerVesselName(c)},
+		{"Cutoff Date", containerCutoffStr(c)},
+		{"Seal Date", containerSealDateStr(c)},
+	}
+	for i, m := range meta {
+		row := fmt.Sprintf("%d", i+1)
+		_ = f.SetCellStyle(sheet, "A"+row, "A"+row, bold)
+		_ = f.SetCellValue(sheet, "A"+row, m.label)
+		_ = f.SetCellValue(sheet, "B"+row, m.value)
+	}
+
+	// ── Column headers (row 6) ───────────────────────────────────────────
+	headers := []string{"No.", "SKU Code", "SKU Name", "Qty", "CBM Total", "Weight KG"}
+	for col, h := range headers {
+		cell, _ := excelize.CoordinatesToCellName(col+1, 6)
+		_ = f.SetCellStyle(sheet, cell, cell, bold)
+		_ = f.SetCellValue(sheet, cell, h)
+	}
+
+	// ── Data rows (from row 7) ───────────────────────────────────────────
+	for i, l := range lines {
+		row := i + 7
+		skuName := l.SKUName
+		if skuName == "" {
+			skuName = l.SKUCode
+		}
+		values := []any{i + 1, l.SKUCode, skuName, l.Qty, l.CBMTotal, l.WeightKGTotal}
+		for col, v := range values {
+			cell, _ := excelize.CoordinatesToCellName(col+1, row)
+			_ = f.SetCellValue(sheet, cell, v)
+		}
+	}
+
+	_ = f.SetColWidth(sheet, "A", "A", 6)
+	_ = f.SetColWidth(sheet, "B", "B", 16)
+	_ = f.SetColWidth(sheet, "C", "C", 32)
+	_ = f.SetColWidth(sheet, "D", "D", 8)
+	_ = f.SetColWidth(sheet, "E", "F", 14)
+
+	return f.Write(w)
+}
+
+func containerVesselName(c Container) string {
+	// VesselName is not on Container struct — vessel info is on the vessel row.
+	// cutoff_date is denormalized; vessel name is not. Return the vessel ID
+	// string as a fallback when the FE has it from context.
+	if c.VesselID != nil {
+		return c.VesselID.String()
+	}
+	return ""
+}
+
+func containerCutoffStr(c Container) string {
+	if c.CutoffDate == nil {
+		return ""
+	}
+	return c.CutoffDate.Format("2006-01-02")
+}
+
+func containerSealDateStr(c Container) string {
+	if c.SealedAt == nil {
+		return ""
+	}
+	return c.SealedAt.Format("2006-01-02")
 }
