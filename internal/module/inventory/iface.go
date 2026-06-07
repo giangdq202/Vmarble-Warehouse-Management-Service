@@ -92,6 +92,32 @@ type RemnantFilter struct {
 	Status domain.RemnantStatus
 }
 
+// RemnantAgingLevel classifies how urgent an AVAILABLE remnant's age is.
+type RemnantAgingLevel string
+
+const (
+	RemnantAgingOK      RemnantAgingLevel = "OK"
+	RemnantAgingAtRisk  RemnantAgingLevel = "AT_RISK"   // age >= warn_days
+	RemnantAgingExpired RemnantAgingLevel = "EXPIRED"   // age >= expire_days (candidate for auto-expire)
+)
+
+// RemnantAgingRow is one AVAILABLE remnant enriched with age metadata.
+type RemnantAgingRow struct {
+	Remnant  Remnant           `json:"remnant"`
+	AgeDays  int               `json:"age_days"`
+	Level    RemnantAgingLevel `json:"level"`
+}
+
+// RemnantAgingSummary is the full response for GET /remnants/aging.
+type RemnantAgingSummary struct {
+	WarnDays   int               `json:"warn_days"`
+	ExpireDays int               `json:"expire_days"`
+	Rows       []RemnantAgingRow `json:"rows"`
+	TotalOK    int               `json:"total_ok"`
+	TotalAtRisk int              `json:"total_at_risk"`
+	TotalExpired int             `json:"total_expired"`
+}
+
 // StorageLocation represents a physical shelf / bin where remnants are stored.
 type StorageLocation struct {
 	ID        uuid.UUID `json:"id"`
@@ -369,6 +395,17 @@ type Service interface {
 	// timestamp is older than `before` back to AVAILABLE. Returns the number
 	// of remnants released. Used by the background auto-release task.
 	ReleaseExpiredAllocations(ctx context.Context, before time.Time) (int, error)
+
+	// GetRemnantAging returns a list of AVAILABLE remnants with their age in
+	// days. Remnants with age_days >= expireDays are tagged as expired
+	// candidates; those with age_days >= warnDays (but < expireDays) are
+	// tagged as at-risk. Both thresholds default when <= 0 (warn=60, expire=90).
+	GetRemnantAging(ctx context.Context, warnDays, expireDays int) (RemnantAgingSummary, error)
+
+	// ExpireStaleRemnants flips AVAILABLE remnants older than ageDays to
+	// EXPIRED. Returns the count updated. Intended to be called by a daily
+	// admin trigger or cron endpoint (RequireAdminOnly).
+	ExpireStaleRemnants(ctx context.Context, ageDays int) (int, error)
 
 	// ListStorageLocations returns all active storage locations.
 	ListStorageLocations(ctx context.Context) ([]StorageLocation, error)

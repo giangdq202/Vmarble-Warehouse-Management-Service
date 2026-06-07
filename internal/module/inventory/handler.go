@@ -39,6 +39,8 @@ func (h *Handler) Register(rg *gin.RouterGroup) {
 	inv.GET("/cutting-records", h.listCuttingRecords)
 	inv.GET("/remnants", h.listRemnants)
 	inv.GET("/remnants/suggestions", h.suggestRemnants)
+	inv.GET("/remnants/aging", h.getRemnantAging)
+	inv.POST("/remnants/expire", auth.RequireAdminOnly(), h.expireStaleRemnants)
 	inv.GET("/remnants/:id", h.getRemnant)
 	inv.GET("/remnants/:id/lineage", h.getRemnantLineage)
 	inv.GET("/remnants/:id/label.pdf", h.getRemnantLabelPDF)
@@ -405,6 +407,50 @@ func (h *Handler) suggestRemnants(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, suggestions)
+}
+
+// getRemnantAging godoc
+//
+// @Summary      Get remnant aging report
+// @Description  Returns all AVAILABLE remnants with age in days, classified as OK / AT_RISK / EXPIRED.
+// @Tags         inventory
+// @Produce      json
+// @Param        warn_days    query  int  false  "days before AT_RISK (default 60)"
+// @Param        expire_days  query  int  false  "days before EXPIRED candidate (default 90)"
+// @Security     BearerAuth
+// @Success      200  {object}  RemnantAgingSummary
+// @Failure      400  {object}  map[string]string
+// @Router       /api/v1/inventory/remnants/aging [get]
+func (h *Handler) getRemnantAging(c *gin.Context) {
+	warnDays, _ := strconv.Atoi(c.DefaultQuery("warn_days", "0"))
+	expireDays, _ := strconv.Atoi(c.DefaultQuery("expire_days", "0"))
+	summary, err := h.svc.GetRemnantAging(c.Request.Context(), warnDays, expireDays)
+	if err != nil {
+		httpkit.Error(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, summary)
+}
+
+// expireStaleRemnants godoc
+//
+// @Summary      Expire stale AVAILABLE remnants (admin)
+// @Description  Flips AVAILABLE remnants older than age_days to EXPIRED. Default 90 days.
+// @Tags         inventory
+// @Produce      json
+// @Param        age_days  query  int  false  "age threshold in days (default 90)"
+// @Security     BearerAuth
+// @Success      200  {object}  map[string]interface{}
+// @Failure      400  {object}  map[string]string
+// @Router       /api/v1/inventory/remnants/expire [post]
+func (h *Handler) expireStaleRemnants(c *gin.Context) {
+	ageDays, _ := strconv.Atoi(c.DefaultQuery("age_days", "0"))
+	n, err := h.svc.ExpireStaleRemnants(c.Request.Context(), ageDays)
+	if err != nil {
+		httpkit.Error(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"expired_count": n})
 }
 
 // getRemnantLineage godoc

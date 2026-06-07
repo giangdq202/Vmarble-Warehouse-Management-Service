@@ -126,6 +126,13 @@ type store interface {
 	// are cleared). Returns the number of rows updated.
 	releaseExpiredAllocations(ctx context.Context, before time.Time) (int64, error)
 
+	// selectRemnantAging returns all AVAILABLE remnants with their age in days,
+	// ordered oldest first.
+	selectRemnantAging(ctx context.Context) ([]remnantAgingRow, error)
+	// expireStaleRemnants sets status=EXPIRED on all AVAILABLE remnants older
+	// than ageDays. Returns the number of rows updated.
+	expireStaleRemnants(ctx context.Context, ageDays int) (int64, error)
+
 	// ── BR-INV01..06: QC + supplier claim ────────────────────────────────
 
 	// qcPassLotAtomically transitions every PENDING_QC sheet of the lot to
@@ -150,6 +157,13 @@ type rejectLotOp struct {
 	LotID     uuid.UUID
 	Qty       int
 	Rejection MaterialRejection
+}
+
+// remnantAgingRow is the raw result from selectRemnantAging — a Remnant plus
+// its computed age so the service can classify it without a second query.
+type remnantAgingRow struct {
+	Remnant Remnant
+	AgeDays int
 }
 
 // updateClaimRow is the post-validation payload handed to the store.

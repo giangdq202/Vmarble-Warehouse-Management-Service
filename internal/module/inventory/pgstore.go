@@ -1018,6 +1018,75 @@ func (s *pgStore) releaseExpiredAllocations(ctx context.Context, before time.Tim
 	return tag.RowsAffected(), nil
 }
 
+func (s *pgStore) selectRemnantAging(ctx context.Context) ([]remnantAgingRow, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT
+			r.id, r.parent_board_id, r.parent_remnant_id,
+			r.length_mm, r.width_mm, r.status, r.shape_type,
+			r.allocated_to_wo_id, r.allocated_at,
+			r.supplier_code, r.lot_batch, r.grain_pattern, r.quality_grade,
+			r.bounding_box_length_mm, r.bounding_box_width_mm, r.bin_location_id, r.created_at,
+			EXTRACT(DAY FROM (NOW() - r.created_at))::int AS age_days
+		 FROM remnants r
+		 WHERE r.status = 'AVAILABLE'
+		 ORDER BY r.created_at ASC`)
+	if err != nil {
+		return nil, fmt.Errorf("select remnant aging: %w", err)
+	}
+	defer rows.Close()
+
+	var out []remnantAgingRow
+	for rows.Next() {
+		var r Remnant
+		var ageDays int
+		var allocatedAt sql.NullTime
+		var supplierCode, lotBatch, grainPattern, qualityGrade sql.NullString
+		var bbLengthMM, bbWidthMM sql.NullInt32
+		var binLocationID uuid.NullUUID
+
+		if err := rows.Scan(
+			&r.ID, &r.ParentBoardID, &r.ParentRemnantID,
+			&r.Dimensions.LengthMM, &r.Dimensions.WidthMM,
+			&r.Status, &r.ShapeType, &r.AllocatedToWO, &allocatedAt,
+			&supplierCode, &lotBatch, &grainPattern, &qualityGrade,
+			&bbLengthMM, &bbWidthMM, &binLocationID, &r.CreatedAt,
+			&ageDays,
+		); err != nil {
+			return nil, fmt.Errorf("scan remnant aging row: %w", err)
+		}
+		r.SupplierCode = nullStringPtr(supplierCode)
+		r.LotBatch = nullStringPtr(lotBatch)
+		r.GrainPattern = nullStringPtr(grainPattern)
+		r.QualityGrade = nullStringPtr(qualityGrade)
+		r.BoundingBoxLengthMM = nullInt32Ptr(bbLengthMM)
+		r.BoundingBoxWidthMM = nullInt32Ptr(bbWidthMM)
+		if binLocationID.Valid {
+			v := binLocationID.UUID
+			r.BinLocationID = &v
+		}
+		if allocatedAt.Valid {
+			t := allocatedAt.Time
+			r.AllocatedAt = &t
+		}
+		out = append(out, remnantAgingRow{Remnant: r, AgeDays: ageDays})
+	}
+	return out, rows.Err()
+}
+
+func (s *pgStore) expireStaleRemnants(ctx context.Context, ageDays int) (int64, error) {
+	tag, err := s.pool.Exec(ctx,
+		`UPDATE remnants
+		 SET status = $1
+		 WHERE status = $2
+		   AND created_at < NOW() - ($3 || ' days')::INTERVAL`,
+		string(domain.RemnantExpired), string(domain.RemnantAvailable), ageDays,
+	)
+	if err != nil {
+		return 0, fmt.Errorf("expire stale remnants: %w", err)
+	}
+	return tag.RowsAffected(), nil
+}
+
 func (s *pgStore) selectActiveStorageLocations(ctx context.Context) ([]StorageLocation, error) {
 	rows, err := s.pool.Query(ctx,
 		`SELECT id, zone, rack, shelf, label, barcode, is_active, created_at

@@ -67,6 +67,7 @@ const (
 	RemnantAllocated RemnantStatus = "ALLOCATED"
 	RemnantConsumed  RemnantStatus = "CONSUMED"
 	RemnantWaste     RemnantStatus = "WASTE"
+	RemnantExpired   RemnantStatus = "EXPIRED"
 )
 
 // ── Production Plan status ──────────────────────────────────

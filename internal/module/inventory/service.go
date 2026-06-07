@@ -606,6 +606,65 @@ func (s *service) ReleaseExpiredAllocations(ctx context.Context, before time.Tim
 }
 
 const (
+	defaultAgingWarnDays   = 60
+	defaultAgingExpireDays = 90
+)
+
+func (s *service) GetRemnantAging(ctx context.Context, warnDays, expireDays int) (RemnantAgingSummary, error) {
+	if warnDays <= 0 {
+		warnDays = defaultAgingWarnDays
+	}
+	if expireDays <= 0 {
+		expireDays = defaultAgingExpireDays
+	}
+	if warnDays >= expireDays {
+		return RemnantAgingSummary{}, domain.NewBizError(domain.ErrInvalidInput,
+			"warn_days must be less than expire_days")
+	}
+
+	raw, err := s.st.selectRemnantAging(ctx)
+	if err != nil {
+		return RemnantAgingSummary{}, err
+	}
+
+	summary := RemnantAgingSummary{
+		WarnDays:   warnDays,
+		ExpireDays: expireDays,
+		Rows:       make([]RemnantAgingRow, 0, len(raw)),
+	}
+	for _, r := range raw {
+		level := RemnantAgingOK
+		switch {
+		case r.AgeDays >= expireDays:
+			level = RemnantAgingExpired
+			summary.TotalExpired++
+		case r.AgeDays >= warnDays:
+			level = RemnantAgingAtRisk
+			summary.TotalAtRisk++
+		default:
+			summary.TotalOK++
+		}
+		summary.Rows = append(summary.Rows, RemnantAgingRow{
+			Remnant: r.Remnant,
+			AgeDays: r.AgeDays,
+			Level:   level,
+		})
+	}
+	return summary, nil
+}
+
+func (s *service) ExpireStaleRemnants(ctx context.Context, ageDays int) (int, error) {
+	if ageDays <= 0 {
+		ageDays = defaultAgingExpireDays
+	}
+	n, err := s.st.expireStaleRemnants(ctx, ageDays)
+	if err != nil {
+		return 0, err
+	}
+	return int(n), nil
+}
+
+const (
 	entityTypeRemnant    = "REMNANT"
 	entityTypeBoardSheet = "BOARD_SHEET"
 	entityTypeWorkOrder  = "WORK_ORDER"

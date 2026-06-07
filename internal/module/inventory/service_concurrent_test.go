@@ -216,6 +216,12 @@ func (s *concurrentMockStore) markRemnantWasteAtomically(_ context.Context, remn
 func (s *concurrentMockStore) releaseExpiredAllocations(_ context.Context, _ time.Time) (int64, error) {
 	return 0, nil
 }
+func (s *concurrentMockStore) selectRemnantAging(_ context.Context) ([]remnantAgingRow, error) {
+	return nil, nil
+}
+func (s *concurrentMockStore) expireStaleRemnants(_ context.Context, _ int) (int64, error) {
+	return 0, nil
+}
 
 func (s *concurrentMockStore) qcPassLotAtomically(_ context.Context, _ uuid.UUID) (int, error) {
 	return 0, nil

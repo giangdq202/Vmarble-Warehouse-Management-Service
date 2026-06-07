@@ -42,12 +42,14 @@ definitions:
     - ALLOCATED
     - CONSUMED
     - WASTE
+    - EXPIRED
     type: string
     x-enum-varnames:
     - RemnantAvailable
     - RemnantAllocated
     - RemnantConsumed
     - RemnantWaste
+    - RemnantExpired
   github_com_vmarble_warehouse-management-service_internal_domain.WorkOrderStatus:
     enum:
     - PLANNED
@@ -1848,6 +1850,45 @@ definitions:
         $ref: '#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.RemnantStatus'
       supplier_code:
         type: string
+    type: object
+  internal_module_inventory.RemnantAgingLevel:
+    enum:
+    - OK
+    - AT_RISK
+    - EXPIRED
+    type: string
+    x-enum-comments:
+      RemnantAgingAtRisk: age >= warn_days
+      RemnantAgingExpired: age >= expire_days (candidate for auto-expire)
+    x-enum-varnames:
+    - RemnantAgingOK
+    - RemnantAgingAtRisk
+    - RemnantAgingExpired
+  internal_module_inventory.RemnantAgingRow:
+    properties:
+      age_days:
+        type: integer
+      level:
+        $ref: '#/definitions/internal_module_inventory.RemnantAgingLevel'
+      remnant:
+        $ref: '#/definitions/internal_module_inventory.Remnant'
+    type: object
+  internal_module_inventory.RemnantAgingSummary:
+    properties:
+      expire_days:
+        type: integer
+      rows:
+        items:
+          $ref: '#/definitions/internal_module_inventory.RemnantAgingRow'
+        type: array
+      total_at_risk:
+        type: integer
+      total_expired:
+        type: integer
+      total_ok:
+        type: integer
+      warn_days:
+        type: integer
     type: object
   internal_module_inventory.RemnantSuggestion:
     properties:
@@ -6149,6 +6190,65 @@ paths:
       security:
       - BearerAuth: []
       summary: Mark remnant as waste
+      tags:
+      - inventory
+  /api/v1/inventory/remnants/aging:
+    get:
+      description: Returns all AVAILABLE remnants with age in days, classified as
+        OK / AT_RISK / EXPIRED.
+      parameters:
+      - description: days before AT_RISK (default 60)
+        in: query
+        name: warn_days
+        type: integer
+      - description: days before EXPIRED candidate (default 90)
+        in: query
+        name: expire_days
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_module_inventory.RemnantAgingSummary'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Get remnant aging report
+      tags:
+      - inventory
+  /api/v1/inventory/remnants/expire:
+    post:
+      description: Flips AVAILABLE remnants older than age_days to EXPIRED. Default
+        90 days.
+      parameters:
+      - description: age threshold in days (default 90)
+        in: query
+        name: age_days
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Expire stale AVAILABLE remnants (admin)
       tags:
       - inventory
   /api/v1/inventory/remnants/suggestions:

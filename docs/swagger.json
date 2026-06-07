@@ -4586,6 +4586,97 @@
                 }
             }
         },
+        "/api/v1/inventory/remnants/aging": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns all AVAILABLE remnants with age in days, classified as OK / AT_RISK / EXPIRED.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "inventory"
+                ],
+                "summary": "Get remnant aging report",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "days before AT_RISK (default 60)",
+                        "name": "warn_days",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "days before EXPIRED candidate (default 90)",
+                        "name": "expire_days",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_module_inventory.RemnantAgingSummary"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/inventory/remnants/expire": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Flips AVAILABLE remnants older than age_days to EXPIRED. Default 90 days.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "inventory"
+                ],
+                "summary": "Expire stale AVAILABLE remnants (admin)",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "age threshold in days (default 90)",
+                        "name": "age_days",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/inventory/remnants/suggestions": {
             "get": {
                 "security": [
@@ -11096,13 +11187,15 @@
                 "AVAILABLE",
                 "ALLOCATED",
                 "CONSUMED",
-                "WASTE"
+                "WASTE",
+                "EXPIRED"
             ],
             "x-enum-varnames": [
                 "RemnantAvailable",
                 "RemnantAllocated",
                 "RemnantConsumed",
-                "RemnantWaste"
+                "RemnantWaste",
+                "RemnantExpired"
             ]
         },
         "github_com_vmarble_warehouse-management-service_internal_domain.WorkOrderStatus": {
@@ -13814,6 +13907,63 @@
                 },
                 "supplier_code": {
                     "type": "string"
+                }
+            }
+        },
+        "internal_module_inventory.RemnantAgingLevel": {
+            "type": "string",
+            "enum": [
+                "OK",
+                "AT_RISK",
+                "EXPIRED"
+            ],
+            "x-enum-comments": {
+                "RemnantAgingAtRisk": "age \u003e= warn_days",
+                "RemnantAgingExpired": "age \u003e= expire_days (candidate for auto-expire)"
+            },
+            "x-enum-varnames": [
+                "RemnantAgingOK",
+                "RemnantAgingAtRisk",
+                "RemnantAgingExpired"
+            ]
+        },
+        "internal_module_inventory.RemnantAgingRow": {
+            "type": "object",
+            "properties": {
+                "age_days": {
+                    "type": "integer"
+                },
+                "level": {
+                    "$ref": "#/definitions/internal_module_inventory.RemnantAgingLevel"
+                },
+                "remnant": {
+                    "$ref": "#/definitions/internal_module_inventory.Remnant"
+                }
+            }
+        },
+        "internal_module_inventory.RemnantAgingSummary": {
+            "type": "object",
+            "properties": {
+                "expire_days": {
+                    "type": "integer"
+                },
+                "rows": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_module_inventory.RemnantAgingRow"
+                    }
+                },
+                "total_at_risk": {
+                    "type": "integer"
+                },
+                "total_expired": {
+                    "type": "integer"
+                },
+                "total_ok": {
+                    "type": "integer"
+                },
+                "warn_days": {
+                    "type": "integer"
                 }
             }
         },
