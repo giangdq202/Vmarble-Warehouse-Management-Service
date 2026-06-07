@@ -111,6 +111,14 @@ type mockStore struct {
 	releaseExpiredAllocationsResult int64
 	releaseExpiredAllocationsErr    error
 
+	// selectRemnantAging
+	selectRemnantAgingResult []remnantAgingRow
+	selectRemnantAgingErr    error
+
+	// expireStaleRemnants
+	expireStaleRemnantsResult int64
+	expireStaleRemnantsErr    error
+
 	// BR-INV01..06: QC + supplier claim
 	qcPassLotResult       int
 	qcPassLotErr          error
@@ -250,6 +258,12 @@ func (m *mockStore) preAssignSheet(_ context.Context, _ uuid.UUID, _ uuid.UUID) 
 }
 func (m *mockStore) releaseExpiredAllocations(_ context.Context, _ time.Time) (int64, error) {
 	return m.releaseExpiredAllocationsResult, m.releaseExpiredAllocationsErr
+}
+func (m *mockStore) selectRemnantAging(_ context.Context) ([]remnantAgingRow, error) {
+	return m.selectRemnantAgingResult, m.selectRemnantAgingErr
+}
+func (m *mockStore) expireStaleRemnants(_ context.Context, _ int) (int64, error) {
+	return m.expireStaleRemnantsResult, m.expireStaleRemnantsErr
 }
 
 // ── BR-INV01..06 stubs (overridden per-test as needed) ──────────────────────
@@ -5442,5 +5456,106 @@ func TestSuggestRemnants_InvalidStrategy_Returns400(t *testing.T) {
 	var biz *domain.BizError
 	if !errors.As(err, &biz) || !errors.Is(biz.Sentinel, domain.ErrInvalidInput) {
 		t.Errorf("expected ErrInvalidInput, got %v", err)
+	}
+}
+
+// ── GetRemnantAging / ExpireStaleRemnants ─────────────────────────────────────
+
+func makeAgingRemnant(id string, ageDays int) remnantAgingRow {
+	return remnantAgingRow{
+		Remnant: Remnant{
+			ID:         uuid.MustParse(id),
+			Dimensions: domain.Dimension{LengthMM: 400, WidthMM: 300},
+			Status:     domain.RemnantAvailable,
+		},
+		AgeDays: ageDays,
+	}
+}
+
+func TestGetRemnantAging_91Days_LevelExpired(t *testing.T) {
+	st := &mockStore{
+		selectRemnantAgingResult: []remnantAgingRow{
+			makeAgingRemnant("00000000-0000-0000-0000-000000000001", 91),
+		},
+	}
+	svc := NewService(st, nil)
+	summary, err := svc.GetRemnantAging(context.Background(), 0, 0)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(summary.Rows) != 1 {
+		t.Fatalf("len(rows) = %d, want 1", len(summary.Rows))
+	}
+	if summary.Rows[0].Level != RemnantAgingExpired {
+		t.Errorf("level = %q, want EXPIRED for 91-day remnant", summary.Rows[0].Level)
+	}
+	if summary.TotalExpired != 1 {
+		t.Errorf("TotalExpired = %d, want 1", summary.TotalExpired)
+	}
+	if summary.TotalOK != 0 || summary.TotalAtRisk != 0 {
+		t.Errorf("unexpected non-zero OK/AtRisk counts")
+	}
+}
+
+func TestGetRemnantAging_30Days_LevelOK(t *testing.T) {
+	st := &mockStore{
+		selectRemnantAgingResult: []remnantAgingRow{
+			makeAgingRemnant("00000000-0000-0000-0000-000000000002", 30),
+		},
+	}
+	svc := NewService(st, nil)
+	summary, err := svc.GetRemnantAging(context.Background(), 0, 0)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if summary.Rows[0].Level != RemnantAgingOK {
+		t.Errorf("level = %q, want OK for 30-day remnant", summary.Rows[0].Level)
+	}
+	if summary.TotalOK != 1 {
+		t.Errorf("TotalOK = %d, want 1", summary.TotalOK)
+	}
+}
+
+func TestGetRemnantAging_AtRiskBoundary(t *testing.T) {
+	st := &mockStore{
+		selectRemnantAgingResult: []remnantAgingRow{
+			makeAgingRemnant("00000000-0000-0000-0000-000000000003", 60),
+		},
+	}
+	svc := NewService(st, nil)
+	summary, err := svc.GetRemnantAging(context.Background(), 60, 90)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if summary.Rows[0].Level != RemnantAgingAtRisk {
+		t.Errorf("level = %q, want AT_RISK for 60-day remnant with warn_days=60", summary.Rows[0].Level)
+	}
+	if summary.TotalAtRisk != 1 {
+		t.Errorf("TotalAtRisk = %d, want 1", summary.TotalAtRisk)
+	}
+}
+
+func TestGetRemnantAging_WarnDaysGteExpireDays_ReturnsError(t *testing.T) {
+	st := &mockStore{}
+	svc := NewService(st, nil)
+	_, err := svc.GetRemnantAging(context.Background(), 90, 60)
+	if err == nil {
+		t.Fatal("expected error when warn_days >= expire_days")
+	}
+	var biz *domain.BizError
+	if !errors.As(err, &biz) || !errors.Is(biz.Sentinel, domain.ErrInvalidInput) {
+		t.Errorf("expected ErrInvalidInput, got %v", err)
+	}
+}
+
+func TestExpireStaleRemnants_ReturnsCount(t *testing.T) {
+	st := &mockStore{expireStaleRemnantsResult: 5}
+	svc := NewService(st, nil)
+	n, err := svc.ExpireStaleRemnants(context.Background(), 90)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if n != 5 {
+		t.Errorf("n = %d, want 5", n)
 	}
 }
