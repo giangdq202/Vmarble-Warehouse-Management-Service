@@ -4486,14 +4486,14 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Returns up to ` + "`" + `limit` + "`" + ` AVAILABLE remnants ranked by Best Fit (smallest area) + FIFO (oldest first). Each suggestion includes the remnant's storage location when available.",
+                "description": "Returns up to ` + "`" + `limit` + "`" + ` AVAILABLE remnants ranked by the chosen strategy (best_fit or fifo). Each suggestion includes age_days, score, reason, and storage location when available.",
                 "produces": [
                     "application/json"
                 ],
                 "tags": [
                     "inventory"
                 ],
-                "summary": "Suggest best-fit remnants for a required dimension",
+                "summary": "Suggest remnants for a required dimension",
                 "parameters": [
                     {
                         "type": "integer",
@@ -4513,6 +4513,22 @@ const docTemplate = `{
                         "type": "integer",
                         "description": "max results (default 3, max 10)",
                         "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "enum": [
+                            "best_fit",
+                            "fifo"
+                        ],
+                        "type": "string",
+                        "description": "best_fit or fifo (default: material config → best_fit)",
+                        "name": "strategy",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "restrict to remnants from this material",
+                        "name": "material_id",
                         "in": "query"
                     }
                 ],
@@ -13656,14 +13672,23 @@ const docTemplate = `{
         "internal_module_inventory.RemnantSuggestion": {
             "type": "object",
             "properties": {
+                "age_days": {
+                    "type": "integer"
+                },
                 "location": {
                     "$ref": "#/definitions/internal_module_inventory.StorageLocation"
                 },
                 "rank": {
                     "type": "integer"
                 },
+                "reason": {
+                    "type": "string"
+                },
                 "remnant": {
                     "$ref": "#/definitions/internal_module_inventory.Remnant"
+                },
+                "score": {
+                    "type": "number"
                 }
             }
         },

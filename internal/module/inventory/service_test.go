@@ -130,8 +130,13 @@ type mockStore struct {
 	rejectionReportErr    error
 
 	// selectTopRemnantSuggestions
-	selectTopRemnantSuggestionsResult []RemnantSuggestion
-	selectTopRemnantSuggestionsErr    error
+	selectTopRemnantSuggestionsResult   []RemnantSuggestion
+	selectTopRemnantSuggestionsErr      error
+	selectTopRemnantSuggestionsStrategy RemnantStrategy
+
+	// selectMaterialStrategy
+	selectMaterialStrategyResult RemnantStrategy
+	selectMaterialStrategyErr    error
 
 	// selectOverflowAreas
 	selectOverflowRemnantArea int64
@@ -283,8 +288,12 @@ func (m *mockStore) insertRemnant(_ context.Context, _ Remnant) error {
 func (m *mockStore) selectAvailableRemnantsByMinDimension(_ context.Context, _ domain.Dimension) ([]Remnant, error) {
 	return m.selectAvailableRemnantsResult, m.selectAvailableRemnantsErr
 }
-func (m *mockStore) selectTopRemnantSuggestions(_ context.Context, _ domain.Dimension, _ int) ([]RemnantSuggestion, error) {
+func (m *mockStore) selectTopRemnantSuggestions(_ context.Context, _ domain.Dimension, _ int, strategy RemnantStrategy, _ *uuid.UUID) ([]RemnantSuggestion, error) {
+	m.selectTopRemnantSuggestionsStrategy = strategy
 	return m.selectTopRemnantSuggestionsResult, m.selectTopRemnantSuggestionsErr
+}
+func (m *mockStore) selectMaterialStrategy(_ context.Context, _ uuid.UUID) (RemnantStrategy, error) {
+	return m.selectMaterialStrategyResult, m.selectMaterialStrategyErr
 }
 func (m *mockStore) selectRemnantsByBoardSheet(_ context.Context, _ uuid.UUID) ([]Remnant, error) {
 	return m.selectRemnantsByBoardSheetResult, m.selectRemnantsByBoardSheetErr
@@ -5337,5 +5346,101 @@ func TestRecordCut_BRK06_ExactlyAtThreshold_KeepsRemnant(t *testing.T) {
 	}
 	if st.recordCutAtomicallyOp.NewRemnant == nil {
 		t.Fatal("op.NewRemnant must be non-nil when remnant matches threshold exactly")
+	}
+}
+
+// ── SuggestRemnants ───────────────────────────────────────────────────────────
+
+func TestSuggestRemnants_BestFit_PicksSmallestFitting(t *testing.T) {
+	small := RemnantSuggestion{
+		Remnant: Remnant{Dimensions: domain.Dimension{LengthMM: 300, WidthMM: 200}, Status: domain.RemnantAvailable},
+		Rank:    1,
+	}
+	large := RemnantSuggestion{
+		Remnant: Remnant{Dimensions: domain.Dimension{LengthMM: 600, WidthMM: 400}, Status: domain.RemnantAvailable},
+		Rank:    2,
+	}
+	st := &mockStore{
+		selectTopRemnantSuggestionsResult: []RemnantSuggestion{small, large},
+	}
+	svc := NewService(st, nil)
+	got, err := svc.SuggestRemnants(context.Background(), SuggestRemnantsInput{
+		RequiredDimension: domain.Dimension{LengthMM: 200, WidthMM: 150},
+		Strategy:          RemnantStrategyBestFit,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("len = %d, want 2", len(got))
+	}
+	if st.selectTopRemnantSuggestionsStrategy != RemnantStrategyBestFit {
+		t.Errorf("strategy passed to store = %q, want best_fit", st.selectTopRemnantSuggestionsStrategy)
+	}
+	if got[0].Score <= got[1].Score {
+		t.Errorf("rank-1 score (%f) should be higher than rank-2 (%f) for best fit", got[0].Score, got[1].Score)
+	}
+	if got[0].Reason == "" {
+		t.Error("Reason must not be empty")
+	}
+}
+
+func TestSuggestRemnants_FIFO_PassesStrategyToStore(t *testing.T) {
+	st := &mockStore{
+		selectTopRemnantSuggestionsResult: []RemnantSuggestion{
+			{Remnant: Remnant{Dimensions: domain.Dimension{LengthMM: 400, WidthMM: 300}}, AgeDays: 10, Rank: 1},
+		},
+	}
+	svc := NewService(st, nil)
+	got, err := svc.SuggestRemnants(context.Background(), SuggestRemnantsInput{
+		RequiredDimension: domain.Dimension{LengthMM: 200, WidthMM: 150},
+		Strategy:          RemnantStrategyFIFO,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if st.selectTopRemnantSuggestionsStrategy != RemnantStrategyFIFO {
+		t.Errorf("strategy passed to store = %q, want fifo", st.selectTopRemnantSuggestionsStrategy)
+	}
+	if len(got) != 1 {
+		t.Fatalf("len = %d, want 1", len(got))
+	}
+	if got[0].Reason == "" {
+		t.Error("Reason must not be empty for FIFO")
+	}
+}
+
+func TestSuggestRemnants_NoStrategy_ResolvesFromMaterial(t *testing.T) {
+	matID := uuid.New()
+	st := &mockStore{
+		selectMaterialStrategyResult:      RemnantStrategyFIFO,
+		selectTopRemnantSuggestionsResult: []RemnantSuggestion{},
+	}
+	svc := NewService(st, nil)
+	_, err := svc.SuggestRemnants(context.Background(), SuggestRemnantsInput{
+		RequiredDimension: domain.Dimension{LengthMM: 100, WidthMM: 100},
+		MaterialID:        &matID,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if st.selectTopRemnantSuggestionsStrategy != RemnantStrategyFIFO {
+		t.Errorf("strategy = %q, want fifo (from material config)", st.selectTopRemnantSuggestionsStrategy)
+	}
+}
+
+func TestSuggestRemnants_InvalidStrategy_Returns400(t *testing.T) {
+	st := &mockStore{}
+	svc := NewService(st, nil)
+	_, err := svc.SuggestRemnants(context.Background(), SuggestRemnantsInput{
+		RequiredDimension: domain.Dimension{LengthMM: 100, WidthMM: 100},
+		Strategy:          "random",
+	})
+	if err == nil {
+		t.Fatal("expected error for invalid strategy")
+	}
+	var biz *domain.BizError
+	if !errors.As(err, &biz) || !errors.Is(biz.Sentinel, domain.ErrInvalidInput) {
+		t.Errorf("expected ErrInvalidInput, got %v", err)
 	}
 }

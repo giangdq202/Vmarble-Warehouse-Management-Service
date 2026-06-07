@@ -1824,12 +1824,18 @@ definitions:
     type: object
   internal_module_inventory.RemnantSuggestion:
     properties:
+      age_days:
+        type: integer
       location:
         $ref: '#/definitions/internal_module_inventory.StorageLocation'
       rank:
         type: integer
+      reason:
+        type: string
       remnant:
         $ref: '#/definitions/internal_module_inventory.Remnant'
+      score:
+        type: number
     type: object
   internal_module_inventory.StorageLocation:
     properties:
@@ -6044,9 +6050,9 @@ paths:
       - inventory
   /api/v1/inventory/remnants/suggestions:
     get:
-      description: Returns up to `limit` AVAILABLE remnants ranked by Best Fit (smallest
-        area) + FIFO (oldest first). Each suggestion includes the remnant's storage
-        location when available.
+      description: Returns up to `limit` AVAILABLE remnants ranked by the chosen strategy
+        (best_fit or fifo). Each suggestion includes age_days, score, reason, and
+        storage location when available.
       parameters:
       - description: required length in mm
         in: query
@@ -6062,6 +6068,17 @@ paths:
         in: query
         name: limit
         type: integer
+      - description: 'best_fit or fifo (default: material config → best_fit)'
+        enum:
+        - best_fit
+        - fifo
+        in: query
+        name: strategy
+        type: string
+      - description: restrict to remnants from this material
+        in: query
+        name: material_id
+        type: string
       produces:
       - application/json
       responses:
@@ -6079,7 +6096,7 @@ paths:
             type: object
       security:
       - BearerAuth: []
-      summary: Suggest best-fit remnants for a required dimension
+      summary: Suggest remnants for a required dimension
       tags:
       - inventory
   /api/v1/inventory/reports/rejections:

@@ -295,6 +295,21 @@ func (s *pgStore) selectMinRemnantPolicyByParentBoard(ctx context.Context, board
 	return lengthMM, widthMM, nil
 }
 
+func (s *pgStore) selectMaterialStrategy(ctx context.Context, materialID uuid.UUID) (RemnantStrategy, error) {
+	var strategy string
+	err := s.pool.QueryRow(ctx,
+		`SELECT remnant_selection_strategy FROM materials WHERE id = $1`,
+		materialID,
+	).Scan(&strategy)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", domain.NewBizError(domain.ErrNotFound, "material not found")
+		}
+		return "", fmt.Errorf("select material strategy: %w", err)
+	}
+	return RemnantStrategy(strategy), nil
+}
+
 func (s *pgStore) updateSheetStatus(ctx context.Context, id uuid.UUID, status string, issuedToWO *uuid.UUID) error {
 	tag, err := s.pool.Exec(ctx,
 		`UPDATE board_sheets SET status = $1, issued_to_wo_id = $2 WHERE id = $3`,
@@ -555,28 +570,38 @@ func (s *pgStore) selectAvailableRemnantsByMinDimension(ctx context.Context, min
 }
 
 // selectTopRemnantSuggestions returns up to `limit` AVAILABLE remnants that
-// fit `minDim`, ranked by Best Fit (smallest bounding-box area) + FIFO
-// (oldest created_at). Each row is LEFT JOINed with storage_locations so the
-// caller gets the shelf position without a second round trip.
-func (s *pgStore) selectTopRemnantSuggestions(ctx context.Context, minDim domain.Dimension, limit int) ([]RemnantSuggestion, error) {
-	rows, err := s.pool.Query(ctx,
-		`SELECT
+// fit `minDim`. Ordering is controlled by strategy: best_fit ranks by smallest
+// bounding-box area first (ties broken by age), fifo ranks oldest first (ties
+// broken by area). materialID optionally restricts results to one material via
+// a JOIN on board_sheets. Each row is LEFT JOINed with storage_locations.
+func (s *pgStore) selectTopRemnantSuggestions(ctx context.Context, minDim domain.Dimension, limit int, strategy RemnantStrategy, materialID *uuid.UUID) ([]RemnantSuggestion, error) {
+	// ORDER BY is built from an enum — never from raw user input.
+	var orderBy string
+	if strategy == RemnantStrategyFIFO {
+		orderBy = `r.created_at ASC, (COALESCE(r.bounding_box_length_mm, r.length_mm) * COALESCE(r.bounding_box_width_mm, r.width_mm)) ASC`
+	} else {
+		orderBy = `(COALESCE(r.bounding_box_length_mm, r.length_mm) * COALESCE(r.bounding_box_width_mm, r.width_mm)) ASC, r.created_at ASC`
+	}
+
+	q := fmt.Sprintf(`
+		SELECT
 			r.id, r.parent_board_id, r.parent_remnant_id,
 			r.length_mm, r.width_mm, r.status, r.shape_type, r.allocated_to_wo_id, r.allocated_at,
 			r.supplier_code, r.lot_batch, r.grain_pattern, r.quality_grade,
 			r.bounding_box_length_mm, r.bounding_box_width_mm, r.bin_location_id, r.created_at,
+			EXTRACT(DAY FROM (NOW() - r.created_at))::int AS age_days,
 			sl.id, sl.zone, sl.rack, sl.shelf, sl.label, sl.barcode, sl.is_active, sl.created_at
-		 FROM remnants r
-		 LEFT JOIN storage_locations sl ON sl.id = r.bin_location_id AND sl.is_active = TRUE
-		 WHERE r.status = 'AVAILABLE'
-		   AND COALESCE(r.bounding_box_length_mm, r.length_mm) >= $1
-		   AND COALESCE(r.bounding_box_width_mm, r.width_mm) >= $2
-		 ORDER BY
-			(COALESCE(r.bounding_box_length_mm, r.length_mm) * COALESCE(r.bounding_box_width_mm, r.width_mm)) ASC,
-			r.created_at ASC
-		 LIMIT $3`,
-		minDim.LengthMM, minDim.WidthMM, limit,
-	)
+		FROM remnants r
+		LEFT JOIN board_sheets bs ON bs.id = r.parent_board_id
+		LEFT JOIN storage_locations sl ON sl.id = r.bin_location_id AND sl.is_active = TRUE
+		WHERE r.status = 'AVAILABLE'
+		  AND COALESCE(r.bounding_box_length_mm, r.length_mm) >= $1
+		  AND COALESCE(r.bounding_box_width_mm, r.width_mm) >= $2
+		  AND ($3::uuid IS NULL OR bs.material_id = $3)
+		ORDER BY %s
+		LIMIT $4`, orderBy)
+
+	rows, err := s.pool.Query(ctx, q, minDim.LengthMM, minDim.WidthMM, materialID, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -592,6 +617,7 @@ func (s *pgStore) selectTopRemnantSuggestions(ctx context.Context, minDim domain
 		var locIsActive sql.NullBool
 		var locCreatedAt sql.NullTime
 		var allocatedAt sql.NullTime
+		var ageDays sql.NullInt32
 
 		var supplierCode, lotBatch, grainPattern, qualityGrade sql.NullString
 		var bbLengthMM, bbWidthMM sql.NullInt32
@@ -603,12 +629,12 @@ func (s *pgStore) selectTopRemnantSuggestions(ctx context.Context, minDim domain
 			&r.Status, &r.ShapeType, &r.AllocatedToWO, &allocatedAt,
 			&supplierCode, &lotBatch, &grainPattern, &qualityGrade,
 			&bbLengthMM, &bbWidthMM, &binLocationID, &r.CreatedAt,
+			&ageDays,
 			&locID, &locZone, &locRack, &locShelf, &locLabel, &locBarcode, &locIsActive, &locCreatedAt,
 		); err != nil {
 			return nil, err
 		}
 
-		// Map nullable remnant fields.
 		r.SupplierCode = nullStringPtr(supplierCode)
 		r.LotBatch = nullStringPtr(lotBatch)
 		r.GrainPattern = nullStringPtr(grainPattern)
@@ -625,8 +651,10 @@ func (s *pgStore) selectTopRemnantSuggestions(ctx context.Context, minDim domain
 		}
 
 		sug := RemnantSuggestion{Remnant: r, Rank: rank}
+		if ageDays.Valid {
+			sug.AgeDays = int(ageDays.Int32)
+		}
 
-		// Map nullable location fields (LEFT JOIN may produce NULLs).
 		if locID.Valid {
 			loc.ID = locID.UUID
 			if locZone.Valid {

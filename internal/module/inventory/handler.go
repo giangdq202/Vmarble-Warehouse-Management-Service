@@ -359,13 +359,15 @@ func (h *Handler) listRemnants(c *gin.Context) {
 
 // suggestRemnants godoc
 //
-// @Summary      Suggest best-fit remnants for a required dimension
-// @Description  Returns up to `limit` AVAILABLE remnants ranked by Best Fit (smallest area) + FIFO (oldest first). Each suggestion includes the remnant's storage location when available.
+// @Summary      Suggest remnants for a required dimension
+// @Description  Returns up to `limit` AVAILABLE remnants ranked by the chosen strategy (best_fit or fifo). Each suggestion includes age_days, score, reason, and storage location when available.
 // @Tags         inventory
 // @Produce      json
-// @Param        length_mm  query     int   true   "required length in mm"
-// @Param        width_mm   query     int   true   "required width in mm"
-// @Param        limit      query     int   false  "max results (default 3, max 10)"
+// @Param        length_mm    query     int     true   "required length in mm"
+// @Param        width_mm     query     int     true   "required width in mm"
+// @Param        limit        query     int     false  "max results (default 3, max 10)"
+// @Param        strategy     query     string  false  "best_fit or fifo (default: material config → best_fit)"  Enums(best_fit,fifo)
+// @Param        material_id  query     string  false  "restrict to remnants from this material"
 // @Security     BearerAuth
 // @Success      200  {array}   RemnantSuggestion
 // @Failure      400  {object}  map[string]string
@@ -383,10 +385,21 @@ func (h *Handler) suggestRemnants(c *gin.Context) {
 	}
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "3"))
 
-	suggestions, err := h.svc.SuggestRemnants(c.Request.Context(), SuggestRemnantsInput{
+	in := SuggestRemnantsInput{
 		RequiredDimension: domain.Dimension{LengthMM: lengthMM, WidthMM: widthMM},
 		Limit:             limit,
-	})
+		Strategy:          RemnantStrategy(c.Query("strategy")),
+	}
+	if matIDStr := c.Query("material_id"); matIDStr != "" {
+		matID, parseErr := uuid.Parse(matIDStr)
+		if parseErr != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "material_id must be a valid UUID"})
+			return
+		}
+		in.MaterialID = &matID
+	}
+
+	suggestions, err := h.svc.SuggestRemnants(c.Request.Context(), in)
 	if err != nil {
 		httpkit.Error(c, err)
 		return
