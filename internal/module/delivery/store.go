@@ -93,6 +93,15 @@ type store interface {
 	// name and the aggregated CBM/line_count from container_lines.
 	selectAtRiskContainers(ctx context.Context, before time.Time) ([]AtRiskRow, error)
 
+	// updateContainerLoader sets containers.loader_id = loaderID (nil = unassign)
+	// and inserts an audit row into container_loader_log. Runs in a single tx
+	// so the update and audit are atomic (BR-D22).
+	updateContainerLoader(ctx context.Context, containerID uuid.UUID, loaderID *uuid.UUID, log ContainerLoaderLog) error
+
+	// selectLoaderLog returns container_loader_log rows for one container,
+	// newest first.
+	selectLoaderLog(ctx context.Context, containerID uuid.UUID) ([]ContainerLoaderLog, error)
+
 	// changeDestinationTx atomically: updates destination_code/name, clears
 	// vessel_id + cutoff_date when clearVessel=true, and inserts the BR-D24
 	// audit row — all in a single transaction.
