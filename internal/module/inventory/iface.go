@@ -125,19 +125,32 @@ type Remnant struct {
 
 // RemnantSuggestion pairs a candidate remnant with its physical storage
 // location (if stocked) and a 1-based rank. Suggestions are ordered by the
-// Best Fit + FIFO algorithm: smallest bounding-box area first, oldest first
-// among ties.
+// RemnantStrategy controls how candidates are ranked in SuggestRemnants.
+type RemnantStrategy string
+
+const (
+	// RemnantStrategyBestFit picks the smallest remnant that still fits
+	// (minimises leftover waste after the cut).
+	RemnantStrategyBestFit RemnantStrategy = "best_fit"
+	// RemnantStrategyFIFO picks the oldest remnant first (minimises aging risk).
+	RemnantStrategyFIFO RemnantStrategy = "fifo"
+)
+
 type RemnantSuggestion struct {
 	Remnant  Remnant          `json:"remnant"`
 	Location *StorageLocation `json:"location,omitempty"`
 	Rank     int              `json:"rank"`
+	AgeDays  int              `json:"age_days"`
+	Score    float64          `json:"score"`
+	Reason   string           `json:"reason"`
 }
 
-// SuggestRemnantsInput carries the parameters for the Best Fit + FIFO
-// remnant suggestion query.
+// SuggestRemnantsInput carries the parameters for the remnant suggestion query.
 type SuggestRemnantsInput struct {
 	RequiredDimension domain.Dimension
-	Limit             int // defaults to 3; clamped to [1, 10]
+	Limit             int             // defaults to 3; clamped to [1, 10]
+	Strategy          RemnantStrategy // empty → resolve from material default → best_fit
+	MaterialID        *uuid.UUID      // when set, restricts to remnants from this material
 }
 
 type RemnantLabelSize string

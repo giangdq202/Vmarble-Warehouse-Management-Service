@@ -115,8 +115,11 @@ func (s *concurrentMockStore) insertRemnant(_ context.Context, _ Remnant) error 
 func (s *concurrentMockStore) selectAvailableRemnantsByMinDimension(_ context.Context, _ domain.Dimension) ([]Remnant, error) {
 	return nil, nil
 }
-func (s *concurrentMockStore) selectTopRemnantSuggestions(_ context.Context, _ domain.Dimension, _ int) ([]RemnantSuggestion, error) {
+func (s *concurrentMockStore) selectTopRemnantSuggestions(_ context.Context, _ domain.Dimension, _ int, _ RemnantStrategy, _ *uuid.UUID) ([]RemnantSuggestion, error) {
 	return nil, nil
+}
+func (s *concurrentMockStore) selectMaterialStrategy(_ context.Context, _ uuid.UUID) (RemnantStrategy, error) {
+	return RemnantStrategyBestFit, nil
 }
 func (s *concurrentMockStore) selectRemnantsByFilter(_ context.Context, _ RemnantFilter, _ httpkit.PageParams) ([]Remnant, int, error) {
 	return nil, 0, nil

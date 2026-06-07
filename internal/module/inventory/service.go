@@ -465,7 +465,51 @@ func (s *service) SuggestRemnants(ctx context.Context, in SuggestRemnantsInput) 
 	if limit > maxSuggestionLimit {
 		limit = maxSuggestionLimit
 	}
-	return s.st.selectTopRemnantSuggestions(ctx, in.RequiredDimension, limit)
+
+	strategy := in.Strategy
+	if strategy == "" {
+		if in.MaterialID != nil {
+			mat, err := s.st.selectMaterialStrategy(ctx, *in.MaterialID)
+			if err == nil {
+				strategy = mat
+			}
+		}
+		if strategy == "" {
+			strategy = RemnantStrategyBestFit
+		}
+	}
+	if strategy != RemnantStrategyBestFit && strategy != RemnantStrategyFIFO {
+		return nil, domain.NewBizError(domain.ErrInvalidInput, "strategy must be best_fit or fifo")
+	}
+
+	sugs, err := s.st.selectTopRemnantSuggestions(ctx, in.RequiredDimension, limit, strategy, in.MaterialID)
+	if err != nil {
+		return nil, err
+	}
+
+	reqArea := in.RequiredDimension.LengthMM * in.RequiredDimension.WidthMM
+	for i := range sugs {
+		r := &sugs[i]
+		bbL := r.Remnant.Dimensions.LengthMM
+		bbW := r.Remnant.Dimensions.WidthMM
+		if r.Remnant.BoundingBoxLengthMM != nil {
+			bbL = int(*r.Remnant.BoundingBoxLengthMM)
+		}
+		if r.Remnant.BoundingBoxWidthMM != nil {
+			bbW = int(*r.Remnant.BoundingBoxWidthMM)
+		}
+		remnantArea := bbL * bbW
+		wasteArea := remnantArea - reqArea
+		if remnantArea > 0 {
+			r.Score = 1.0 - float64(wasteArea)/float64(remnantArea)
+		}
+		if strategy == RemnantStrategyFIFO {
+			r.Reason = fmt.Sprintf("FIFO: remnant is %d days old", r.AgeDays)
+		} else {
+			r.Reason = fmt.Sprintf("best fit: %.0f%% area utilisation", r.Score*100)
+		}
+	}
+	return sugs, nil
 }
 
 func (s *service) AllocateRemnant(ctx context.Context, remnantID uuid.UUID, workOrderID uuid.UUID) error {
