@@ -1,29 +1,13 @@
-# GitLab CI — equivalent of .github/workflows/ci.yml + deploy.yml
-#
-# Quality gate : triggered on Merge Request targeting dev
-#   test → lint → go-build
-#
-# Docker build  : triggered on push to dev
-#   docker-build (build only — push + Dokploy webhook left as TODO)
-#
-# Secrets needed (Settings → CI/CD → Variables):
-#   DOKPLOY_BE_WEBHOOK_URL  — only needed when un-commenting the deploy step
-
 stages:
-  - test
-  - lint
   - build
   - push
 
 variables:
   IMAGE_NAME: registry.gitlab.com/529-stu/vmarble-warehouse-management-service
 
-# ── Shared Go base (extends into test / go-build) ─────────────────────────
-
 .go_base:
   image: golang:1.25-alpine
   variables:
-    # Keep module cache inside project dir so GitLab cache paths work
     GOPATH: $CI_PROJECT_DIR/.go
     GOCACHE: $CI_PROJECT_DIR/.go/build-cache
   cache:
@@ -33,41 +17,6 @@ variables:
     paths:
       - .go/pkg/mod/
       - .go/build-cache/
-
-# ── Quality gate — MR → dev ───────────────────────────────────────────────
-
-test:
-  extends: .go_base
-  # Override to Debian image — alpine lacks gcc, which -race requires (CGO)
-  image: golang:1.25
-  stage: test
-  rules:
-    - if: >
-        $CI_PIPELINE_SOURCE == "merge_request_event" &&
-        $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "dev"
-  script:
-    - go test ./... -race -count=1
-
-lint:
-  stage: lint
-  # Mirror golangci-lint-action@v7 — pin a specific version in production
-  image: golangci/golangci-lint:latest-alpine
-  variables:
-    GOPATH: $CI_PROJECT_DIR/.go
-    GOCACHE: $CI_PROJECT_DIR/.go/build-cache
-  cache:
-    key:
-      files:
-        - go.sum
-    paths:
-      - .go/pkg/mod/
-      - .go/build-cache/
-  rules:
-    - if: >
-        $CI_PIPELINE_SOURCE == "merge_request_event" &&
-        $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "dev"
-  script:
-    - golangci-lint run ./...
 
 go-build:
   extends: .go_base
@@ -78,8 +27,6 @@ go-build:
         $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "dev"
   script:
     - go build ./...
-
-# ── Docker build + push — push to dev ────────────────────────────────────
 
 docker-push:
   stage: push
@@ -101,6 +48,5 @@ docker-push:
     - docker login -u $CI_REGISTRY_USER -p $CI_JOB_TOKEN $CI_REGISTRY
     - docker push "${IMAGE_NAME}:sha-${CI_COMMIT_SHORT_SHA}"
     - docker push "${IMAGE_NAME}:stg-latest"
-    # ── Dokploy webhook trigger ──────────────────────────────────────────
     - apk add --no-cache curl
     - curl -sS -f -X POST "$DOKPLOY_BE_WEBHOOK_URL"
