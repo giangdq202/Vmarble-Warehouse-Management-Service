@@ -2,12 +2,21 @@ package packing
 
 import (
 	"context"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
 	"github.com/vmarble/warehouse-management-service/internal/platform/httpkit"
 )
+
+// fgSuggestionCandidate wraps an AVAILABLE FGPool row with the earliest
+// cutoff_date of any open container that holds the same SO line. Nil cutoff
+// means no booked container yet — such candidates sort last.
+type fgSuggestionCandidate struct {
+	FG          FGPool
+	CutoffDate  *time.Time
+}
 
 // store is the packing module's repository contract. Unexported — only
 // service.go binds to it; pgstore.go provides the production implementation.
@@ -25,9 +34,11 @@ type store interface {
 	selectDefectByFGID(ctx context.Context, fgID uuid.UUID) (FGDefect, error)
 
 	// selectAvailableFGsBySKU returns up to `limit` AVAILABLE FG rows matching
-	// the given SKU, excluding `excludeID`. Used by the shortfall suggestion
-	// engine after a defect is recorded.
-	selectAvailableFGsBySKU(ctx context.Context, skuID, excludeID uuid.UUID, limit int) ([]FGPool, error)
+	// the given SKU, excluding `excludeID`. Rows are sorted by the earliest
+	// cutoff_date of an open container that holds the same SO line (ASC NULLS
+	// LAST) so the defect suggestion engine surfaces the most urgent replacement
+	// first. Each row carries the resolved cutoff date for the FE badge.
+	selectAvailableFGsBySKU(ctx context.Context, skuID, excludeID uuid.UUID, limit int) ([]fgSuggestionCandidate, error)
 
 	withTx(ctx context.Context, fn func(tx txStore) error) error
 }

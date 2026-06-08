@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -205,30 +206,50 @@ func (s *pgStore) selectDefectByFGID(ctx context.Context, fgID uuid.UUID) (FGDef
 	return d, nil
 }
 
-// selectAvailableFGsBySKU returns up to `limit` AVAILABLE FGs matching the
-// given SKU, excluding the specified FG (typically the one just marked DEFECT).
-// Used by the shortfall suggestion engine — read-only, outside tx.
-func (s *pgStore) selectAvailableFGsBySKU(ctx context.Context, skuID, excludeID uuid.UUID, limit int) ([]FGPool, error) {
+// selectAvailableFGsBySKU returns up to `limit` AVAILABLE FGs for the given
+// SKU, excluding the defective FG. Rows are sorted by the earliest cutoff_date
+// of any open container that holds the same SO line (ASC NULLS LAST) so the
+// most urgent replacement surfaces first (#19).
+func (s *pgStore) selectAvailableFGsBySKU(ctx context.Context, skuID, excludeID uuid.UUID, limit int) ([]fgSuggestionCandidate, error) {
 	rows, err := s.pool.Query(ctx,
-		fgSelectCols+`
-		 WHERE fp.sku_id = $1
-		   AND fp.status = 'AVAILABLE'
-		   AND fp.id != $2
-		 ORDER BY fp.created_at ASC, fp.id
-		 LIMIT $3`,
+		`SELECT fp.id, fp.work_order_id, fp.sku_id, s.code, s.name, fp.barcode_id,
+		        fp.sales_order_line_id, fp.status, fp.container_line_id,
+		        fp.component_type, fp.unit_index,
+		        fp.qc_passed_at, fp.qc_passed_by, fp.created_at,
+		        (SELECT MIN(c.cutoff_date)
+		           FROM container_lines cl
+		           JOIN containers c ON c.id = cl.container_id
+		          WHERE cl.sales_order_line_id = fp.sales_order_line_id
+		            AND c.status NOT IN ('SEALED','CANCELLED')
+		            AND fp.sales_order_line_id IS NOT NULL
+		        ) AS nearest_cutoff
+		   FROM fg_pool fp
+		   JOIN skus s ON s.id = fp.sku_id
+		  WHERE fp.sku_id = $1
+		    AND fp.status = 'AVAILABLE'
+		    AND fp.id != $2
+		  ORDER BY nearest_cutoff ASC NULLS LAST, fp.created_at ASC, fp.id
+		  LIMIT $3`,
 		skuID, excludeID, limit)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	var out []FGPool
+	var out []fgSuggestionCandidate
 	for rows.Next() {
-		fg, err := scanFG(rows)
-		if err != nil {
+		var fg FGPool
+		var cutoff *time.Time
+		if err := rows.Scan(
+			&fg.ID, &fg.WorkOrderID, &fg.SKUID, &fg.SKUCode, &fg.SKUName,
+			&fg.BarcodeID, &fg.SalesOrderLineID, &fg.Status, &fg.ContainerLineID,
+			&fg.ComponentType, &fg.UnitIndex,
+			&fg.QCPassedAt, &fg.QCPassedBy, &fg.CreatedAt,
+			&cutoff,
+		); err != nil {
 			return nil, err
 		}
-		out = append(out, fg)
+		out = append(out, fgSuggestionCandidate{FG: fg, CutoffDate: cutoff})
 	}
 	return out, rows.Err()
 }
