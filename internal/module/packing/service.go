@@ -11,15 +11,16 @@ import (
 )
 
 type service struct {
-	s          store
-	barcodeIss BarcodeIssuer
-	barcodeRes BarcodeResolver
-	wog        WorkOrderGateway
-	cs         ContainerSuggester
-	clr        ContainerLineRemover
-	notifier   DefectNotifier
-	solChecker SOLineChecker
-	now        func() time.Time
+	s            store
+	barcodeIss   BarcodeIssuer
+	barcodeRes   BarcodeResolver
+	wog          WorkOrderGateway
+	cs           ContainerSuggester
+	clr          ContainerLineRemover
+	notifier     DefectNotifier
+	solChecker   SOLineChecker
+	skuCompRes   SKUComponentResolver
+	now          func() time.Time
 }
 
 // NewService wires the packing module. Any cross-module dep may be nil in
@@ -53,6 +54,12 @@ func (svc *service) SetSOLineChecker(c SOLineChecker) {
 	svc.solChecker = c
 }
 
+// SetSKUComponentResolver wires the catalog component resolver after construction.
+// When nil, CreateFromCompletedWO creates one FG row per unit (single-box SKUs).
+func (svc *service) SetSKUComponentResolver(r SKUComponentResolver) {
+	svc.skuCompRes = r
+}
+
 // ── FG creation hook ────────────────────────────────────────────────────────
 
 // CreateFromCompletedWO is idempotent: when the WO already has fg_pool rows,
@@ -81,33 +88,83 @@ func (svc *service) CreateFromCompletedWO(ctx context.Context, in CreateFromComp
 			"barcode issuer not configured")
 	}
 
-	now := svc.now()
-	rows := make([]FGPool, 0, in.Quantity)
-	for i := 0; i < in.Quantity; i++ {
-		bc, err := svc.barcodeIss.GenerateBarcode(ctx, BarcodeIssueInput{
-			WorkOrderID:      in.WorkOrderID,
-			SKUID:            in.SKUID,
-			POID:             in.POID,
-			ProductionPlanID: in.ProductionPlanID,
-			SKUCode:          in.SKUCode,
-			SKUName:          in.SKUName,
-			Dimensions:       in.Dimensions,
-			ProducedDate:     in.ProducedDate,
-		})
+	// BR-PK-MULTI01: resolve components; nil resolver or empty result → single-box.
+	var components []SKUComponentInfo
+	if svc.skuCompRes != nil {
+		components, err = svc.skuCompRes.GetSKUComponents(ctx, in.SKUID)
 		if err != nil {
 			return nil, err
 		}
-		rows = append(rows, FGPool{
-			ID:               uuid.New(),
-			WorkOrderID:      in.WorkOrderID,
-			SKUID:            in.SKUID,
-			BarcodeID:        bc.ID,
-			SalesOrderLineID: in.SalesOrderLineID,
-			Status:           FGStatusAvailable,
-			QCPassedAt:       now,
-			QCPassedBy:       in.QCPassedBy,
-			CreatedAt:        now,
-		})
+	}
+
+	now := svc.now()
+	var rows []FGPool
+
+	if len(components) == 0 {
+		// Simple SKU: one FG row per physical unit.
+		rows = make([]FGPool, 0, in.Quantity)
+		for i := 0; i < in.Quantity; i++ {
+			bc, err := svc.barcodeIss.GenerateBarcode(ctx, BarcodeIssueInput{
+				WorkOrderID:      in.WorkOrderID,
+				SKUID:            in.SKUID,
+				POID:             in.POID,
+				ProductionPlanID: in.ProductionPlanID,
+				SKUCode:          in.SKUCode,
+				SKUName:          in.SKUName,
+				Dimensions:       in.Dimensions,
+				ProducedDate:     in.ProducedDate,
+			})
+			if err != nil {
+				return nil, err
+			}
+			rows = append(rows, FGPool{
+				ID:               uuid.New(),
+				WorkOrderID:      in.WorkOrderID,
+				SKUID:            in.SKUID,
+				BarcodeID:        bc.ID,
+				SalesOrderLineID: in.SalesOrderLineID,
+				Status:           FGStatusAvailable,
+				QCPassedAt:       now,
+				QCPassedBy:       in.QCPassedBy,
+				CreatedAt:        now,
+			})
+		}
+	} else {
+		// BR-PK-MULTI01: multi-component SKU — one FG row per component per unit.
+		// All components of the same physical unit share the same unit_index.
+		rows = make([]FGPool, 0, in.Quantity*len(components))
+		for unitIdx := 0; unitIdx < in.Quantity; unitIdx++ {
+			for _, comp := range components {
+				bc, err := svc.barcodeIss.GenerateBarcode(ctx, BarcodeIssueInput{
+					WorkOrderID:      in.WorkOrderID,
+					SKUID:            in.SKUID,
+					POID:             in.POID,
+					ProductionPlanID: in.ProductionPlanID,
+					SKUCode:          in.SKUCode,
+					SKUName:          in.SKUName,
+					Dimensions:       in.Dimensions,
+					ProducedDate:     in.ProducedDate,
+				})
+				if err != nil {
+					return nil, err
+				}
+				ct := comp.ComponentType
+				ui := unitIdx
+				rows = append(rows, FGPool{
+					ID:               uuid.New(),
+					WorkOrderID:      in.WorkOrderID,
+					SKUID:            in.SKUID,
+					BarcodeID:        bc.ID,
+					SalesOrderLineID: in.SalesOrderLineID,
+					Status:           FGStatusAvailable,
+					ComponentType:    &ct,
+					UnitIndex:        &ui,
+					QCPassedAt:       now,
+					QCPassedBy:       in.QCPassedBy,
+					CreatedAt:        now,
+				})
+			}
+		}
 	}
 	if err := svc.s.insertFGBatch(ctx, rows); err != nil {
 		return nil, err
@@ -561,4 +618,74 @@ func (svc *service) ReassignFG(ctx context.Context, in ReassignFGInput) (Reassig
 		return nil
 	})
 	return result, err
+}
+
+// CheckComponentsForSeal validates BR-PK-MULTI03: every physical unit (grouped
+// by unit_index) in the container's RESERVED FG rows must have all expected
+// component_types present. Simple SKUs (unit_index IS NULL) are always valid.
+func (svc *service) CheckComponentsForSeal(ctx context.Context, containerID uuid.UUID) error {
+	if svc.skuCompRes == nil {
+		return nil // component resolver not wired — skip (simple SKUs only)
+	}
+
+	fgs, err := svc.s.selectReservedFGsByContainer(ctx, containerID)
+	if err != nil {
+		return err
+	}
+
+	// Group multi-component FGs by (skuID, unitIndex).
+	type unitKey struct {
+		skuID     uuid.UUID
+		unitIndex int
+	}
+	present := make(map[unitKey]map[string]struct{})
+	for _, fg := range fgs {
+		if fg.UnitIndex == nil || fg.ComponentType == nil {
+			continue
+		}
+		k := unitKey{fg.SKUID, *fg.UnitIndex}
+		if present[k] == nil {
+			present[k] = make(map[string]struct{})
+		}
+		present[k][*fg.ComponentType] = struct{}{}
+	}
+
+	if len(present) == 0 {
+		return nil
+	}
+
+	// Fetch expected components per SKU (cached across units of same SKU).
+	skuComps := make(map[uuid.UUID][]SKUComponentInfo)
+	var missingUnits []map[string]any
+
+	for k, gotTypes := range present {
+		comps, ok := skuComps[k.skuID]
+		if !ok {
+			comps, err = svc.skuCompRes.GetSKUComponents(ctx, k.skuID)
+			if err != nil {
+				return err
+			}
+			skuComps[k.skuID] = comps
+		}
+		var missing []string
+		for _, c := range comps {
+			if _, found := gotTypes[c.ComponentType]; !found {
+				missing = append(missing, c.ComponentType)
+			}
+		}
+		if len(missing) > 0 {
+			missingUnits = append(missingUnits, map[string]any{
+				"sku_id":     k.skuID,
+				"unit_index": k.unitIndex,
+				"missing":    missing,
+			})
+		}
+	}
+
+	if len(missingUnits) > 0 {
+		return domain.NewBizError(domain.ErrPreconditionFailed,
+			"cannot seal: some units are missing component packages (BR-PK-MULTI03)").
+			WithDetails(map[string]any{"incomplete_units": missingUnits})
+	}
+	return nil
 }

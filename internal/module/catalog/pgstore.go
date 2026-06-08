@@ -355,6 +355,62 @@ func (s *pgStore) deletePackingUnit(ctx context.Context, skuID uuid.UUID, unit s
 	return nil
 }
 
+// ── SKU components (BR-PK-MULTI01) ──────────────────────────────────────────
+
+func (s *pgStore) upsertSKUComponent(ctx context.Context, in UpsertSKUComponentInput) (SKUComponent, error) {
+	var c SKUComponent
+	err := s.pool.QueryRow(ctx,
+		`INSERT INTO sku_components (sku_id, component_type, cbm_per_unit, sort_order)
+		 VALUES ($1, $2, $3, $4)
+		 ON CONFLICT (sku_id, component_type) DO UPDATE
+		     SET cbm_per_unit = EXCLUDED.cbm_per_unit,
+		         sort_order   = EXCLUDED.sort_order
+		 RETURNING id, sku_id, component_type, cbm_per_unit, sort_order, created_at`,
+		in.SKUID, in.ComponentType, in.CbmPerUnit, in.SortOrder,
+	).Scan(&c.ID, &c.SKUID, &c.ComponentType, &c.CbmPerUnit, &c.SortOrder, &c.CreatedAt)
+	if err != nil {
+		return SKUComponent{}, err
+	}
+	return c, nil
+}
+
+func (s *pgStore) selectSKUComponentsBySkuID(ctx context.Context, skuID uuid.UUID) ([]SKUComponent, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT id, sku_id, component_type, cbm_per_unit, sort_order, created_at
+		 FROM sku_components WHERE sku_id = $1
+		 ORDER BY sort_order ASC, created_at ASC`,
+		skuID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []SKUComponent
+	for rows.Next() {
+		var c SKUComponent
+		if err := rows.Scan(&c.ID, &c.SKUID, &c.ComponentType, &c.CbmPerUnit, &c.SortOrder, &c.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
+func (s *pgStore) deleteSKUComponent(ctx context.Context, skuID uuid.UUID, componentType string) error {
+	tag, err := s.pool.Exec(ctx,
+		`DELETE FROM sku_components WHERE sku_id = $1 AND component_type = $2`,
+		skuID, componentType,
+	)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return domain.ErrNotFound
+	}
+	return nil
+}
+
 func (s *pgStore) deactivateSKU(ctx context.Context, id uuid.UUID) error {
 	tag, err := s.pool.Exec(ctx,
 		`UPDATE skus SET is_active = false WHERE id = $1`,

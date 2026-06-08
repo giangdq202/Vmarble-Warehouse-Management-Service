@@ -27,6 +27,7 @@ func NewPGStore(pool *pgxpool.Pool) store {
 const fgSelectCols = `
 SELECT fp.id, fp.work_order_id, fp.sku_id, s.code, s.name, fp.barcode_id,
        fp.sales_order_line_id, fp.status, fp.container_line_id,
+       fp.component_type, fp.unit_index,
        fp.qc_passed_at, fp.qc_passed_by, fp.created_at
   FROM fg_pool fp
   JOIN skus s ON s.id = fp.sku_id`
@@ -39,6 +40,7 @@ func scanFG(r fgScanner) (FGPool, error) {
 	var fg FGPool
 	if err := r.Scan(&fg.ID, &fg.WorkOrderID, &fg.SKUID, &fg.SKUCode, &fg.SKUName,
 		&fg.BarcodeID, &fg.SalesOrderLineID, &fg.Status, &fg.ContainerLineID,
+		&fg.ComponentType, &fg.UnitIndex,
 		&fg.QCPassedAt, &fg.QCPassedBy, &fg.CreatedAt); err != nil {
 		return FGPool{}, err
 	}
@@ -59,10 +61,12 @@ func (s *pgStore) insertFGBatch(ctx context.Context, rows []FGPool) error {
 		if _, err := tx.Exec(ctx,
 			`INSERT INTO fg_pool
 			    (id, work_order_id, sku_id, barcode_id, sales_order_line_id,
-			     status, container_line_id, qc_passed_at, qc_passed_by, created_at)
-			 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+			     status, container_line_id, component_type, unit_index,
+			     qc_passed_at, qc_passed_by, created_at)
+			 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
 			r.ID, r.WorkOrderID, r.SKUID, r.BarcodeID, r.SalesOrderLineID,
-			r.Status, r.ContainerLineID, r.QCPassedAt, r.QCPassedBy, r.CreatedAt,
+			r.Status, r.ContainerLineID, r.ComponentType, r.UnitIndex,
+			r.QCPassedAt, r.QCPassedBy, r.CreatedAt,
 		); err != nil {
 			return err
 		}
@@ -213,6 +217,30 @@ func (s *pgStore) selectAvailableFGsBySKU(ctx context.Context, skuID, excludeID 
 		 ORDER BY fp.created_at ASC, fp.id
 		 LIMIT $3`,
 		skuID, excludeID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []FGPool
+	for rows.Next() {
+		fg, err := scanFG(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, fg)
+	}
+	return out, rows.Err()
+}
+
+func (s *pgStore) selectReservedFGsByContainer(ctx context.Context, containerID uuid.UUID) ([]FGPool, error) {
+	rows, err := s.pool.Query(ctx,
+		fgSelectCols+`
+		  JOIN container_lines cl ON cl.id = fp.container_line_id
+		 WHERE cl.container_id = $1
+		   AND fp.status = 'RESERVED'
+		 ORDER BY fp.sku_id, fp.unit_index, fp.component_type`,
+		containerID)
 	if err != nil {
 		return nil, err
 	}

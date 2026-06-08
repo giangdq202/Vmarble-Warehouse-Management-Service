@@ -28,8 +28,9 @@ type service struct {
 	skuResolver    CustomerSKUResolver
 	lpAuditor      LoadingPlanAuditLogger
 	planReloader   PlanReloadNotifier
-	pendingExc     PendingExceptionsChecker
-	shortShipped   ShortShippedAutoCreator
+	pendingExc      PendingExceptionsChecker
+	shortShipped    ShortShippedAutoCreator
+	fgCompChecker   FGComponentChecker
 	cbmOverheadPct float64
 	now            func() time.Time // overridable in tests
 }
@@ -87,6 +88,12 @@ func (svc *service) SetPendingExceptionsChecker(c PendingExceptionsChecker) {
 // SHORT_SHIPPED auto-creation at seal time.
 func (svc *service) SetShortShippedAutoCreator(c ShortShippedAutoCreator) {
 	svc.shortShipped = c
+}
+
+// SetFGComponentChecker wires the BR-PK-MULTI03 SEAL pre-check. nil disables
+// the guard (simple / single-box SKU containers skip component validation).
+func (svc *service) SetFGComponentChecker(c FGComponentChecker) {
+	svc.fgCompChecker = c
 }
 
 // ── Container CRUD ──────────────────────────────────────────────────────────
@@ -616,6 +623,13 @@ func (svc *service) Seal(ctx context.Context, in SealInput) (Container, error) {
 					"pending_exception_ids": summary.IDs,
 					"pending_count":         summary.Count,
 				})
+		}
+	}
+	// BR-PK-MULTI03: every physical unit must have all expected component
+	// packages present before sealing. Done outside the tx — read-only check.
+	if svc.fgCompChecker != nil {
+		if err := svc.fgCompChecker.CheckComponentsForSeal(ctx, in.ContainerID); err != nil {
+			return Container{}, err
 		}
 	}
 	var sealed Container

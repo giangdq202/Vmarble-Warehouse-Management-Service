@@ -110,6 +110,16 @@ func (m *mockStore) selectAvailableFGsBySKU(_ context.Context, skuID, excludeID 
 	return out, nil
 }
 
+func (m *mockStore) selectReservedFGsByContainer(_ context.Context, _ uuid.UUID) ([]FGPool, error) {
+	var out []FGPool
+	for _, fg := range m.fgsByID {
+		if fg.Status == FGStatusReserved {
+			out = append(out, fg)
+		}
+	}
+	return out, nil
+}
+
 func (m *mockStore) withTx(ctx context.Context, fn func(tx txStore) error) error {
 	return fn(&mockTxStore{ms: m})
 }
@@ -1159,5 +1169,190 @@ func TestReportDefect_ReservedFG_PoolHasDifferentSKU_SuggestsCarryOver(t *testin
 	}
 	if out.Suggestions[0].Type != SuggestionCarryOverWO {
 		t.Errorf("want CARRY_OVER_WO (no same-SKU match), got %s", out.Suggestions[0].Type)
+	}
+}
+
+// ── Multi-component SKU (BR-PK-MULTI01/02/03) ───────────────────────────────
+
+type mockSKUComponentResolver struct {
+	comps map[uuid.UUID][]SKUComponentInfo
+}
+
+func (m *mockSKUComponentResolver) GetSKUComponents(_ context.Context, skuID uuid.UUID) ([]SKUComponentInfo, error) {
+	return m.comps[skuID], nil
+}
+
+func newHarnessWithComponents(comps map[uuid.UUID][]SKUComponentInfo) *harness {
+	h := newHarness()
+	h.svc.(*service).skuCompRes = &mockSKUComponentResolver{comps: comps}
+	return h
+}
+
+func ptr[T any](v T) *T { return &v }
+
+func TestCreateFromCompletedWO_MultiComponent_CreatesOneRowPerComponentPerUnit(t *testing.T) {
+	skuID := uuid.New()
+	comps := map[uuid.UUID][]SKUComponentInfo{
+		skuID: {
+			{ComponentType: "TOP", CbmPerUnit: 0.1, SortOrder: 0},
+			{ComponentType: "BASE", CbmPerUnit: 0.15, SortOrder: 1},
+		},
+	}
+	h := newHarnessWithComponents(comps)
+
+	rows, err := h.svc.CreateFromCompletedWO(context.Background(), CreateFromCompletedWOInput{
+		WorkOrderID: uuid.New(),
+		SKUID:       skuID,
+		SKUCode:     "SKU-MULTI",
+		Quantity:    2,
+		QCPassedBy:  uuid.New(),
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// 2 units × 2 components = 4 rows
+	if len(rows) != 4 {
+		t.Fatalf("want 4 rows, got %d", len(rows))
+	}
+	if h.issuer.calls != 4 {
+		t.Fatalf("want 4 barcode calls, got %d", h.issuer.calls)
+	}
+	// Verify each row has ComponentType and UnitIndex set
+	byUnit := map[int]map[string]bool{}
+	for _, r := range rows {
+		if r.ComponentType == nil || r.UnitIndex == nil {
+			t.Errorf("multi-component FG must have ComponentType and UnitIndex set; got %+v", r)
+			continue
+		}
+		if byUnit[*r.UnitIndex] == nil {
+			byUnit[*r.UnitIndex] = map[string]bool{}
+		}
+		byUnit[*r.UnitIndex][*r.ComponentType] = true
+	}
+	for unitIdx := 0; unitIdx < 2; unitIdx++ {
+		if !byUnit[unitIdx]["TOP"] || !byUnit[unitIdx]["BASE"] {
+			t.Errorf("unit %d missing expected components: %v", unitIdx, byUnit[unitIdx])
+		}
+	}
+}
+
+func TestCreateFromCompletedWO_NoComponents_SingleRowPerUnit(t *testing.T) {
+	skuID := uuid.New()
+	// SKU exists but has no components — single-box path
+	comps := map[uuid.UUID][]SKUComponentInfo{skuID: nil}
+	h := newHarnessWithComponents(comps)
+
+	rows, err := h.svc.CreateFromCompletedWO(context.Background(), CreateFromCompletedWOInput{
+		WorkOrderID: uuid.New(),
+		SKUID:       skuID,
+		Quantity:    3,
+		QCPassedBy:  uuid.New(),
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(rows) != 3 {
+		t.Fatalf("want 3 rows (one per unit), got %d", len(rows))
+	}
+	for _, r := range rows {
+		if r.ComponentType != nil || r.UnitIndex != nil {
+			t.Errorf("single-box row must have nil ComponentType/UnitIndex; got %+v", r)
+		}
+	}
+}
+
+func TestCheckComponentsForSeal_AllPresent_ReturnsNil(t *testing.T) {
+	skuID := uuid.New()
+	clID := uuid.New()
+	comps := map[uuid.UUID][]SKUComponentInfo{
+		skuID: {
+			{ComponentType: "TOP"},
+			{ComponentType: "BASE"},
+		},
+	}
+	h := newHarnessWithComponents(comps)
+
+	// Seed 2 RESERVED FGs for unit_index=0 (TOP + BASE)
+	for _, ct := range []string{"TOP", "BASE"} {
+		ct := ct
+		fg := FGPool{
+			ID:              uuid.New(),
+			SKUID:           skuID,
+			BarcodeID:       uuid.New(),
+			Status:          FGStatusReserved,
+			ContainerLineID: &clID,
+			ComponentType:   &ct,
+			UnitIndex:       ptr(0),
+			CreatedAt:       time.Now(),
+		}
+		h.store.fgsByID[fg.ID] = fg
+	}
+
+	err := h.svc.CheckComponentsForSeal(context.Background(), uuid.New())
+	if err != nil {
+		t.Fatalf("want nil for complete units, got %v", err)
+	}
+}
+
+func TestCheckComponentsForSeal_MissingComponent_ReturnsPreconditionFailed(t *testing.T) {
+	skuID := uuid.New()
+	clID := uuid.New()
+	comps := map[uuid.UUID][]SKUComponentInfo{
+		skuID: {
+			{ComponentType: "TOP"},
+			{ComponentType: "BASE"},
+		},
+	}
+	h := newHarnessWithComponents(comps)
+
+	// Only TOP present for unit_index=0 — BASE is missing
+	ct := "TOP"
+	fg := FGPool{
+		ID:              uuid.New(),
+		SKUID:           skuID,
+		BarcodeID:       uuid.New(),
+		Status:          FGStatusReserved,
+		ContainerLineID: &clID,
+		ComponentType:   &ct,
+		UnitIndex:       ptr(0),
+		CreatedAt:       time.Now(),
+	}
+	h.store.fgsByID[fg.ID] = fg
+
+	err := h.svc.CheckComponentsForSeal(context.Background(), uuid.New())
+	if !errors.Is(err, domain.ErrPreconditionFailed) {
+		t.Fatalf("want ErrPreconditionFailed for incomplete unit, got %v", err)
+	}
+}
+
+func TestCheckComponentsForSeal_NoComponentSKU_ReturnsNil(t *testing.T) {
+	skuID := uuid.New()
+	clID := uuid.New()
+	// SKU has no components — simple / single-box SKU
+	comps := map[uuid.UUID][]SKUComponentInfo{skuID: nil}
+	h := newHarnessWithComponents(comps)
+
+	// Seed a RESERVED FG with no ComponentType/UnitIndex
+	fg := FGPool{
+		ID:              uuid.New(),
+		SKUID:           skuID,
+		BarcodeID:       uuid.New(),
+		Status:          FGStatusReserved,
+		ContainerLineID: &clID,
+		CreatedAt:       time.Now(),
+	}
+	h.store.fgsByID[fg.ID] = fg
+
+	err := h.svc.CheckComponentsForSeal(context.Background(), uuid.New())
+	if err != nil {
+		t.Fatalf("want nil for single-box SKU, got %v", err)
+	}
+}
+
+func TestCheckComponentsForSeal_NilResolver_ReturnsNil(t *testing.T) {
+	h := newHarness() // no component resolver wired
+	err := h.svc.CheckComponentsForSeal(context.Background(), uuid.New())
+	if err != nil {
+		t.Fatalf("want nil when resolver is nil (bypass), got %v", err)
 	}
 }

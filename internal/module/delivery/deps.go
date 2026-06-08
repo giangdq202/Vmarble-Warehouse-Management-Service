@@ -14,9 +14,10 @@ type SKUChecker interface {
 }
 
 type SKUInfo struct {
-	ID   uuid.UUID
-	Code string
-	Name string
+	ID         uuid.UUID
+	Code       string
+	Name       string
+	CbmPerUnit *float64
 }
 
 // SOLineChecker validates that a sales_order_line_id referenced by AddLine
@@ -139,6 +140,14 @@ type PlanReloadNotice struct {
 	NewVersion      int
 	SupersededLines int
 	ActorID         uuid.UUID
+}
+
+// FGComponentChecker validates BR-PK-MULTI03 before a container is sealed:
+// every physical unit must have all expected component packages present.
+// Implemented by packing.Service.CheckComponentsForSeal; wired in main.go.
+// Optional — when nil, the seal guard is skipped (simple / single-box SKUs).
+type FGComponentChecker interface {
+	CheckComponentsForSeal(ctx context.Context, containerID uuid.UUID) error
 }
 
 // PendingExceptionsChecker is the BR-D14 SEAL guard hook (#303). Seal asks

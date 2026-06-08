@@ -509,6 +509,11 @@ type Service interface {
 	// ListRouteLog returns the destination change audit trail for one container,
 	// newest entry first.
 	ListRouteLog(ctx context.Context, containerID uuid.UUID) ([]ContainerRouteChangeLog, error)
+
+	// SetFGComponentChecker wires the BR-PK-MULTI03 SEAL pre-check after
+	// construction (packing ↔ delivery cycle-break pattern). nil disables the
+	// guard.
+	SetFGComponentChecker(c FGComponentChecker)
 }
 
 // DefaultCapacityForType returns the ISO defaults for a container type. When

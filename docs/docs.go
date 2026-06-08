@@ -14417,6 +14417,9 @@ const docTemplate = `{
                 "barcode_id": {
                     "type": "string"
                 },
+                "component_type": {
+                    "type": "string"
+                },
                 "container_line_id": {
                     "type": "string"
                 },
@@ -14446,6 +14449,9 @@ const docTemplate = `{
                 },
                 "status": {
                     "type": "string"
+                },
+                "unit_index": {
+                    "type": "integer"
                 },
                 "work_order_id": {
                     "type": "string"
