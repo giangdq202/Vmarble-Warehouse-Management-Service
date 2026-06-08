@@ -52,6 +52,8 @@ type FGPool struct {
 	SalesOrderLineID *uuid.UUID `json:"sales_order_line_id,omitempty"`
 	Status           string     `json:"status"`
 	ContainerLineID  *uuid.UUID `json:"container_line_id,omitempty"`
+	ComponentType    *string    `json:"component_type,omitempty"`
+	UnitIndex        *int       `json:"unit_index,omitempty"`
 	QCPassedAt       time.Time  `json:"qc_passed_at"`
 	QCPassedBy       uuid.UUID  `json:"qc_passed_by"`
 	CreatedAt        time.Time  `json:"created_at"`
@@ -194,6 +196,11 @@ type Service interface {
 	// fg_pool row whose container_line_id is on the sealed container to
 	// LOADED. Idempotent.
 	MarkLoadedOnSeal(ctx context.Context, containerID uuid.UUID) error
+
+	// CheckComponentsForSeal validates BR-PK-MULTI03: every unit_index in the
+	// container's RESERVED FG rows must have all component_types present. Returns
+	// ErrPreconditionFailed with details when incomplete units are found.
+	CheckComponentsForSeal(ctx context.Context, containerID uuid.UUID) error
 
 	// ReassignFG changes the sales_order_line attribution of an FG in the
 	// pool. Allowed only when the FG is AVAILABLE or RESERVED (not sealed).

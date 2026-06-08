@@ -84,3 +84,18 @@ type SOLineInfo struct {
 	ID    uuid.UUID
 	SKUID uuid.UUID
 }
+
+// SKUComponentResolver fetches the multi-component breakdown for a SKU.
+// Used by CreateFromCompletedWO to create one FG row per component per unit.
+// When a SKU has no components, the result is empty and the caller falls back
+// to single-row-per-unit behaviour (simple / single-box SKU).
+// Wired in main.go to catalog.Service.ListSKUComponents.
+type SKUComponentResolver interface {
+	GetSKUComponents(ctx context.Context, skuID uuid.UUID) ([]SKUComponentInfo, error)
+}
+
+type SKUComponentInfo struct {
+	ComponentType string
+	CbmPerUnit    float64
+	SortOrder     int
+}

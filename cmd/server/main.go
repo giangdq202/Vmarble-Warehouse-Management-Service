@@ -274,6 +274,16 @@ func main() {
 	}); ok {
 		hooked.SetShortShippedAutoCreator(&deliveryShortShippedAdapter{svc: loadingExceptionSvc})
 	}
+	if hooked, ok := packingSvc.(interface {
+		SetSKUComponentResolver(packing.SKUComponentResolver)
+	}); ok {
+		hooked.SetSKUComponentResolver(&packingSKUComponentResolverAdapter{svc: catalogSvc})
+	}
+	if hooked, ok := deliverySvc.(interface {
+		SetFGComponentChecker(delivery.FGComponentChecker)
+	}); ok {
+		hooked.SetFGComponentChecker(&deliveryFGComponentCheckerAdapter{svc: packingSvc})
+	}
 
 	// Scrap sales (#299). No cross-module deps — standalone CRUD.
 	scrapSvc := scrap.NewService(scrapStore)
@@ -1595,4 +1605,33 @@ func (a *catalogPolicyAuditAdapter) LogMinRemnantPolicyChange(ctx context.Contex
 		in.MaterialID, in.ActorID, meta,
 	)
 	return err
+}
+
+// packingSKUComponentResolverAdapter implements packing.SKUComponentResolver by
+// delegating to catalog.Service.ListSKUComponents. Wired to break the
+// packing → catalog import cycle via a local interface.
+type packingSKUComponentResolverAdapter struct{ svc catalog.Service }
+
+func (a *packingSKUComponentResolverAdapter) GetSKUComponents(ctx context.Context, skuID uuid.UUID) ([]packing.SKUComponentInfo, error) {
+	comps, err := a.svc.ListSKUComponents(ctx, skuID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]packing.SKUComponentInfo, len(comps))
+	for i, c := range comps {
+		out[i] = packing.SKUComponentInfo{
+			ComponentType: c.ComponentType,
+			CbmPerUnit:    c.CbmPerUnit,
+			SortOrder:     c.SortOrder,
+		}
+	}
+	return out, nil
+}
+
+// deliveryFGComponentCheckerAdapter implements delivery.FGComponentChecker by
+// delegating to packing.Service.CheckComponentsForSeal (BR-PK-MULTI03).
+type deliveryFGComponentCheckerAdapter struct{ svc packing.Service }
+
+func (a *deliveryFGComponentCheckerAdapter) CheckComponentsForSeal(ctx context.Context, containerID uuid.UUID) error {
+	return a.svc.CheckComponentsForSeal(ctx, containerID)
 }

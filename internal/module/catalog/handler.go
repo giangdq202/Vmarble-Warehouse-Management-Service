@@ -40,6 +40,10 @@ func (h *Handler) Register(rg *gin.RouterGroup) {
 	rg.PUT("/skus/:id/packing-units/:unit", auth.RequireAdminOnly(), h.upsertPackingUnit)
 	rg.GET("/skus/:id/packing-units", h.listPackingUnits)
 	rg.DELETE("/skus/:id/packing-units/:unit", auth.RequireAdminOnly(), h.deletePackingUnit)
+
+	rg.PUT("/skus/:id/components/:type", auth.RequireAdminOnly(), h.upsertSKUComponent)
+	rg.GET("/skus/:id/components", h.listSKUComponents)
+	rg.DELETE("/skus/:id/components/:type", auth.RequireAdminOnly(), h.deleteSKUComponent)
 }
 
 // createMaterial godoc
@@ -545,4 +549,53 @@ func (h *Handler) listBOMVariants(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, variants)
+}
+
+func (h *Handler) upsertSKUComponent(c *gin.Context) {
+	skuID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+	componentType := c.Param("type")
+	var in UpsertSKUComponentInput
+	if !httpkit.Bind(c, &in) {
+		return
+	}
+	in.SKUID = skuID
+	in.ComponentType = componentType
+	comp, err := h.svc.UpsertSKUComponent(c.Request.Context(), in)
+	if err != nil {
+		httpkit.Error(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, comp)
+}
+
+func (h *Handler) listSKUComponents(c *gin.Context) {
+	skuID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+	comps, err := h.svc.ListSKUComponents(c.Request.Context(), skuID)
+	if err != nil {
+		httpkit.Error(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, comps)
+}
+
+func (h *Handler) deleteSKUComponent(c *gin.Context) {
+	skuID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+	componentType := c.Param("type")
+	if err := h.svc.DeleteSKUComponent(c.Request.Context(), skuID, componentType); err != nil {
+		httpkit.Error(c, err)
+		return
+	}
+	c.Status(http.StatusNoContent)
 }

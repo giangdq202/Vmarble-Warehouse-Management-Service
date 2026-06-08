@@ -166,6 +166,15 @@ func (m *mockStore) selectPackingUnitsBySkuID(_ context.Context, _ uuid.UUID) ([
 func (m *mockStore) deletePackingUnit(_ context.Context, _ uuid.UUID, _ string) error {
 	return m.deletePackingUnitErr
 }
+func (m *mockStore) upsertSKUComponent(_ context.Context, _ UpsertSKUComponentInput) (SKUComponent, error) {
+	return SKUComponent{}, nil
+}
+func (m *mockStore) selectSKUComponentsBySkuID(_ context.Context, _ uuid.UUID) ([]SKUComponent, error) {
+	return nil, nil
+}
+func (m *mockStore) deleteSKUComponent(_ context.Context, _ uuid.UUID, _ string) error {
+	return nil
+}
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 

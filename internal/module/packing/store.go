@@ -17,6 +17,9 @@ type store interface {
 	selectFGByBarcodeID(ctx context.Context, barcodeID uuid.UUID) (FGPool, error)
 	selectFGByWorkOrderID(ctx context.Context, woID uuid.UUID) ([]FGPool, error)
 	selectFGPaged(ctx context.Context, p httpkit.PageParams, f FGListFilter) ([]FGPool, int, error)
+	// selectReservedFGsByContainer returns all RESERVED fg_pool rows whose
+	// container_line_id belongs to containerID. Used by CheckComponentsForSeal.
+	selectReservedFGsByContainer(ctx context.Context, containerID uuid.UUID) ([]FGPool, error)
 
 	selectDefectByID(ctx context.Context, id uuid.UUID) (FGDefect, error)
 	selectDefectByFGID(ctx context.Context, fgID uuid.UUID) (FGDefect, error)

@@ -76,6 +76,27 @@ type UpdateSKUInput struct {
 	HSCode   *string
 }
 
+// SKUComponent represents one physical sub-package a SKU ships in.
+// Examples: TOP, BASE, DRAWER. component_type is free-text; unique per SKU.
+// cbm_per_unit is the individual package's volume in cubic metres.
+type SKUComponent struct {
+	ID            uuid.UUID `json:"id"`
+	SKUID         uuid.UUID `json:"sku_id"`
+	ComponentType string    `json:"component_type"`
+	CbmPerUnit    float64   `json:"cbm_per_unit"`
+	SortOrder     int       `json:"sort_order"`
+	CreatedAt     time.Time `json:"created_at"`
+}
+
+// UpsertSKUComponentInput creates or replaces one (sku_id, component_type) row.
+// BR-PK-MULTI01: component_type must be a non-empty string unique per SKU.
+type UpsertSKUComponentInput struct {
+	SKUID         uuid.UUID `json:"sku_id"`
+	ComponentType string    `json:"component_type"`
+	CbmPerUnit    float64   `json:"cbm_per_unit"`
+	SortOrder     int       `json:"sort_order"`
+}
+
 // PackingUnit represents one row in sku_packing_units.
 // unit: piece | set | carton; pieces_per_unit >= 1.
 type PackingUnit struct {
@@ -146,6 +167,12 @@ type Service interface {
 	DeactivateSKU(ctx context.Context, skuID uuid.UUID) error
 	// UpdateSKU sets export/shipping fields (BR-SKU02 validates hs_code format).
 	UpdateSKU(ctx context.Context, in UpdateSKUInput) (SKU, error)
+
+	// UpsertSKUComponent creates or replaces one (sku_id, component_type) row.
+	// BR-PK-MULTI01: component_type must be a non-empty string unique per SKU.
+	UpsertSKUComponent(ctx context.Context, in UpsertSKUComponentInput) (SKUComponent, error)
+	ListSKUComponents(ctx context.Context, skuID uuid.UUID) ([]SKUComponent, error)
+	DeleteSKUComponent(ctx context.Context, skuID uuid.UUID, componentType string) error
 
 	// UpsertPackingUnit creates or replaces a (sku_id, unit) row.
 	// Setting is_default=true automatically clears is_default on all other units
