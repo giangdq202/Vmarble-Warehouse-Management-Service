@@ -12427,6 +12427,10 @@ const docTemplate = `{
                 "finalized_by": {
                     "type": "string"
                 },
+                "fx_rate_to_vnd": {
+                    "description": "FXRateToVND is the closest-on-or-before-WO-completion rate for SOCurrency.\nNil when SOCurrency is nil or \"VND\".",
+                    "type": "number"
+                },
                 "id": {
                     "type": "string"
                 },
@@ -12437,6 +12441,10 @@ const docTemplate = `{
                     "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.Money"
                 },
                 "sku_id": {
+                    "type": "string"
+                },
+                "so_currency": {
+                    "description": "SOCurrency is the ISO-4217 currency of the linked sales order line.\nNil for VND orders or when the WO has no SO link.",
                     "type": "string"
                 },
                 "total_cost": {

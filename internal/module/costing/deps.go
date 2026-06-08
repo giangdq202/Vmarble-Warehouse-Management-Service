@@ -2,6 +2,7 @@ package costing
 
 import (
 	"context"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/vmarble/warehouse-management-service/internal/domain"
@@ -12,9 +13,23 @@ type WorkOrderReader interface {
 }
 
 type WOInfo struct {
-	ID     uuid.UUID
-	SKUID  uuid.UUID
-	Status domain.WorkOrderStatus
+	ID               uuid.UUID
+	SKUID            uuid.UUID
+	Status           domain.WorkOrderStatus
+	SalesOrderLineID *uuid.UUID
+	CompletedAt      *time.Time
+}
+
+// FXRateResolver fetches the FX rate closest on-or-before a given date.
+// Returns ErrNotFound when no rate exists for the currency.
+type FXRateResolver interface {
+	GetRateOnDate(ctx context.Context, currency string, date time.Time) (float64, error)
+}
+
+// SOCurrencyReader returns the ISO-4217 currency code of the sales order
+// that owns a given SO line. Returns "" for VND-denominated orders.
+type SOCurrencyReader interface {
+	GetSOLineCurrency(ctx context.Context, soLineID uuid.UUID) (string, error)
 }
 
 type CuttingDataReader interface {
