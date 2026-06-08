@@ -136,6 +136,8 @@ func (h *Handler) Register(rg *gin.RouterGroup) {
 	rg.GET("/machines/:id/slots", h.listSlots)
 	rg.GET("/slots/:slotID", h.getSlot)
 	rg.DELETE("/slots/:slotID", auth.RequireRole(auth.RoleCNCManager, auth.RolePlanner, auth.RoleAdmin), h.deleteSlot)
+
+	rg.GET("/work-orders/export.xlsx", h.exportWorkOrders)
 }
 
 // createWorkOrder godoc
@@ -909,4 +911,23 @@ func (h *Handler) listLaborEntries(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, entries)
+}
+
+func (h *Handler) exportWorkOrders(c *gin.Context) {
+	createdFrom, createdTo, ok := parseWorkOrderCreatedAtFilter(c)
+	if !ok {
+		return
+	}
+	p := httpkit.BindPageParams(c)
+	f := WorkOrderListFilter{
+		Status:      c.Query("status"),
+		CreatedFrom: createdFrom,
+		CreatedTo:   createdTo,
+	}
+	c.Header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+	c.Header("Content-Disposition", "attachment; filename=work-orders.xlsx")
+	if err := h.svc.ExportWorkOrders(c.Request.Context(), p, f, c.Writer); err != nil {
+		c.Header("Content-Disposition", "")
+		httpkit.Error(c, err)
+	}
 }

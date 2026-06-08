@@ -2,6 +2,7 @@ package catalog
 
 import (
 	"context"
+	"io"
 	"time"
 
 	"github.com/google/uuid"
@@ -167,6 +168,8 @@ type Service interface {
 	DeactivateSKU(ctx context.Context, skuID uuid.UUID) error
 	// UpdateSKU sets export/shipping fields (BR-SKU02 validates hs_code format).
 	UpdateSKU(ctx context.Context, in UpdateSKUInput) (SKU, error)
+	// ExportSKUs writes up to limit SKUs as an .xlsx workbook to w.
+	ExportSKUs(ctx context.Context, p httpkit.PageParams, w io.Writer) error
 
 	// UpsertSKUComponent creates or replaces one (sku_id, component_type) row.
 	// BR-PK-MULTI01: component_type must be a non-empty string unique per SKU.

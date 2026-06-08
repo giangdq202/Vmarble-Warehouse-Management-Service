@@ -2,6 +2,7 @@ package production
 
 import (
 	"context"
+	"io"
 	"time"
 
 	"github.com/google/uuid"
@@ -266,6 +267,8 @@ type Service interface {
 	ListWorkOrders(ctx context.Context, p httpkit.PageParams, f WorkOrderListFilter) (httpkit.PagedResult[WorkOrder], error)
 	ListWorkOrdersByPlan(ctx context.Context, planID uuid.UUID) ([]WorkOrder, error)
 	ListWorkOrdersByAssignee(ctx context.Context, userID uuid.UUID) ([]WorkOrder, error)
+	// ExportWorkOrders writes up to limit WorkOrders as an .xlsx workbook to w.
+	ExportWorkOrders(ctx context.Context, p httpkit.PageParams, f WorkOrderListFilter, w io.Writer) error
 	AdvanceStatus(ctx context.Context, woID uuid.UUID, in AdvanceStatusInput) error
 	// PartialComplete transitions IN_PROCESSING → PARTIAL_COMPLETE with an
 	// actual_qty < quantity, optionally spawning a carry-over WO for the

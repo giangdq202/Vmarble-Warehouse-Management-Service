@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -104,6 +105,9 @@ func (stubService) ListWOPreemptCandidates(context.Context, uuid.UUID) ([]WOPree
 	panic("unexpected call")
 }
 func (stubService) PreemptWO(context.Context, PreemptWOInput) (PreemptWOResult, error) {
+	panic("unexpected call")
+}
+func (stubService) ExportWorkOrders(context.Context, httpkit.PageParams, WorkOrderListFilter, io.Writer) error {
 	panic("unexpected call")
 }
 
