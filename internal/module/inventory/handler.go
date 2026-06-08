@@ -61,6 +61,8 @@ func (h *Handler) Register(rg *gin.RouterGroup) {
 
 	inv.GET("/work-orders/:id/pick-slip", auth.RequireRole(auth.RoleWarehouse, auth.RoleCNC, auth.RoleCNCManager, auth.RoleForeman, auth.RoleAdmin), h.getPickSlipPDF)
 
+	inv.GET("/lots/export.xlsx", h.exportLots)
+
 	rg.GET("/storage-locations", h.listStorageLocations)
 }
 
@@ -1205,4 +1207,14 @@ func actorIDFromContext(c *gin.Context) (uuid.UUID, bool) {
 		return uuid.Nil, false
 	}
 	return id, true
+}
+
+func (h *Handler) exportLots(c *gin.Context) {
+	p := httpkit.BindPageParams(c)
+	c.Header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+	c.Header("Content-Disposition", "attachment; filename=inventory-lots.xlsx")
+	if err := h.svc.ExportLots(c.Request.Context(), p, c.Writer); err != nil {
+		c.Header("Content-Disposition", "")
+		httpkit.Error(c, err)
+	}
 }

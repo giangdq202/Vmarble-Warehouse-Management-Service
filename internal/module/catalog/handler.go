@@ -44,6 +44,8 @@ func (h *Handler) Register(rg *gin.RouterGroup) {
 	rg.PUT("/skus/:id/components/:type", auth.RequireAdminOnly(), h.upsertSKUComponent)
 	rg.GET("/skus/:id/components", h.listSKUComponents)
 	rg.DELETE("/skus/:id/components/:type", auth.RequireAdminOnly(), h.deleteSKUComponent)
+
+	rg.GET("/skus/export.xlsx", h.exportSKUs)
 }
 
 // createMaterial godoc
@@ -598,4 +600,14 @@ func (h *Handler) deleteSKUComponent(c *gin.Context) {
 		return
 	}
 	c.Status(http.StatusNoContent)
+}
+
+func (h *Handler) exportSKUs(c *gin.Context) {
+	p := httpkit.BindPageParams(c)
+	c.Header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+	c.Header("Content-Disposition", "attachment; filename=skus.xlsx")
+	if err := h.svc.ExportSKUs(c.Request.Context(), p, c.Writer); err != nil {
+		c.Header("Content-Disposition", "")
+		httpkit.Error(c, err)
+	}
 }

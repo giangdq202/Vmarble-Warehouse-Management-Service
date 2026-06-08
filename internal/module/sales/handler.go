@@ -48,6 +48,8 @@ func (h *Handler) Register(rg *gin.RouterGroup) {
 	rg.PATCH("/customer-sku-mappings/:customerID/:code", auth.RequirePlannerUp(), h.patchCustomerSKUMapping)
 	rg.DELETE("/customer-sku-mappings/:customerID/:code", auth.RequirePlannerUp(), h.deleteCustomerSKUMapping)
 	rg.POST("/customer-sku-mappings/bulk-import", auth.RequirePlannerUp(), h.bulkImportCustomerSKUMappings)
+
+	rg.GET("/sales-orders/export.xlsx", h.exportSOs)
 }
 
 // ── Customer endpoints ───────────────────────────────────────────────────────
@@ -832,3 +834,22 @@ func (b *bomStripper) Read(p []byte) (int, error) {
 // existing handler still imports strconv so this stays lint-clean. Intentional
 // no-op assignment to silence editors that want to nuke unused imports.
 var _ = strconv.Itoa
+
+func (h *Handler) exportSOs(c *gin.Context) {
+	p := httpkit.BindPageParams(c)
+	f := SOListFilter{Status: c.Query("status")}
+	if raw := c.Query("customer_id"); raw != "" {
+		cid, err := uuid.Parse(raw)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid customer_id"})
+			return
+		}
+		f.CustomerID = &cid
+	}
+	c.Header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+	c.Header("Content-Disposition", "attachment; filename=sales-orders.xlsx")
+	if err := h.svc.ExportSOs(c.Request.Context(), p, f, c.Writer); err != nil {
+		c.Header("Content-Disposition", "")
+		httpkit.Error(c, err)
+	}
+}

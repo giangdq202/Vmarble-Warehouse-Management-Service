@@ -3,6 +3,7 @@ package inventory
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"time"
 
 	"github.com/google/uuid"
@@ -323,6 +324,8 @@ type Service interface {
 	ReceiveStock(ctx context.Context, in ReceiveStockInput) (InventoryLot, error)
 	ListLots(ctx context.Context, p httpkit.PageParams) (httpkit.PagedResult[InventoryLot], error)
 	DeactivateLot(ctx context.Context, lotID uuid.UUID) error
+	// ExportLots writes up to limit InventoryLots as an .xlsx workbook to w.
+	ExportLots(ctx context.Context, p httpkit.PageParams, w io.Writer) error
 
 	// QCPassLot transitions every PENDING_QC sheet of the lot to AVAILABLE
 	// (BR-INV02). Idempotent: 0 PENDING_QC sheets returns ErrPreconditionFailed

@@ -7,6 +7,7 @@ package sales
 
 import (
 	"context"
+	"io"
 	"time"
 
 	"github.com/google/uuid"
@@ -267,6 +268,8 @@ type Service interface {
 	ConfirmSO(ctx context.Context, id uuid.UUID) error
 	CancelSO(ctx context.Context, in CancelSOInput) error
 	SplitToPlan(ctx context.Context, in SplitToPlanInput) (SplitToPlanResult, error)
+	// ExportSOs writes up to limit SalesOrders as an .xlsx workbook to w.
+	ExportSOs(ctx context.Context, p httpkit.PageParams, f SOListFilter, w io.Writer) error
 
 	// GetSOLine returns one sales_order_line row joined with its parent SO so
 	// callers (delivery.AddLine) can validate qty + SO status in one round-trip.
