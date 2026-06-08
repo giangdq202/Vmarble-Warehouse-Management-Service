@@ -23,6 +23,10 @@ type mockStore struct {
 	defectsByFG    map[uuid.UUID]uuid.UUID
 
 	insertBatchErr error
+	// candidatesOverride, when set, is returned verbatim by
+	// selectAvailableFGsBySKU (bypasses the map scan). Used by cutoff-sort
+	// tests that need to control the exact candidate list and cutoff dates.
+	candidatesOverride []fgSuggestionCandidate
 }
 
 func newMockStore() *mockStore {
@@ -96,13 +100,16 @@ func (m *mockStore) selectDefectByFGID(_ context.Context, fgID uuid.UUID) (FGDef
 	return m.defectsByID[id], nil
 }
 
-func (m *mockStore) selectAvailableFGsBySKU(_ context.Context, skuID, excludeID uuid.UUID, limit int) ([]FGPool, error) {
-	var out []FGPool
+func (m *mockStore) selectAvailableFGsBySKU(_ context.Context, skuID, excludeID uuid.UUID, limit int) ([]fgSuggestionCandidate, error) {
+	if m.candidatesOverride != nil {
+		return m.candidatesOverride, nil
+	}
+	var out []fgSuggestionCandidate
 	for _, fg := range m.fgsByID {
 		if fg.SKUID != skuID || fg.Status != FGStatusAvailable || fg.ID == excludeID {
 			continue
 		}
-		out = append(out, fg)
+		out = append(out, fgSuggestionCandidate{FG: fg})
 		if len(out) >= limit {
 			break
 		}
@@ -1172,7 +1179,93 @@ func TestReportDefect_ReservedFG_PoolHasDifferentSKU_SuggestsCarryOver(t *testin
 	}
 }
 
-// ── Multi-component SKU (BR-PK-MULTI01/02/03) ───────────────────────────────
+func TestReportDefect_Suggestions_SortedByCutoffASC(t *testing.T) {
+	h := newHarness()
+	skuID := uuid.New()
+	soLineID := uuid.New()
+
+	// Defected FG — RESERVED on a container line.
+	fg := h.seedFG(uuid.New(), skuID, &soLineID, FGStatusReserved)
+	clID := uuid.New()
+	fg.ContainerLineID = &clID
+	h.store.fgsByID[fg.ID] = fg
+
+	soonCutoff := time.Now().UTC().Add(3 * 24 * time.Hour)   // 3 days away
+	laterCutoff := time.Now().UTC().Add(10 * 24 * time.Hour) // 10 days away
+
+	fg1 := FGPool{ID: uuid.New(), SKUID: skuID, Status: FGStatusAvailable, BarcodeID: uuid.New()}
+	fg2 := FGPool{ID: uuid.New(), SKUID: skuID, Status: FGStatusAvailable, BarcodeID: uuid.New()}
+
+	// Store returns candidates pre-sorted by cutoff ASC (as the real DB does).
+	// The service must preserve that order in the suggestion list.
+	h.store.candidatesOverride = []fgSuggestionCandidate{
+		{FG: fg2, CutoffDate: &soonCutoff},
+		{FG: fg1, CutoffDate: &laterCutoff},
+	}
+
+	out, err := h.svc.ReportDefect(context.Background(), ReportDefectInput{
+		BarcodeID:  fg.BarcodeID,
+		Reason:     DefectReasonBroken,
+		DetectedBy: uuid.New(),
+	})
+	if err != nil {
+		t.Fatalf("unexpected: %v", err)
+	}
+	if len(out.Suggestions) != 2 {
+		t.Fatalf("want 2 suggestions, got %d", len(out.Suggestions))
+	}
+	// Both suggestions must carry ContainerCutoffDate + DaysToCutoff.
+	for i, s := range out.Suggestions {
+		if s.ContainerCutoffDate == nil {
+			t.Errorf("suggestion[%d]: ContainerCutoffDate must not be nil", i)
+		}
+		if s.DaysToCutoff == nil {
+			t.Errorf("suggestion[%d]: DaysToCutoff must not be nil", i)
+		}
+	}
+	// The candidate with the sooner cutoff must appear first (store already
+	// sorted; service preserves the order).
+	if out.Suggestions[0].FGID == nil || *out.Suggestions[0].FGID != fg2.ID {
+		t.Errorf("first suggestion should be fg2 (soonest cutoff), got %v", out.Suggestions[0].FGID)
+	}
+	if out.Suggestions[1].FGID == nil || *out.Suggestions[1].FGID != fg1.ID {
+		t.Errorf("second suggestion should be fg1 (later cutoff), got %v", out.Suggestions[1].FGID)
+	}
+}
+
+func TestReportDefect_Suggestions_NilCutoff_FieldsOmitted(t *testing.T) {
+	h := newHarness()
+	skuID := uuid.New()
+	soLineID := uuid.New()
+
+	fg := h.seedFG(uuid.New(), skuID, &soLineID, FGStatusReserved)
+	clID := uuid.New()
+	fg.ContainerLineID = &clID
+	h.store.fgsByID[fg.ID] = fg
+
+	candidate := FGPool{ID: uuid.New(), SKUID: skuID, Status: FGStatusAvailable, BarcodeID: uuid.New()}
+	h.store.candidatesOverride = []fgSuggestionCandidate{
+		{FG: candidate, CutoffDate: nil},
+	}
+
+	out, err := h.svc.ReportDefect(context.Background(), ReportDefectInput{
+		BarcodeID:  fg.BarcodeID,
+		Reason:     DefectReasonBroken,
+		DetectedBy: uuid.New(),
+	})
+	if err != nil {
+		t.Fatalf("unexpected: %v", err)
+	}
+	if len(out.Suggestions) != 1 {
+		t.Fatalf("want 1 suggestion, got %d", len(out.Suggestions))
+	}
+	if out.Suggestions[0].ContainerCutoffDate != nil {
+		t.Error("ContainerCutoffDate should be nil when no booked container")
+	}
+	if out.Suggestions[0].DaysToCutoff != nil {
+		t.Error("DaysToCutoff should be nil when no booked container")
+	}
+}
 
 type mockSKUComponentResolver struct {
 	comps map[uuid.UUID][]SKUComponentInfo

@@ -125,6 +125,13 @@ type ShortfallSuggestion struct {
 	Detail string     `json:"detail"`            // human-readable explanation
 	FGID   *uuid.UUID `json:"fg_id,omitempty"`   // for REASSIGN: candidate FG
 	SKUID  uuid.UUID  `json:"sku_id"`
+	// ContainerCutoffDate is the soonest cutoff among open containers that
+	// still need this FG's SO line. Nil when no container is booked yet.
+	ContainerCutoffDate *time.Time `json:"container_cutoff_date,omitempty"`
+	// DaysToCutoff is the integer number of days from now to
+	// ContainerCutoffDate. Negative means the cutoff has already passed.
+	// Nil when ContainerCutoffDate is nil.
+	DaysToCutoff *int `json:"days_to_cutoff,omitempty"`
 }
 
 const (

@@ -325,6 +325,8 @@ func (svc *service) ReportDefect(ctx context.Context, in ReportDefectInput) (Def
 // buildShortfallSuggestions returns actionable suggestions after a defect.
 // If the FG was not on a container, there is no shortfall → empty.
 // Otherwise, check the pool for same-SKU AVAILABLE replacements.
+// Candidates are pre-sorted by nearest container cutoff_date ASC NULLS LAST
+// by the store so the most urgent replacement surfaces first (#19).
 func (svc *service) buildShortfallSuggestions(ctx context.Context, hadContainerLine bool, skuID, excludeFGID uuid.UUID, skuCode string) []ShortfallSuggestion {
 	if !hadContainerLine {
 		return nil
@@ -349,15 +351,22 @@ func (svc *service) buildShortfallSuggestions(ctx context.Context, hadContainerL
 		}}
 	}
 
+	now := time.Now().UTC()
 	suggestions := make([]ShortfallSuggestion, 0, len(candidates))
 	for i := range candidates {
-		id := candidates[i].ID
-		suggestions = append(suggestions, ShortfallSuggestion{
-			Type:   SuggestionReassign,
+		id := candidates[i].FG.ID
+		s := ShortfallSuggestion{
+			Type:  SuggestionReassign,
 			Detail: "FG " + id.String()[:8] + " available (same SKU " + skuCode + ")",
-			FGID:   &id,
-			SKUID:  skuID,
-		})
+			FGID:  &id,
+			SKUID: skuID,
+		}
+		if candidates[i].CutoffDate != nil {
+			s.ContainerCutoffDate = candidates[i].CutoffDate
+			days := int(candidates[i].CutoffDate.Sub(now).Hours() / 24)
+			s.DaysToCutoff = &days
+		}
+		suggestions = append(suggestions, s)
 	}
 	return suggestions
 }
