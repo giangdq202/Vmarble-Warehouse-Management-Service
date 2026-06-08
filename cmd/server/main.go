@@ -22,6 +22,7 @@ import (
 	"github.com/vmarble/warehouse-management-service/internal/module/costing"
 	"github.com/vmarble/warehouse-management-service/internal/module/dashboard"
 	"github.com/vmarble/warehouse-management-service/internal/module/delivery"
+	"github.com/vmarble/warehouse-management-service/internal/module/fxrates"
 	"github.com/vmarble/warehouse-management-service/internal/module/inventory"
 	"github.com/vmarble/warehouse-management-service/internal/module/loading_exception"
 	"github.com/vmarble/warehouse-management-service/internal/module/order"
@@ -96,6 +97,7 @@ func main() {
 	packingStore := packing.NewPGStore(pool)
 	loadingExceptionStore := loading_exception.NewPGStore(pool)
 	scrapStore := scrap.NewPGStore(pool)
+	fxratesStore := fxrates.NewPGStore(pool)
 	shippingStore := shipping.NewPGStore(pool)
 
 	// ── Module services ─────────────────────────────────────
@@ -287,7 +289,21 @@ func main() {
 
 	// Scrap sales (#299). No cross-module deps — standalone CRUD.
 	scrapSvc := scrap.NewService(scrapStore)
+	fxratesSvc := fxrates.NewService(fxratesStore)
 	shippingSvc := shipping.NewService(shippingStore)
+
+	// Wire FX rate + SO currency resolvers into costing now that both
+	// fxratesSvc and salesSvc are constructed.
+	if hooked, ok := costingSvc.(interface {
+		SetFXRateResolver(costing.FXRateResolver)
+	}); ok {
+		hooked.SetFXRateResolver(&costingFXRateAdapter{svc: fxratesSvc})
+	}
+	if hooked, ok := costingSvc.(interface {
+		SetSOCurrencyReader(costing.SOCurrencyReader)
+	}); ok {
+		hooked.SetSOCurrencyReader(&costingSOCurrencyAdapter{svc: salesSvc})
+	}
 
 	// ── Background: auto-release expired remnant allocations ─────────────────
 	// Ticks every cfg.RemnantAllocCheckInterval. Remnants that have been
@@ -349,6 +365,7 @@ func main() {
 	packing.NewHandler(packingSvc).Register(api)
 	loading_exception.NewHandler(loadingExceptionSvc).Register(api)
 	scrap.NewHandler(scrapSvc).Register(api)
+	fxrates.NewHandler(fxratesSvc).Register(api)
 	shipping.NewHandler(shippingSvc).Register(api)
 
 	srv := &http.Server{
@@ -431,7 +448,7 @@ func (a *woAdapter) GetWorkOrder(ctx context.Context, woID uuid.UUID) (costing.W
 	if err != nil {
 		return costing.WOInfo{}, err
 	}
-	return costing.WOInfo{ID: wo.ID, SKUID: wo.SKUID, Status: wo.Status}, nil
+	return costing.WOInfo{ID: wo.ID, SKUID: wo.SKUID, Status: wo.Status, SalesOrderLineID: wo.SalesOrderLineID}, nil
 }
 
 type sheetAssignAdapter struct {
@@ -1634,4 +1651,26 @@ type deliveryFGComponentCheckerAdapter struct{ svc packing.Service }
 
 func (a *deliveryFGComponentCheckerAdapter) CheckComponentsForSeal(ctx context.Context, containerID uuid.UUID) error {
 	return a.svc.CheckComponentsForSeal(ctx, containerID)
+}
+
+// costingFXRateAdapter bridges fxrates.Service → costing.FXRateResolver.
+type costingFXRateAdapter struct{ svc fxrates.Service }
+
+func (a *costingFXRateAdapter) GetRateOnDate(ctx context.Context, currency string, date time.Time) (float64, error) {
+	r, err := a.svc.GetRateOnDate(ctx, currency, date)
+	if err != nil {
+		return 0, err
+	}
+	return r.RateToVND, nil
+}
+
+// costingSOCurrencyAdapter bridges sales.Service → costing.SOCurrencyReader.
+type costingSOCurrencyAdapter struct{ svc sales.Service }
+
+func (a *costingSOCurrencyAdapter) GetSOLineCurrency(ctx context.Context, soLineID uuid.UUID) (string, error) {
+	_, so, err := a.svc.GetSOLine(ctx, soLineID)
+	if err != nil {
+		return "", err
+	}
+	return so.Currency, nil
 }

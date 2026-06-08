@@ -18,12 +18,10 @@ func NewService(st store) Service {
 }
 
 func (s *service) CreateScrapSale(ctx context.Context, in CreateScrapSaleInput) (ScrapSale, error) {
-	// Phase A constraint (BR-C08): only VND currency accepted.
-	if in.Currency != "VND" {
-		return ScrapSale{}, domain.NewBizError(domain.ErrInvalidInput, "only VND supported in Phase A")
-	}
-
 	// Validate inputs.
+	if in.Currency == "" {
+		return ScrapSale{}, domain.NewBizError(domain.ErrInvalidInput, "currency is required")
+	}
 	if in.SaleDate.IsZero() {
 		return ScrapSale{}, domain.NewBizError(domain.ErrInvalidInput, "sale_date is required")
 	}

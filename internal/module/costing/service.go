@@ -19,6 +19,8 @@ type service struct {
 	lbr      LaborDataReader
 	notifier CostingNotifier
 	audit    AuditLogger
+	fxr      FXRateResolver
+	socr     SOCurrencyReader
 }
 
 func NewService(st store, wor WorkOrderReader, cdr CuttingDataReader, conr ConsumptionDataReader, lbr LaborDataReader) Service {
@@ -41,6 +43,12 @@ func NewServiceWithNotifier(st store, wor WorkOrderReader, cdr CuttingDataReader
 func NewServiceFull(st store, wor WorkOrderReader, cdr CuttingDataReader, conr ConsumptionDataReader, lbr LaborDataReader, notifier CostingNotifier, audit AuditLogger) Service {
 	return &service{st: st, wor: wor, cdr: cdr, conr: conr, lbr: lbr, notifier: notifier, audit: audit}
 }
+
+// SetFXRateResolver wires the FX rate lookup after construction (cycle break).
+func (s *service) SetFXRateResolver(r FXRateResolver) { s.fxr = r }
+
+// SetSOCurrencyReader wires the SO currency lookup after construction (cycle break).
+func (s *service) SetSOCurrencyReader(r SOCurrencyReader) { s.socr = r }
 
 func (s *service) ComputeCost(ctx context.Context, workOrderID uuid.UUID) (CostingRecord, error) {
 	wo, err := s.wor.GetWorkOrder(ctx, workOrderID)
@@ -87,6 +95,28 @@ func (s *service) ComputeCost(ctx context.Context, workOrderID uuid.UUID) (Costi
 	}
 	totalCost := materialCost.Add(auxiliaryCost).Add(laborCost)
 
+	// Multi-currency: if the WO is linked to an SO line, capture the SO
+	// currency and the closest fx_rate on or before WO completion date.
+	// Best-effort — missing rate or resolver is silently skipped.
+	var soCurrency *string
+	var fxRateToVND *float64
+	if wo.SalesOrderLineID != nil && s.socr != nil {
+		if cur, err2 := s.socr.GetSOLineCurrency(ctx, *wo.SalesOrderLineID); err2 == nil && cur != "" && cur != "VND" {
+			soCurrency = &cur
+			if s.fxr != nil {
+				rateDate := time.Now().UTC()
+				if wo.CompletedAt != nil {
+					rateDate = *wo.CompletedAt
+				}
+				if rate, err3 := s.fxr.GetRateOnDate(ctx, cur, rateDate); err3 == nil {
+					fxRateToVND = &rate
+				} else {
+					slog.Warn("costing: fx rate not found", "currency", cur, "date", rateDate, "err", err3)
+				}
+			}
+		}
+	}
+
 	record := CostingRecord{
 		WorkOrderID:   workOrderID,
 		SKUID:         wo.SKUID,
@@ -95,6 +125,8 @@ func (s *service) ComputeCost(ctx context.Context, workOrderID uuid.UUID) (Costi
 		AuxiliaryCost: auxiliaryCost,
 		LaborCost:     laborCost,
 		TotalCost:     totalCost,
+		SOCurrency:    soCurrency,
+		FXRateToVND:   fxRateToVND,
 		Finalized:     false,
 		CreatedAt:     time.Now().UTC(),
 	}

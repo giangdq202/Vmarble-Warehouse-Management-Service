@@ -28,14 +28,16 @@ func (s *pgStore) insertCostingRecord(ctx context.Context, r CostingRecord) erro
 			auxiliary_cost_amount, auxiliary_cost_currency,
 			labor_cost_amount, labor_cost_currency,
 			total_cost_amount, total_cost_currency,
-			finalized, created_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
+			finalized, created_at,
+			so_currency, fx_rate_to_vnd
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`,
 		r.ID, r.WorkOrderID, r.SKUID, r.CostingType,
 		r.MaterialCost.Amount, r.MaterialCost.Currency,
 		r.AuxiliaryCost.Amount, r.AuxiliaryCost.Currency,
 		r.LaborCost.Amount, r.LaborCost.Currency,
 		r.TotalCost.Amount, r.TotalCost.Currency,
 		r.Finalized, r.CreatedAt,
+		r.SOCurrency, r.FXRateToVND,
 	)
 	return err
 }
@@ -47,13 +49,15 @@ func (s *pgStore) updateCostingRecord(ctx context.Context, r CostingRecord) erro
 			material_cost_amount = $4, material_cost_currency = $5,
 			auxiliary_cost_amount = $6, auxiliary_cost_currency = $7,
 			labor_cost_amount = $8, labor_cost_currency = $9,
-			total_cost_amount = $10, total_cost_currency = $11
+			total_cost_amount = $10, total_cost_currency = $11,
+			so_currency = $12, fx_rate_to_vnd = $13
 		WHERE work_order_id = $1 AND finalized = false`,
 		r.WorkOrderID, r.SKUID, r.CostingType,
 		r.MaterialCost.Amount, r.MaterialCost.Currency,
 		r.AuxiliaryCost.Amount, r.AuxiliaryCost.Currency,
 		r.LaborCost.Amount, r.LaborCost.Currency,
 		r.TotalCost.Amount, r.TotalCost.Currency,
+		r.SOCurrency, r.FXRateToVND,
 	)
 	if err != nil {
 		return err
@@ -84,7 +88,8 @@ const selectCostingCols = `id, work_order_id, sku_id, costing_type,
 	auxiliary_cost_amount, auxiliary_cost_currency,
 	labor_cost_amount, labor_cost_currency,
 	total_cost_amount, total_cost_currency,
-	finalized, finalized_at, finalized_by, created_at`
+	finalized, finalized_at, finalized_by, created_at,
+	so_currency, fx_rate_to_vnd`
 
 // prefixedCostingCols is selectCostingCols with a `cr.` table alias on every
 // column — used by selectCostingRecordsKeyset which JOINs skus for the
@@ -94,7 +99,8 @@ const prefixedCostingCols = `cr.id, cr.work_order_id, cr.sku_id, cr.costing_type
 	cr.auxiliary_cost_amount, cr.auxiliary_cost_currency,
 	cr.labor_cost_amount, cr.labor_cost_currency,
 	cr.total_cost_amount, cr.total_cost_currency,
-	cr.finalized, cr.finalized_at, cr.finalized_by, cr.created_at`
+	cr.finalized, cr.finalized_at, cr.finalized_by, cr.created_at,
+	cr.so_currency, cr.fx_rate_to_vnd`
 
 func scanCostingRecord(row interface{ Scan(...any) error }) (CostingRecord, error) {
 	var r CostingRecord
@@ -107,6 +113,7 @@ func scanCostingRecord(row interface{ Scan(...any) error }) (CostingRecord, erro
 		&r.LaborCost.Amount, &r.LaborCost.Currency,
 		&r.TotalCost.Amount, &r.TotalCost.Currency,
 		&r.Finalized, &finalizedAt, &finalizedBy, &r.CreatedAt,
+		&r.SOCurrency, &r.FXRateToVND,
 	)
 	r.FinalizedAt = finalizedAt
 	r.FinalizedBy = finalizedBy

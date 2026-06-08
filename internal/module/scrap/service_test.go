@@ -70,22 +70,19 @@ func TestCreateScrapSale_HappyPath(t *testing.T) {
 	}
 }
 
-func TestCreateScrapSale_CurrencyGuard_RejectsNonVND(t *testing.T) {
+func TestCreateScrapSale_NonVND_Allowed(t *testing.T) {
 	st := &mockStore{}
 	svc := NewService(st)
 
 	in := validInput()
 	in.Currency = "USD"
 	_, err := svc.CreateScrapSale(context.Background(), in)
-	if !errors.Is(err, domain.ErrInvalidInput) {
-		t.Errorf("expected ErrInvalidInput for non-VND currency, got %v", err)
-	}
-	if st.insertCalled {
-		t.Error("insertScrapSale must not be called when currency guard rejects")
+	if err != nil {
+		t.Errorf("non-VND currency should be accepted after Phase A guard removal, got: %v", err)
 	}
 }
 
-func TestCreateScrapSale_MissingCurrency_RejectsNonVND(t *testing.T) {
+func TestCreateScrapSale_EmptyCurrency_Rejects(t *testing.T) {
 	st := &mockStore{}
 	svc := NewService(st)
 
