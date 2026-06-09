@@ -78,6 +78,10 @@ definitions:
         type: array
       next_cursor:
         type: string
+      total:
+        type: integer
+      total_is_estimate:
+        type: boolean
     type: object
   github_com_vmarble_warehouse-management-service_internal_platform_httpkit.CursorResult-internal_module_costing_CostingRecord:
     properties:
@@ -89,6 +93,10 @@ definitions:
         type: array
       next_cursor:
         type: string
+      total:
+        type: integer
+      total_is_estimate:
+        type: boolean
     type: object
   github_com_vmarble_warehouse-management-service_internal_platform_httpkit.CursorResult-internal_module_inventory_AuditLogEntry:
     properties:
@@ -100,6 +108,10 @@ definitions:
         type: array
       next_cursor:
         type: string
+      total:
+        type: integer
+      total_is_estimate:
+        type: boolean
     type: object
   ? github_com_vmarble_warehouse-management-service_internal_platform_httpkit.CursorResult-internal_module_inventory_CuttingRecordReport
   : properties:
@@ -111,6 +123,10 @@ definitions:
         type: array
       next_cursor:
         type: string
+      total:
+        type: integer
+      total_is_estimate:
+        type: boolean
     type: object
   ? github_com_vmarble_warehouse-management-service_internal_platform_httpkit.CursorResult-internal_module_inventory_MaterialRejection
   : properties:
@@ -122,6 +138,10 @@ definitions:
         type: array
       next_cursor:
         type: string
+      total:
+        type: integer
+      total_is_estimate:
+        type: boolean
     type: object
   ? github_com_vmarble_warehouse-management-service_internal_platform_httpkit.CursorResult-internal_module_loading_exception_LoadingException
   : properties:
@@ -133,6 +153,10 @@ definitions:
         type: array
       next_cursor:
         type: string
+      total:
+        type: integer
+      total_is_estimate:
+        type: boolean
     type: object
   github_com_vmarble_warehouse-management-service_internal_platform_httpkit.CursorResult-internal_module_scrap_ScrapSale:
     properties:
@@ -144,6 +168,10 @@ definitions:
         type: array
       next_cursor:
         type: string
+      total:
+        type: integer
+      total_is_estimate:
+        type: boolean
     type: object
   github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_authn_UserDetail:
     properties:

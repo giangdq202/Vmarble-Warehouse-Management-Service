@@ -30,6 +30,9 @@ func (stubService) GetWorkOrder(context.Context, uuid.UUID) (WorkOrder, error) {
 func (s stubService) ListWorkOrders(context.Context, httpkit.PageParams, WorkOrderListFilter) (httpkit.PagedResult[WorkOrder], error) {
 	return s.listResult, nil
 }
+func (stubService) ListWorkOrdersKeyset(context.Context, httpkit.CursorParams, WorkOrderListFilter) (httpkit.CursorResult[WorkOrder], error) {
+	return httpkit.CursorResult[WorkOrder]{}, nil
+}
 func (stubService) ListWorkOrdersByPlan(context.Context, uuid.UUID) ([]WorkOrder, error) {
 	panic("unexpected call")
 }

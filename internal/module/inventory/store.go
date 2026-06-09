@@ -13,6 +13,7 @@ type store interface {
 	insertLot(ctx context.Context, lot InventoryLot) error
 	selectLots(ctx context.Context) ([]InventoryLot, error)
 	selectLotsPaged(ctx context.Context, p httpkit.PageParams) ([]InventoryLot, int, error)
+	selectLotsKeyset(ctx context.Context, search string, cur httpkit.Cursor, limit int) ([]InventoryLot, error)
 	deactivateLot(ctx context.Context, id uuid.UUID) error
 
 	insertSheets(ctx context.Context, sheets []BoardSheet) error

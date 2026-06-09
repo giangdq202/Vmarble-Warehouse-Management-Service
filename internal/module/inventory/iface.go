@@ -322,7 +322,7 @@ type PostCycleCountInput struct {
 
 type Service interface {
 	ReceiveStock(ctx context.Context, in ReceiveStockInput) (InventoryLot, error)
-	ListLots(ctx context.Context, p httpkit.PageParams) (httpkit.PagedResult[InventoryLot], error)
+	ListLots(ctx context.Context, p httpkit.CursorParams, search string) (httpkit.CursorResult[InventoryLot], error)
 	DeactivateLot(ctx context.Context, lotID uuid.UUID) error
 	// ExportLots writes up to limit InventoryLots as an .xlsx workbook to w.
 	ExportLots(ctx context.Context, p httpkit.PageParams, w io.Writer) error

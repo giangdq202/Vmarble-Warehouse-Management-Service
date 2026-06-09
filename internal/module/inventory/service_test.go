@@ -227,6 +227,9 @@ func (m *mockStore) selectLots(_ context.Context) ([]InventoryLot, error) {
 func (m *mockStore) selectLotsPaged(_ context.Context, _ httpkit.PageParams) ([]InventoryLot, int, error) {
 	return m.selectLotsPagedResult, m.selectLotsPagedTotal, m.selectLotsPagedErr
 }
+func (m *mockStore) selectLotsKeyset(_ context.Context, _ string, _ httpkit.Cursor, _ int) ([]InventoryLot, error) {
+	return m.selectLotsPagedResult, m.selectLotsPagedErr
+}
 func (m *mockStore) deactivateLot(_ context.Context, _ uuid.UUID) error {
 	return m.deactivateLotErr
 }
@@ -1474,7 +1477,7 @@ func TestListLots_ReturnsPersisted(t *testing.T) {
 	}
 	svc := NewService(st, nil)
 
-	result, err := svc.ListLots(context.Background(), httpkit.PageParams{Page: 1, Limit: 10})
+	result, err := svc.ListLots(context.Background(), httpkit.CursorParams{Limit: 10}, "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1490,7 +1493,7 @@ func TestListLots_Empty_ReturnsNil(t *testing.T) {
 	}
 	svc := NewService(st, nil)
 
-	result, err := svc.ListLots(context.Background(), httpkit.PageParams{Page: 1, Limit: 10})
+	result, err := svc.ListLots(context.Background(), httpkit.CursorParams{Limit: 10}, "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1504,7 +1507,7 @@ func TestListLots_StoreError_Propagates(t *testing.T) {
 	st := &mockStore{selectLotsPagedErr: dbErr}
 	svc := NewService(st, nil)
 
-	_, err := svc.ListLots(context.Background(), httpkit.PageParams{Page: 1, Limit: 10})
+	_, err := svc.ListLots(context.Background(), httpkit.CursorParams{Limit: 10}, "")
 	if !errors.Is(err, dbErr) {
 		t.Errorf("expected store error to propagate, got %v", err)
 	}
@@ -1906,22 +1909,16 @@ func TestListLots_ReturnsPagedResult(t *testing.T) {
 	}
 	svc := NewService(st, nil)
 
-	p := httpkit.PageParams{Page: 1, Limit: 10}
-	result, err := svc.ListLots(context.Background(), p)
+	p := httpkit.CursorParams{Limit: 10}
+	result, err := svc.ListLots(context.Background(), p, "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if len(result.Items) != 2 {
 		t.Errorf("items = %d, want 2", len(result.Items))
 	}
-	if result.TotalItems != 2 {
-		t.Errorf("total_items = %d, want 2", result.TotalItems)
-	}
-	if result.TotalPages != 1 {
-		t.Errorf("total_pages = %d, want 1", result.TotalPages)
-	}
-	if result.CurrentPage != 1 {
-		t.Errorf("current_page = %d, want 1", result.CurrentPage)
+	if result.HasMore {
+		t.Errorf("has_more should be false for 2 items with limit 10")
 	}
 }
 
@@ -1932,24 +1929,21 @@ func TestListLots_SearchNoResults_ReturnsEmptyItems(t *testing.T) {
 	}
 	svc := NewService(st, nil)
 
-	p := httpkit.PageParams{Page: 1, Limit: 10, Search: "SUP-DOES-NOT-EXIST"}
-	result, err := svc.ListLots(context.Background(), p)
+	p := httpkit.CursorParams{Limit: 10}
+	result, err := svc.ListLots(context.Background(), p, "SUP-DOES-NOT-EXIST")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if len(result.Items) != 0 {
 		t.Errorf("items = %d, want 0 for no-match search", len(result.Items))
 	}
-	if result.TotalItems != 0 {
-		t.Errorf("total_items = %d, want 0", result.TotalItems)
-	}
-	if result.TotalPages != 1 {
-		t.Errorf("total_pages = %d, want at least 1", result.TotalPages)
+	if result.HasMore {
+		t.Errorf("has_more should be false for empty result")
 	}
 }
 
 func TestListLots_LastPage_CorrectMetadata(t *testing.T) {
-	// 12 total, limit 5 → 3 pages; last page has 2 items
+	// 2 items returned with limit 5 → no next page
 	lastPageLots := []InventoryLot{
 		{ID: uuid.New(), SupplierRef: "SUP-011"},
 		{ID: uuid.New(), SupplierRef: "SUP-012"},
@@ -1960,19 +1954,13 @@ func TestListLots_LastPage_CorrectMetadata(t *testing.T) {
 	}
 	svc := NewService(st, nil)
 
-	p := httpkit.PageParams{Page: 3, Limit: 5}
-	result, err := svc.ListLots(context.Background(), p)
+	p := httpkit.CursorParams{Limit: 5}
+	result, err := svc.ListLots(context.Background(), p, "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if result.TotalItems != 12 {
-		t.Errorf("total_items = %d, want 12", result.TotalItems)
-	}
-	if result.TotalPages != 3 {
-		t.Errorf("total_pages = %d, want 3", result.TotalPages)
-	}
-	if result.CurrentPage != 3 {
-		t.Errorf("current_page = %d, want 3", result.CurrentPage)
+	if result.HasMore {
+		t.Errorf("has_more should be false when fewer items than limit")
 	}
 	if len(result.Items) != 2 {
 		t.Errorf("items on last page = %d, want 2", len(result.Items))
@@ -1984,7 +1972,7 @@ func TestListLots_StoreError_Propagated(t *testing.T) {
 	st := &mockStore{selectLotsPagedErr: storeErr}
 	svc := NewService(st, nil)
 
-	_, err := svc.ListLots(context.Background(), httpkit.PageParams{Page: 1, Limit: 10})
+	_, err := svc.ListLots(context.Background(), httpkit.CursorParams{Limit: 10}, "")
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}

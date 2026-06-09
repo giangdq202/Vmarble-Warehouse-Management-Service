@@ -247,8 +247,8 @@ func (h *Handler) list(c *gin.Context) {
 		return
 	}
 
-	p := httpkit.BindPageParams(c)
-	result, err := h.svc.ListWorkOrders(c.Request.Context(), p, WorkOrderListFilter{
+	p := httpkit.BindCursorParams(c)
+	result, err := h.svc.ListWorkOrdersKeyset(c.Request.Context(), p, WorkOrderListFilter{
 		Status:       c.Query("status"),
 		PlanID:       planID,
 		CreatedFrom:  createdFrom,

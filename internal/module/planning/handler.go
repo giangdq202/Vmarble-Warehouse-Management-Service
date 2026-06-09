@@ -79,8 +79,9 @@ func (h *Handler) create(c *gin.Context) {
 // @Failure      401  {object}  map[string]string
 // @Router       /api/v1/plans [get]
 func (h *Handler) list(c *gin.Context) {
-	p := httpkit.BindPageParams(c)
+	p := httpkit.BindCursorParams(c)
 	status := c.Query("status")
+	search := c.Query("search")
 
 	// Optional date window on pp.created_at. Parsed as YYYY-MM-DD in UTC; the
 	// upper bound is widened to the end of the day so the inclusive contract
@@ -105,7 +106,7 @@ func (h *Handler) list(c *gin.Context) {
 		to = &eod
 	}
 
-	result, err := h.svc.ListPlans(c.Request.Context(), p, status, from, to)
+	result, err := h.svc.ListPlans(c.Request.Context(), p, status, search, from, to)
 	if err != nil {
 		httpkit.Error(c, err)
 		return

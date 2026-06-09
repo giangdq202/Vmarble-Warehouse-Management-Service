@@ -265,6 +265,7 @@ type Service interface {
 	CreateWorkOrder(ctx context.Context, in CreateWOInput) (WorkOrder, error)
 	GetWorkOrder(ctx context.Context, woID uuid.UUID) (WorkOrder, error)
 	ListWorkOrders(ctx context.Context, p httpkit.PageParams, f WorkOrderListFilter) (httpkit.PagedResult[WorkOrder], error)
+	ListWorkOrdersKeyset(ctx context.Context, p httpkit.CursorParams, f WorkOrderListFilter) (httpkit.CursorResult[WorkOrder], error)
 	ListWorkOrdersByPlan(ctx context.Context, planID uuid.UUID) ([]WorkOrder, error)
 	ListWorkOrdersByAssignee(ctx context.Context, userID uuid.UUID) ([]WorkOrder, error)
 	// ExportWorkOrders writes up to limit WorkOrders as an .xlsx workbook to w.

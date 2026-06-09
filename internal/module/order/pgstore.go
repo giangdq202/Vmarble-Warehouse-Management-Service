@@ -116,6 +116,59 @@ func (s *pgStore) selectPOsPaged(ctx context.Context, p httpkit.PageParams, f PO
 	return pos, total, rows.Err()
 }
 
+func (s *pgStore) selectPOsKeyset(ctx context.Context, f POListFilter, cur httpkit.Cursor, limit int) ([]PO, error) {
+	search := "%" + f.Search + "%"
+
+	// Typed-nil binding so the IS NULL branch fires when From/To are unset.
+	var fromAny, toAny any
+	if f.From != nil {
+		fromAny = *f.From
+	}
+	if f.To != nil {
+		toAny = *f.To
+	}
+
+	args := []any{search, fromAny, toAny}
+	idx := 4
+
+	q := `SELECT po.id, po.code, po.expected_delivery, po.is_active, po.created_at,
+		        COALESCE(COUNT(li.id), 0) AS item_count,
+		        COALESCE(SUM(li.quantity), 0) AS total_quantity,
+		        COALESCE(COUNT(DISTINCT li.sku_id), 0) AS total_skus
+		 FROM purchase_orders po
+		 LEFT JOIN po_line_items li ON li.po_id = po.id
+		 WHERE po.is_active = true AND po.code ILIKE $1
+		   AND ($2::timestamptz IS NULL OR po.created_at >= $2)
+		   AND ($3::timestamptz IS NULL OR po.created_at <  $3)`
+
+	if !cur.IsZero() {
+		q += fmt.Sprintf(" AND (po.created_at, po.id) < ($%d, $%d)", idx, idx+1)
+		args = append(args, cur.Ts, cur.ID)
+		idx += 2
+	}
+
+	q += ` GROUP BY po.id, po.code, po.expected_delivery, po.is_active, po.created_at`
+	q += fmt.Sprintf(" ORDER BY po.created_at DESC, po.id DESC LIMIT $%d", idx)
+	args = append(args, limit)
+
+	rows, err := s.pool.Query(ctx, q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var pos []PO
+	for rows.Next() {
+		var po PO
+		if err := rows.Scan(&po.ID, &po.Code, &po.ExpectedDelivery, &po.IsActive, &po.CreatedAt,
+			&po.ItemCount, &po.TotalQuantity, &po.TotalSKUs); err != nil {
+			return nil, err
+		}
+		pos = append(pos, po)
+	}
+	return pos, rows.Err()
+}
+
 func (s *pgStore) selectPOByID(ctx context.Context, id uuid.UUID) (PO, error) {
 	var p PO
 	err := s.pool.QueryRow(ctx,

@@ -70,12 +70,12 @@ func (h *Handler) create(c *gin.Context) {
 // @Failure      401  {object}  map[string]string
 // @Router       /api/v1/pos [get]
 func (h *Handler) list(c *gin.Context) {
-	p := httpkit.BindPageParams(c)
+	p := httpkit.BindCursorParams(c)
 	from, to, ok := httpkit.ParseDateRangeFilter(c)
 	if !ok {
 		return
 	}
-	result, err := h.svc.ListPOs(c.Request.Context(), p, POListFilter{From: from, To: to})
+	result, err := h.svc.ListPOs(c.Request.Context(), p, POListFilter{Search: c.Query("search"), From: from, To: to})
 	if err != nil {
 		httpkit.Error(c, err)
 		return

@@ -105,8 +105,8 @@ func (h *Handler) receiveStock(c *gin.Context) {
 // @Failure      500  {object}  map[string]string
 // @Router       /api/v1/inventory/lots [get]
 func (h *Handler) listLots(c *gin.Context) {
-	p := httpkit.BindPageParams(c)
-	result, err := h.svc.ListLots(c.Request.Context(), p)
+	p := httpkit.BindCursorParams(c)
+	result, err := h.svc.ListLots(c.Request.Context(), p, c.Query("search"))
 	if err != nil {
 		httpkit.Error(c, err)
 		return

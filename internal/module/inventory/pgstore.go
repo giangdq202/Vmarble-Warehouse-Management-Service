@@ -105,6 +105,44 @@ func (s *pgStore) selectLotsPaged(ctx context.Context, p httpkit.PageParams) ([]
 	return lots, total, rows.Err()
 }
 
+func (s *pgStore) selectLotsKeyset(ctx context.Context, search string, cur httpkit.Cursor, limit int) ([]InventoryLot, error) {
+	searchPat := "%" + search + "%"
+
+	args := []any{searchPat}
+	idx := 2
+
+	q := `SELECT id, material_id, quantity, cost_per_sheet_amount, cost_per_sheet_currency, supplier_ref, is_active, received_at
+		 FROM inventory_lots
+		 WHERE is_active = true AND supplier_ref ILIKE $1`
+
+	if !cur.IsZero() {
+		q += fmt.Sprintf(" AND (received_at, id) < ($%d, $%d)", idx, idx+1)
+		args = append(args, cur.Ts, cur.ID)
+		idx += 2
+	}
+
+	q += fmt.Sprintf(" ORDER BY received_at DESC, id DESC LIMIT $%d", idx)
+	args = append(args, limit)
+
+	rows, err := s.pool.Query(ctx, q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var lots []InventoryLot
+	for rows.Next() {
+		var l InventoryLot
+		if err := rows.Scan(&l.ID, &l.MaterialID, &l.Quantity,
+			&l.CostPerSheet.Amount, &l.CostPerSheet.Currency,
+			&l.SupplierRef, &l.IsActive, &l.ReceivedAt); err != nil {
+			return nil, err
+		}
+		lots = append(lots, l)
+	}
+	return lots, rows.Err()
+}
+
 func (s *pgStore) deactivateLot(ctx context.Context, id uuid.UUID) error {
 	tag, err := s.pool.Exec(ctx,
 		`UPDATE inventory_lots SET is_active = false WHERE id = $1`,

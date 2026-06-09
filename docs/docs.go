@@ -11241,6 +11241,12 @@ const docTemplate = `{
                 },
                 "next_cursor": {
                     "type": "string"
+                },
+                "total": {
+                    "type": "integer"
+                },
+                "total_is_estimate": {
+                    "type": "boolean"
                 }
             }
         },
@@ -11258,6 +11264,12 @@ const docTemplate = `{
                 },
                 "next_cursor": {
                     "type": "string"
+                },
+                "total": {
+                    "type": "integer"
+                },
+                "total_is_estimate": {
+                    "type": "boolean"
                 }
             }
         },
@@ -11275,6 +11287,12 @@ const docTemplate = `{
                 },
                 "next_cursor": {
                     "type": "string"
+                },
+                "total": {
+                    "type": "integer"
+                },
+                "total_is_estimate": {
+                    "type": "boolean"
                 }
             }
         },
@@ -11292,6 +11310,12 @@ const docTemplate = `{
                 },
                 "next_cursor": {
                     "type": "string"
+                },
+                "total": {
+                    "type": "integer"
+                },
+                "total_is_estimate": {
+                    "type": "boolean"
                 }
             }
         },
@@ -11309,6 +11333,12 @@ const docTemplate = `{
                 },
                 "next_cursor": {
                     "type": "string"
+                },
+                "total": {
+                    "type": "integer"
+                },
+                "total_is_estimate": {
+                    "type": "boolean"
                 }
             }
         },
@@ -11326,6 +11356,12 @@ const docTemplate = `{
                 },
                 "next_cursor": {
                     "type": "string"
+                },
+                "total": {
+                    "type": "integer"
+                },
+                "total_is_estimate": {
+                    "type": "boolean"
                 }
             }
         },
@@ -11343,6 +11379,12 @@ const docTemplate = `{
                 },
                 "next_cursor": {
                     "type": "string"
+                },
+                "total": {
+                    "type": "integer"
+                },
+                "total_is_estimate": {
+                    "type": "boolean"
                 }
             }
         },

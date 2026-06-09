@@ -11,6 +11,7 @@ import (
 type store interface {
 	insertWorkOrder(ctx context.Context, wo WorkOrder) error
 	selectWorkOrdersPaged(ctx context.Context, p httpkit.PageParams, f WorkOrderListFilter) ([]WorkOrder, int, error)
+	selectWorkOrdersKeyset(ctx context.Context, f WorkOrderListFilter, cur httpkit.Cursor, limit int) ([]WorkOrder, error)
 	selectWorkOrderByID(ctx context.Context, id uuid.UUID) (WorkOrder, error)
 	selectWorkOrdersByPlan(ctx context.Context, planID uuid.UUID) ([]WorkOrder, error)
 	selectWorkOrdersByAssignee(ctx context.Context, userID uuid.UUID) ([]WorkOrder, error)

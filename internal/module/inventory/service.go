@@ -96,12 +96,18 @@ func (s *service) ReceiveStock(ctx context.Context, in ReceiveStockInput) (Inven
 	return lot, nil
 }
 
-func (s *service) ListLots(ctx context.Context, p httpkit.PageParams) (httpkit.PagedResult[InventoryLot], error) {
-	items, total, err := s.st.selectLotsPaged(ctx, p)
+func (s *service) ListLots(ctx context.Context, p httpkit.CursorParams, search string) (httpkit.CursorResult[InventoryLot], error) {
+	cur, err := p.Decoded()
 	if err != nil {
-		return httpkit.PagedResult[InventoryLot]{}, err
+		return httpkit.CursorResult[InventoryLot]{}, domain.NewBizError(domain.ErrInvalidInput, "invalid cursor")
 	}
-	return httpkit.NewPagedResult(items, total, p), nil
+	rows, err := s.st.selectLotsKeyset(ctx, search, cur, p.Limit+1)
+	if err != nil {
+		return httpkit.CursorResult[InventoryLot]{}, err
+	}
+	return httpkit.NewCursorResult(rows, p.Limit, func(l InventoryLot) httpkit.Cursor {
+		return httpkit.Cursor{Ts: l.ReceivedAt, ID: l.ID}
+	}), nil
 }
 
 func (s *service) DeactivateLot(ctx context.Context, lotID uuid.UUID) error {

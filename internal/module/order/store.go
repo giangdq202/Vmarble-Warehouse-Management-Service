@@ -13,6 +13,7 @@ type store interface {
 	// back, preventing orphan PO records.
 	insertPOWithItems(ctx context.Context, p PO, items []LineItem) error
 	selectPOsPaged(ctx context.Context, p httpkit.PageParams, f POListFilter) ([]PO, int, error)
+	selectPOsKeyset(ctx context.Context, f POListFilter, cur httpkit.Cursor, limit int) ([]PO, error)
 	selectPOByID(ctx context.Context, id uuid.UUID) (PO, error)
 	deactivatePO(ctx context.Context, id uuid.UUID) error
 	selectLineItemsByPO(ctx context.Context, poID uuid.UUID) ([]LineItem, error)

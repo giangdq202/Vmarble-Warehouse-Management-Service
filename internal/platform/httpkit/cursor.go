@@ -108,10 +108,15 @@ func BindCursorParams(c *gin.Context) CursorParams {
 // CursorResult is the standard envelope returned by keyset-paginated list
 // endpoints. NextCursor is omitted (not just empty) when there are no more
 // rows so clients can use plain "if has next_cursor" branching.
+// Total is the row count estimate (n_live_tup from pg_stat_user_tables);
+// TotalIsEstimate is true when the value comes from the stats collector
+// rather than a real COUNT(*).
 type CursorResult[T any] struct {
-	Items      []T    `json:"items"`
-	NextCursor string `json:"next_cursor,omitempty"`
-	HasMore    bool   `json:"has_more"`
+	Items           []T    `json:"items"`
+	NextCursor      string `json:"next_cursor,omitempty"`
+	HasMore         bool   `json:"has_more"`
+	Total           int64  `json:"total"`
+	TotalIsEstimate bool   `json:"total_is_estimate"`
 }
 
 // NewCursorResult builds the response envelope from an over-fetched slice.
@@ -130,19 +135,27 @@ type CursorResult[T any] struct {
 // The store's responsibility ends at "give me up to N+1 rows in the right
 // order"; pagination math lives here.
 func NewCursorResult[T any](items []T, limit int, getCursor func(T) Cursor) CursorResult[T] {
+	return NewCursorResultWithCount(items, limit, getCursor, 0, false)
+}
+
+// NewCursorResultWithCount is like NewCursorResult but also carries the
+// row-count estimate returned by EstimateRowCount / CountOrEstimate.
+func NewCursorResultWithCount[T any](items []T, limit int, getCursor func(T) Cursor, total int64, isEstimate bool) CursorResult[T] {
 	if items == nil {
 		items = []T{}
 	}
 	if limit < 1 {
 		limit = defaultPageLimit
 	}
+	base := CursorResult[T]{Total: total, TotalIsEstimate: isEstimate}
 	if len(items) <= limit {
-		return CursorResult[T]{Items: items, HasMore: false}
+		base.Items = items
+		base.HasMore = false
+		return base
 	}
 	kept := items[:limit]
-	return CursorResult[T]{
-		Items:      kept,
-		HasMore:    true,
-		NextCursor: getCursor(kept[len(kept)-1]).Encode(),
-	}
+	base.Items = kept
+	base.HasMore = true
+	base.NextCursor = getCursor(kept[len(kept)-1]).Encode()
+	return base
 }

@@ -72,6 +72,9 @@ func (s *concurrentMockStore) selectLots(_ context.Context) ([]InventoryLot, err
 func (s *concurrentMockStore) selectLotsPaged(_ context.Context, _ httpkit.PageParams) ([]InventoryLot, int, error) {
 	return nil, 0, nil
 }
+func (s *concurrentMockStore) selectLotsKeyset(_ context.Context, _ string, _ httpkit.Cursor, _ int) ([]InventoryLot, error) {
+	return nil, nil
+}
 func (s *concurrentMockStore) deactivateLot(_ context.Context, _ uuid.UUID) error   { return nil }
 func (s *concurrentMockStore) insertSheets(_ context.Context, _ []BoardSheet) error { return nil }
 

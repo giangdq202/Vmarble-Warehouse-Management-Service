@@ -98,23 +98,29 @@ func (svc *service) GetPlan(ctx context.Context, planID uuid.UUID) (Plan, error)
 	return plan, nil
 }
 
-func (svc *service) ListPlans(ctx context.Context, p httpkit.PageParams, status string, from, to *time.Time) (httpkit.PagedResult[Plan], error) {
+func (svc *service) ListPlans(ctx context.Context, p httpkit.CursorParams, status, search string, from, to *time.Time) (httpkit.CursorResult[Plan], error) {
 	if from != nil && to != nil && from.After(*to) {
-		return httpkit.PagedResult[Plan]{}, domain.NewBizError(domain.ErrInvalidInput, "from must not be after to")
+		return httpkit.CursorResult[Plan]{}, domain.NewBizError(domain.ErrInvalidInput, "from must not be after to")
 	}
-	plans, total, err := svc.s.selectPlansPaged(ctx, p, status, from, to)
+	cur, err := p.Decoded()
 	if err != nil {
-		return httpkit.PagedResult[Plan]{}, err
+		return httpkit.CursorResult[Plan]{}, domain.NewBizError(domain.ErrInvalidInput, "invalid cursor")
+	}
+	plans, err := svc.s.selectPlansKeyset(ctx, status, search, from, to, cur, p.Limit+1)
+	if err != nil {
+		return httpkit.CursorResult[Plan]{}, err
 	}
 	// Hydrate each plan's items inline.
 	for i := range plans {
 		items, err := svc.s.selectPlanItemsByPlanID(ctx, plans[i].ID)
 		if err != nil {
-			return httpkit.PagedResult[Plan]{}, err
+			return httpkit.CursorResult[Plan]{}, err
 		}
 		plans[i].Items = items
 	}
-	return httpkit.NewPagedResult(plans, total, p), nil
+	return httpkit.NewCursorResult(plans, p.Limit, func(pl Plan) httpkit.Cursor {
+		return httpkit.Cursor{Ts: pl.CreatedAt, ID: pl.ID}
+	}), nil
 }
 
 func (svc *service) ApprovePlan(ctx context.Context, planID uuid.UUID) error {
