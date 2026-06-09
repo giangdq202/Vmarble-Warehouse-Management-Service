@@ -120,6 +120,67 @@ func (s *pgStore) selectPlansPaged(ctx context.Context, p httpkit.PageParams, st
 	return plans, total, rows.Err()
 }
 
+func (s *pgStore) selectPlansKeyset(ctx context.Context, status, search string, from, to *time.Time, cur httpkit.Cursor, limit int) ([]Plan, error) {
+	searchPat := "%" + search + "%"
+
+	args := []any{status, searchPat, from, to}
+	idx := 5
+
+	q := `SELECT pp.id, pp.code,
+		        pp.po_id, po.code AS po_code,
+		        pp.sales_order_id, so.code AS so_code,
+		        pp.status, pp.deadline, pp.created_at,
+		        pp.canceled_reason, pp.canceled_at, pp.canceled_by
+		   FROM production_plans pp
+		   LEFT JOIN purchase_orders po ON po.id = pp.po_id
+		   LEFT JOIN sales_orders   so ON so.id = pp.sales_order_id
+		  WHERE ($1::text = '' OR pp.status = $1)
+		    AND ($2::text = '' OR pp.code ILIKE $2 OR po.code ILIKE $2 OR so.code ILIKE $2)
+		    AND ($3::timestamptz IS NULL OR pp.created_at >= $3)
+		    AND ($4::timestamptz IS NULL OR pp.created_at <= $4)`
+
+	if !cur.IsZero() {
+		q += fmt.Sprintf(" AND (pp.created_at, pp.id) < ($%d, $%d)", idx, idx+1)
+		args = append(args, cur.Ts, cur.ID)
+		idx += 2
+	}
+
+	q += fmt.Sprintf(" ORDER BY pp.created_at DESC, pp.id DESC LIMIT $%d", idx)
+	args = append(args, limit)
+
+	rows, err := s.pool.Query(ctx, q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var plans []Plan
+	for rows.Next() {
+		var plan Plan
+		var poCode, soCode, reason *string
+		if err := rows.Scan(
+			&plan.ID, &plan.Code,
+			&plan.POID, &poCode,
+			&plan.SOID, &soCode,
+			&plan.Status, &plan.Deadline, &plan.CreatedAt,
+			&reason, &plan.CanceledAt, &plan.CanceledBy,
+		); err != nil {
+			return nil, err
+		}
+		if poCode != nil {
+			plan.POCode = *poCode
+		}
+		if soCode != nil {
+			plan.SOCode = *soCode
+		}
+		if reason != nil {
+			plan.CanceledReason = *reason
+		}
+		plans = append(plans, plan)
+	}
+	return plans, rows.Err()
+}
+
 func (s *pgStore) selectPlanByID(ctx context.Context, id uuid.UUID) (Plan, error) {
 	var p Plan
 	var poCode, soCode, reason *string

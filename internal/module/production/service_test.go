@@ -120,6 +120,9 @@ func (m *mockStore) selectWorkOrdersPaged(_ context.Context, _ httpkit.PageParam
 	m.selectWorkOrdersFilter = f
 	return m.selectWorkOrdersResult, len(m.selectWorkOrdersResult), m.selectWorkOrdersErr
 }
+func (m *mockStore) selectWorkOrdersKeyset(_ context.Context, _ WorkOrderListFilter, _ httpkit.Cursor, _ int) ([]WorkOrder, error) {
+	panic("unexpected call")
+}
 func (m *mockStore) selectWorkOrderByID(_ context.Context, _ uuid.UUID) (WorkOrder, error) {
 	return m.selectWorkOrderByIDResult, m.selectWorkOrderByIDErr
 }

@@ -62,6 +62,10 @@ func (m *mockStore) selectLineItemsBySKU(_ context.Context, _ uuid.UUID) ([]Line
 	return m.selectLineItemsBySKUResult, m.selectLineItemsBySKUErr
 }
 
+func (m *mockStore) selectPOsKeyset(_ context.Context, _ POListFilter, _ httpkit.Cursor, _ int) ([]PO, error) {
+	return m.selectPOsResult, m.selectPOsErr
+}
+
 // ── helpers ───────────────────────────────────────────────────────────────────
 
 func validInput(lineItems ...CreateLineItemInput) CreatePOInput {
@@ -328,7 +332,7 @@ func TestListPOs_Empty_ReturnsNil(t *testing.T) {
 	st := &mockStore{selectPOsResult: nil}
 
 	svc := NewService(st)
-	pos, err := svc.ListPOs(context.Background(), httpkit.PageParams{Page: 1, Limit: 10}, POListFilter{})
+	pos, err := svc.ListPOs(context.Background(), httpkit.CursorParams{Limit: 10}, POListFilter{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -345,7 +349,7 @@ func TestListPOs_ReturnAll(t *testing.T) {
 	st := &mockStore{selectPOsResult: stored}
 
 	svc := NewService(st)
-	pos, err := svc.ListPOs(context.Background(), httpkit.PageParams{Page: 1, Limit: 10}, POListFilter{})
+	pos, err := svc.ListPOs(context.Background(), httpkit.CursorParams{Limit: 10}, POListFilter{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -359,7 +363,7 @@ func TestListPOs_StoreError_Propagates(t *testing.T) {
 	st := &mockStore{selectPOsErr: dbErr}
 
 	svc := NewService(st)
-	_, err := svc.ListPOs(context.Background(), httpkit.PageParams{Page: 1, Limit: 10}, POListFilter{})
+	_, err := svc.ListPOs(context.Background(), httpkit.CursorParams{Limit: 10}, POListFilter{})
 
 	if !errors.Is(err, dbErr) {
 		t.Errorf("expected selectPOs error to propagate, got %v", err)
@@ -373,7 +377,7 @@ func TestListPOs_FromAfterTo_ReturnsErrInvalidInput(t *testing.T) {
 	from := time.Now()
 	to := from.Add(-24 * time.Hour)
 	svc := NewService(&mockStore{})
-	_, err := svc.ListPOs(context.Background(), httpkit.PageParams{Page: 1, Limit: 10},
+	_, err := svc.ListPOs(context.Background(), httpkit.CursorParams{Limit: 10},
 		POListFilter{From: &from, To: &to})
 	if !errors.Is(err, domain.ErrInvalidInput) {
 		t.Errorf("expected ErrInvalidInput for from > to, got %v", err)
@@ -383,7 +387,7 @@ func TestListPOs_FromAfterTo_ReturnsErrInvalidInput(t *testing.T) {
 func TestListPOs_FromOnly_DoesNotError(t *testing.T) {
 	from := time.Now().Add(-30 * 24 * time.Hour)
 	svc := NewService(&mockStore{})
-	if _, err := svc.ListPOs(context.Background(), httpkit.PageParams{Page: 1, Limit: 10},
+	if _, err := svc.ListPOs(context.Background(), httpkit.CursorParams{Limit: 10},
 		POListFilter{From: &from}); err != nil {
 		t.Errorf("from-only must not error, got %v", err)
 	}
@@ -463,7 +467,7 @@ func TestListPOs_ReturnsSummaryMetadata(t *testing.T) {
 	st := &mockStore{selectPOsResult: stored}
 
 	svc := NewService(st)
-	pos, err := svc.ListPOs(context.Background(), httpkit.PageParams{Page: 1, Limit: 10}, POListFilter{})
+	pos, err := svc.ListPOs(context.Background(), httpkit.CursorParams{Limit: 10}, POListFilter{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

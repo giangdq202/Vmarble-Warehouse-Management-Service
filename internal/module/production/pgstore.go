@@ -203,6 +203,44 @@ func (s *pgStore) selectWorkOrdersDashboard(ctx context.Context, p httpkit.PageP
 	return out, total, rows.Err()
 }
 
+func (s *pgStore) selectWorkOrdersKeyset(ctx context.Context, f WorkOrderListFilter, cur httpkit.Cursor, limit int) ([]WorkOrder, error) {
+	args := []any{f.Status, f.PlanID, f.CreatedFrom, f.CreatedTo, f.AssignedNull, f.AssignedTo}
+	idx := 7
+
+	q := `SELECT ` + selectWOCols + `
+		 WHERE ($1::text = '' OR wo.status = $1)
+		   AND ($2::uuid IS NULL OR wo.plan_id = $2)
+		   AND ($3::timestamptz IS NULL OR wo.created_at >= $3)
+		   AND ($4::timestamptz IS NULL OR wo.created_at < $4)
+		   AND (NOT $5::boolean OR wo.assigned_to IS NULL)
+		   AND ($6::uuid IS NULL OR wo.assigned_to = $6)`
+
+	if !cur.IsZero() {
+		q += fmt.Sprintf(" AND (wo.created_at, wo.id) < ($%d, $%d)", idx, idx+1)
+		args = append(args, cur.Ts, cur.ID)
+		idx += 2
+	}
+
+	q += fmt.Sprintf(" ORDER BY wo.created_at DESC, wo.id DESC LIMIT $%d", idx)
+	args = append(args, limit)
+
+	rows, err := s.pool.Query(ctx, q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []WorkOrder
+	for rows.Next() {
+		wo, err := scanWorkOrder(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, wo)
+	}
+	return out, rows.Err()
+}
+
 func (s *pgStore) selectWorkOrderByID(ctx context.Context, id uuid.UUID) (WorkOrder, error) {
 	row := s.pool.QueryRow(ctx,
 		`SELECT `+selectWOCols+` WHERE wo.id = $1`,

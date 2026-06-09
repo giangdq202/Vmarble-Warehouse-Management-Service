@@ -170,6 +170,20 @@ func (svc *service) ListWorkOrders(ctx context.Context, p httpkit.PageParams, f 
 	return httpkit.NewPagedResult(wos, total, p), nil
 }
 
+func (svc *service) ListWorkOrdersKeyset(ctx context.Context, p httpkit.CursorParams, f WorkOrderListFilter) (httpkit.CursorResult[WorkOrder], error) {
+	cur, err := p.Decoded()
+	if err != nil {
+		return httpkit.CursorResult[WorkOrder]{}, domain.NewBizError(domain.ErrInvalidInput, "invalid cursor")
+	}
+	rows, err := svc.s.selectWorkOrdersKeyset(ctx, f, cur, p.Limit+1)
+	if err != nil {
+		return httpkit.CursorResult[WorkOrder]{}, err
+	}
+	return httpkit.NewCursorResult(rows, p.Limit, func(wo WorkOrder) httpkit.Cursor {
+		return httpkit.Cursor{Ts: wo.CreatedAt, ID: wo.ID}
+	}), nil
+}
+
 func (svc *service) ListWorkOrdersByPlan(ctx context.Context, planID uuid.UUID) ([]WorkOrder, error) {
 	return svc.s.selectWorkOrdersByPlan(ctx, planID)
 }

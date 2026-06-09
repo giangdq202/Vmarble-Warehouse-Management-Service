@@ -121,6 +121,14 @@ func (m *mockStore) selectPlanItemsByPlanID(_ context.Context, _ uuid.UUID) ([]P
 	return m.selectPlanItemsByPlanIDResult, m.selectPlanItemsByPlanIDErr
 }
 
+func (m *mockStore) selectPlansKeyset(_ context.Context, status, search string, from, to *time.Time, _ httpkit.Cursor, _ int) ([]Plan, error) {
+	m.selectPlansSearch = search
+	m.selectPlansStatus = status
+	m.selectPlansFrom = from
+	m.selectPlansTo = to
+	return m.selectPlansResult, m.selectPlansErr
+}
+
 func (m *mockStore) cancelPlanWithMetadata(_ context.Context, id uuid.UUID, reason string, actorID uuid.UUID, at time.Time) error {
 	m.cancelPlanWithMetadataCalled = true
 	m.cancelPlanWithMetadataID = id
@@ -468,7 +476,7 @@ func TestListPlans_PopulatesItems(t *testing.T) {
 	}
 
 	svc := NewService(st)
-	plans, err := svc.ListPlans(context.Background(), httpkit.PageParams{Page: 1, Limit: 10}, "", nil, nil)
+	plans, err := svc.ListPlans(context.Background(), httpkit.CursorParams{Limit: 10}, "", "", nil, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -487,7 +495,7 @@ func TestListPlans_Empty_ReturnsNil(t *testing.T) {
 	st := &mockStore{selectPlansResult: nil}
 
 	svc := NewService(st)
-	plans, err := svc.ListPlans(context.Background(), httpkit.PageParams{Page: 1, Limit: 10}, "", nil, nil)
+	plans, err := svc.ListPlans(context.Background(), httpkit.CursorParams{Limit: 10}, "", "", nil, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -501,7 +509,7 @@ func TestListPlans_SelectPlansError_Propagates(t *testing.T) {
 	st := &mockStore{selectPlansErr: dbErr}
 
 	svc := NewService(st)
-	_, err := svc.ListPlans(context.Background(), httpkit.PageParams{Page: 1, Limit: 10}, "", nil, nil)
+	_, err := svc.ListPlans(context.Background(), httpkit.CursorParams{Limit: 10}, "", "", nil, nil)
 
 	if !errors.Is(err, dbErr) {
 		t.Errorf("expected selectPlans error to propagate, got %v", err)
@@ -517,7 +525,7 @@ func TestListPlans_SelectItemsError_Propagates(t *testing.T) {
 	}
 
 	svc := NewService(st)
-	_, err := svc.ListPlans(context.Background(), httpkit.PageParams{Page: 1, Limit: 10}, "", nil, nil)
+	_, err := svc.ListPlans(context.Background(), httpkit.CursorParams{Limit: 10}, "", "", nil, nil)
 
 	if !errors.Is(err, dbErr) {
 		t.Errorf("expected selectPlanItemsByPlanID error to propagate in ListPlans, got %v", err)
@@ -931,7 +939,7 @@ func TestListPlans_SearchAndPOCodeContract(t *testing.T) {
 	}
 
 	svc := NewService(st)
-	plans, err := svc.ListPlans(context.Background(), httpkit.PageParams{Page: 1, Limit: 20, Search: "PO-001"}, "APPROVED", nil, nil)
+	plans, err := svc.ListPlans(context.Background(), httpkit.CursorParams{Limit: 20}, "APPROVED", "PO-001", nil, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -961,7 +969,8 @@ func TestListPlans_DateRange_ForwardedToStore(t *testing.T) {
 
 	if _, err := svc.ListPlans(
 		context.Background(),
-		httpkit.PageParams{Page: 1, Limit: 10},
+		httpkit.CursorParams{Limit: 10},
+		"",
 		"",
 		&from,
 		&to,
@@ -986,7 +995,8 @@ func TestListPlans_FromAfterTo_Returns400(t *testing.T) {
 
 	_, err := svc.ListPlans(
 		context.Background(),
-		httpkit.PageParams{Page: 1, Limit: 10},
+		httpkit.CursorParams{Limit: 10},
+		"",
 		"",
 		&from,
 		&to,

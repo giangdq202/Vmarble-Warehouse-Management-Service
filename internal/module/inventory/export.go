@@ -16,11 +16,11 @@ func (svc *service) ExportLots(ctx context.Context, p httpkit.PageParams, w io.W
 	if p.Limit <= 0 || p.Limit > exportMaxLimit {
 		p.Limit = exportMaxLimit
 	}
-	result, err := svc.ListLots(ctx, p)
+	items, _, err := svc.st.selectLotsPaged(ctx, p)
 	if err != nil {
 		return err
 	}
-	return buildLotsXLSX(result.Items, w)
+	return buildLotsXLSX(items, w)
 }
 
 func buildLotsXLSX(lots []InventoryLot, w io.Writer) error {
