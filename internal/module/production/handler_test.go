@@ -113,6 +113,15 @@ func (stubService) PreemptWO(context.Context, PreemptWOInput) (PreemptWOResult, 
 func (stubService) ExportWorkOrders(context.Context, httpkit.PageParams, WorkOrderListFilter, io.Writer) error {
 	panic("unexpected call")
 }
+func (stubService) ReassignWorkOrder(context.Context, ReassignWorkOrderInput) (WorkOrder, error) {
+	panic("unexpected call")
+}
+func (stubService) ClaimWorkOrder(context.Context, ClaimWorkOrderInput) (WorkOrder, error) {
+	panic("unexpected call")
+}
+func (stubService) UpdateQCStatus(context.Context, uuid.UUID, string) error {
+	panic("unexpected call")
+}
 
 var _ Service = stubService{}
 

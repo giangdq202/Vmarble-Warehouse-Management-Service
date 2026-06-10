@@ -17,6 +17,16 @@ type store interface {
 	selectWorkOrdersByAssignee(ctx context.Context, userID uuid.UUID) ([]WorkOrder, error)
 	updateWorkOrderStatus(ctx context.Context, id uuid.UUID, status string) error
 	updateWorkOrderAssignment(ctx context.Context, woID uuid.UUID, userID uuid.UUID, assignedAt time.Time) error
+	// reassignWorkOrderAtomically acquires a row-level lock on the WO, verifies
+	// status is IN_CUTTING or IN_PROCESSING, updates assigned_to, and inserts a
+	// wo_reassign_log row — all inside one transaction.
+	reassignWorkOrderAtomically(ctx context.Context, op reassignOp) (WorkOrder, error)
+	// claimWorkOrderAtomically acquires a row-level lock on the WO, verifies
+	// status is PLANNED and assigned_to IS NULL, then sets assigned_to. Returns
+	// 409 (ErrPreconditionFailed) if the WO is already claimed.
+	claimWorkOrderAtomically(ctx context.Context, op claimOp) (WorkOrder, error)
+	// updateWorkOrderQCStatus writes the denormalized qc_status column.
+	updateWorkOrderQCStatus(ctx context.Context, woID uuid.UUID, status string) error
 	// partialCompleteAtomically performs the entire #292 PartialComplete write
 	// inside a single SELECT FOR UPDATE transaction so two concurrent callers
 	// cannot both win. The store re-reads the WO under the lock, validates
@@ -90,6 +100,23 @@ type store interface {
 	// PLANNED or IN_CUTTING (rejects IN_PROCESSING+), reverts from_wo to
 	// PLANNED, and inserts a wo_preemption_log row.
 	preemptAtomically(ctx context.Context, op preemptOp) (uuid.UUID, time.Time, int, error)
+}
+
+// reassignOp carries the payload for reassignWorkOrderAtomically.
+type reassignOp struct {
+	WorkOrderID uuid.UUID
+	NewUserID   uuid.UUID
+	Reason      string
+	ActorID     uuid.UUID
+	LogID       uuid.UUID
+	AssignedAt  time.Time
+}
+
+// claimOp carries the payload for claimWorkOrderAtomically.
+type claimOp struct {
+	WorkOrderID uuid.UUID
+	UserID      uuid.UUID
+	AssignedAt  time.Time
 }
 
 // assignSlotOp carries the pre-validated data for a single slot assignment.

@@ -1001,3 +1001,54 @@ func (svc *service) PreemptWO(ctx context.Context, in PreemptWOInput) (PreemptWO
 	)
 	return PreemptWOResult{PreemptedAt: preemptedAt, AuditID: auditID, FreedQty: freedQty}, nil
 }
+
+func (svc *service) ReassignWorkOrder(ctx context.Context, in ReassignWorkOrderInput) (WorkOrder, error) {
+	if in.Reason == "" {
+		return WorkOrder{}, domain.NewBizError(domain.ErrInvalidInput, "reason is required for work order reassignment")
+	}
+	if in.NewUserID == uuid.Nil {
+		return WorkOrder{}, domain.NewBizError(domain.ErrInvalidInput, "new_user_id is required")
+	}
+	now := time.Now().UTC()
+	wo, err := svc.s.reassignWorkOrderAtomically(ctx, reassignOp{
+		WorkOrderID: in.WorkOrderID,
+		NewUserID:   in.NewUserID,
+		Reason:      in.Reason,
+		ActorID:     in.ActorID,
+		LogID:       uuid.New(),
+		AssignedAt:  now,
+	})
+	if err != nil {
+		return WorkOrder{}, err
+	}
+	slog.Info("wo.reassigned",
+		"work_order_id", in.WorkOrderID,
+		"new_user_id", in.NewUserID,
+		"actor_id", in.ActorID,
+	)
+	return wo, nil
+}
+
+func (svc *service) ClaimWorkOrder(ctx context.Context, in ClaimWorkOrderInput) (WorkOrder, error) {
+	if in.UserID == uuid.Nil {
+		return WorkOrder{}, domain.NewBizError(domain.ErrInvalidInput, "user_id is required")
+	}
+	now := time.Now().UTC()
+	wo, err := svc.s.claimWorkOrderAtomically(ctx, claimOp{
+		WorkOrderID: in.WorkOrderID,
+		UserID:      in.UserID,
+		AssignedAt:  now,
+	})
+	if err != nil {
+		return WorkOrder{}, err
+	}
+	slog.Info("wo.claimed",
+		"work_order_id", in.WorkOrderID,
+		"user_id", in.UserID,
+	)
+	return wo, nil
+}
+
+func (svc *service) UpdateQCStatus(ctx context.Context, woID uuid.UUID, status string) error {
+	return svc.s.updateWorkOrderQCStatus(ctx, woID, status)
+}

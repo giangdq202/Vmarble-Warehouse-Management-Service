@@ -26,6 +26,7 @@ func (h *Handler) Register(rg *gin.RouterGroup) {
 	rg.POST("/barcodes/batch-print", auth.RequireRole(auth.RoleWarehouse, auth.RoleCNC, auth.RoleCNCManager, auth.RoleAdmin), h.generateBatchLabelPDF)
 	rg.POST("/barcodes/:id/scans", auth.RequireRole(auth.RoleCNC, auth.RoleWarehouse, auth.RoleForeman, auth.RoleAdmin), h.recordScan)
 	rg.GET("/barcodes/:id/scans", h.listScans)
+	rg.GET("/work-orders/:id/qc-history", h.getQCHistory)
 }
 
 // listBarcodesByWorkOrder godoc
@@ -265,4 +266,30 @@ func (h *Handler) generateBatchLabelPDF(c *gin.Context) {
 	}
 	c.Header("Content-Disposition", "inline; filename=barcode-label-batch.pdf")
 	c.Data(http.StatusOK, "application/pdf", pdf)
+}
+
+// getQCHistory godoc
+//
+// @Summary      Get QC scan history for a work order
+// @Tags         barcode
+// @Produce      json
+// @Param        id  path      string  true  "work order id (uuid)"
+// @Success      200  {array}   QCEvent
+// @Failure      400  {object}  map[string]string
+// @Failure      404  {object}  map[string]string
+// @Security     BearerAuth
+// @Failure      401  {object}  map[string]string
+// @Router       /api/v1/work-orders/{id}/qc-history [get]
+func (h *Handler) getQCHistory(c *gin.Context) {
+	woID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+	events, err := h.svc.GetQCHistory(c.Request.Context(), woID)
+	if err != nil {
+		httpkit.Error(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, events)
 }

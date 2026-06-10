@@ -123,6 +123,8 @@ func (h *Handler) Register(rg *gin.RouterGroup) {
 	rg.GET("/work-orders/:id/labor-entries", h.listLaborEntries)
 	rg.POST("/work-orders/:id/assign", auth.RequireRole(auth.RoleCNCManager, auth.RoleAdmin), h.assign)
 	rg.POST("/work-orders/:id/suggest-assignment", auth.RequireRole(auth.RoleCNCManager, auth.RoleAdmin), h.suggestAssignment)
+	rg.POST("/work-orders/:id/reassign", auth.RequireAdminOnly(), h.reassign)
+	rg.POST("/work-orders/:id/claim", auth.RequireRole(auth.RoleCNC), h.claim)
 	rg.POST("/work-orders/:id/estimated-hours", auth.RequireRole(auth.RoleCNCManager, auth.RolePlanner, auth.RoleAdmin), h.setEstimatedHours)
 	rg.POST("/work-orders/:id/assign-slot", auth.RequireRole(auth.RoleCNCManager, auth.RolePlanner, auth.RoleAdmin), h.assignSlot)
 	rg.POST("/work-orders/:id/unassign-slot", auth.RequireRole(auth.RoleCNCManager, auth.RolePlanner, auth.RoleAdmin), h.unassignSlot)
@@ -930,4 +932,89 @@ func (h *Handler) exportWorkOrders(c *gin.Context) {
 		c.Header("Content-Disposition", "")
 		httpkit.Error(c, err)
 	}
+}
+
+// reassign godoc
+//
+// @Summary      Admin force-reassign a work order to a different CNC operator
+// @Tags         production
+// @Security     BearerAuth
+// @Accept       json
+// @Produce      json
+// @Param        id    path      string  true  "work order id (uuid)"
+// @Param        body  body      ReassignWorkOrderInput  true  "payload"
+// @Success      200   {object}  WorkOrder
+// @Failure      400   {object}  map[string]string
+// @Failure      403   {object}  map[string]string
+// @Failure      404   {object}  map[string]string
+// @Failure      412   {object}  map[string]string
+// @Router       /api/v1/work-orders/{id}/reassign [post]
+func (h *Handler) reassign(c *gin.Context) {
+	woID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+	var in ReassignWorkOrderInput
+	if !httpkit.Bind(c, &in) {
+		return
+	}
+	identity, ok := auth.FromContext(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "missing auth identity"})
+		return
+	}
+	actorID, err := uuid.Parse(identity.UserID)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid auth identity"})
+		return
+	}
+	in.WorkOrderID = woID
+	in.ActorID = actorID
+	wo, err := h.svc.ReassignWorkOrder(c.Request.Context(), in)
+	if err != nil {
+		httpkit.Error(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, wo)
+}
+
+// claim godoc
+//
+// @Summary      CNC operator self-claims a PLANNED unassigned work order
+// @Tags         production
+// @Security     BearerAuth
+// @Produce      json
+// @Param        id  path      string  true  "work order id (uuid)"
+// @Success      200  {object}  WorkOrder
+// @Failure      400  {object}  map[string]string
+// @Failure      403  {object}  map[string]string
+// @Failure      404  {object}  map[string]string
+// @Failure      412  {object}  map[string]string
+// @Router       /api/v1/work-orders/{id}/claim [post]
+func (h *Handler) claim(c *gin.Context) {
+	woID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+	identity, ok := auth.FromContext(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "missing auth identity"})
+		return
+	}
+	userID, err := uuid.Parse(identity.UserID)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid auth identity"})
+		return
+	}
+	wo, err := h.svc.ClaimWorkOrder(c.Request.Context(), ClaimWorkOrderInput{
+		WorkOrderID: woID,
+		UserID:      userID,
+	})
+	if err != nil {
+		httpkit.Error(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, wo)
 }

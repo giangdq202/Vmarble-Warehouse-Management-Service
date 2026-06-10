@@ -234,6 +234,16 @@ func (m *mockStore) preemptAtomically(_ context.Context, _ preemptOp) (uuid.UUID
 	return uuid.Nil, time.Time{}, 0, nil
 }
 
+func (m *mockStore) reassignWorkOrderAtomically(_ context.Context, _ reassignOp) (WorkOrder, error) {
+	return WorkOrder{}, nil
+}
+func (m *mockStore) claimWorkOrderAtomically(_ context.Context, _ claimOp) (WorkOrder, error) {
+	return WorkOrder{}, nil
+}
+func (m *mockStore) updateWorkOrderQCStatus(_ context.Context, _ uuid.UUID, _ string) error {
+	return nil
+}
+
 // mockPlanChecker satisfies PlanChecker.
 type mockPlanChecker struct {
 	result PlanInfo

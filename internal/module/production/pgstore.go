@@ -40,13 +40,14 @@ func scanWorkOrder(row interface {
 	var estimatedHours sql.NullFloat64
 	var machineSlotID, salesOrderLineID, parentWOID uuid.NullUUID
 	var actualQty sql.NullInt32
-	var shortfallReason sql.NullString
+	var shortfallReason, qcStatus sql.NullString
 	err := row.Scan(
 		&wo.ID, &wo.PlanID, &wo.SKUID, &wo.SKUCode, &wo.SKUName,
 		&wo.SKUDimensions.LengthMM, &wo.SKUDimensions.WidthMM,
 		&wo.Quantity, &wo.Status, &wo.AssignedTo, &wo.AssignedAt, &wo.CreatedAt,
 		&estimatedHours, &machineSlotID, &salesOrderLineID,
 		&actualQty, &parentWOID, &shortfallReason, &wo.PriorityBoost,
+		&qcStatus,
 	)
 	if estimatedHours.Valid {
 		wo.EstimatedHours = &estimatedHours.Float64
@@ -71,6 +72,10 @@ func scanWorkOrder(row interface {
 		v := shortfallReason.String
 		wo.ShortfallReason = &v
 	}
+	if qcStatus.Valid {
+		v := qcStatus.String
+		wo.QCStatus = &v
+	}
 	return wo, err
 }
 
@@ -84,7 +89,8 @@ const selectWOCols = `
 	COALESCE(s.width_mm, 0)  AS sku_width_mm,
 	wo.quantity, wo.status, wo.assigned_to, wo.assigned_at, wo.created_at,
 	wo.estimated_hours, wo.machine_slot_id, wo.sales_order_line_id,
-	wo.actual_qty, wo.parent_wo_id, wo.shortfall_reason, wo.priority_boost
+	wo.actual_qty, wo.parent_wo_id, wo.shortfall_reason, wo.priority_boost,
+	wo.qc_status
 FROM work_orders wo
 LEFT JOIN skus s ON s.id = wo.sku_id`
 
@@ -319,6 +325,109 @@ func (s *pgStore) updateWorkOrderAssignment(ctx context.Context, woID uuid.UUID,
 		return domain.NewBizError(domain.ErrPreconditionFailed, "work order has already started cutting and cannot be reassigned")
 	}
 	return nil
+}
+
+func (s *pgStore) reassignWorkOrderAtomically(ctx context.Context, op reassignOp) (WorkOrder, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return WorkOrder{}, err
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+
+	var wo WorkOrder
+	row := tx.QueryRow(ctx,
+		`SELECT `+selectWOCols+` WHERE wo.id = $1 FOR UPDATE`,
+		op.WorkOrderID,
+	)
+	wo, err = scanWorkOrder(row)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return WorkOrder{}, domain.ErrNotFound
+		}
+		return WorkOrder{}, err
+	}
+	if wo.Status != domain.WOInCutting && wo.Status != domain.WOInProcessing {
+		return WorkOrder{}, domain.NewBizError(domain.ErrPreconditionFailed,
+			"work order must be IN_CUTTING or IN_PROCESSING to be reassigned")
+	}
+
+	_, err = tx.Exec(ctx,
+		`UPDATE work_orders SET assigned_to = $1, assigned_at = $2 WHERE id = $3`,
+		op.NewUserID, op.AssignedAt, op.WorkOrderID,
+	)
+	if err != nil {
+		return WorkOrder{}, err
+	}
+
+	_, err = tx.Exec(ctx,
+		`INSERT INTO wo_reassign_log (id, work_order_id, from_user_id, to_user_id, reason, actor_id, created_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+		op.LogID, op.WorkOrderID, wo.AssignedTo, op.NewUserID, op.Reason, op.ActorID, op.AssignedAt,
+	)
+	if err != nil {
+		return WorkOrder{}, err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return WorkOrder{}, err
+	}
+
+	wo.AssignedTo = &op.NewUserID
+	wo.AssignedAt = &op.AssignedAt
+	return wo, nil
+}
+
+func (s *pgStore) claimWorkOrderAtomically(ctx context.Context, op claimOp) (WorkOrder, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return WorkOrder{}, err
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+
+	var wo WorkOrder
+	row := tx.QueryRow(ctx,
+		`SELECT `+selectWOCols+` WHERE wo.id = $1 FOR UPDATE`,
+		op.WorkOrderID,
+	)
+	wo, err = scanWorkOrder(row)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return WorkOrder{}, domain.ErrNotFound
+		}
+		return WorkOrder{}, err
+	}
+	if wo.Status != domain.WOPlanned {
+		return WorkOrder{}, domain.NewBizError(domain.ErrPreconditionFailed,
+			"work order must be PLANNED to be claimed")
+	}
+	if wo.AssignedTo != nil {
+		return WorkOrder{}, domain.NewBizError(domain.ErrPreconditionFailed,
+			"work order is already claimed by another operator")
+	}
+
+	_, err = tx.Exec(ctx,
+		`UPDATE work_orders SET assigned_to = $1, assigned_at = $2 WHERE id = $3`,
+		op.UserID, op.AssignedAt, op.WorkOrderID,
+	)
+	if err != nil {
+		return WorkOrder{}, err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return WorkOrder{}, err
+	}
+
+	wo.AssignedTo = &op.UserID
+	wo.AssignedAt = &op.AssignedAt
+	return wo, nil
+}
+
+func (s *pgStore) updateWorkOrderQCStatus(ctx context.Context, woID uuid.UUID, status string) error {
+	_, err := s.pool.Exec(ctx,
+		`UPDATE work_orders SET qc_status = $1 WHERE id = $2`,
+		status, woID,
+	)
+	return err
 }
 
 func (s *pgStore) insertConsumption(ctx context.Context, cr ConsumptionRecord) error {

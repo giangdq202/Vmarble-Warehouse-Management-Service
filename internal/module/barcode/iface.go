@@ -15,6 +15,8 @@ type LabelSize string
 
 const (
 	CheckpointCNCComplete   ScanCheckpoint = "CNC_COMPLETE"
+	CheckpointQCPassed      ScanCheckpoint = "QC_PASSED"
+	CheckpointQCFailed      ScanCheckpoint = "QC_FAILED"
 	CheckpointFinishedGoods ScanCheckpoint = "FINISHED_GOODS"
 	CheckpointShipped       ScanCheckpoint = "SHIPPED"
 
@@ -97,12 +99,26 @@ type BatchPrintInput struct {
 	Size       LabelSize   `json:"size,omitempty"`
 }
 
+// QCEvent is one recorded QC scan (QC_PASSED or QC_FAILED) for a barcode.
+type QCEvent struct {
+	ID          uuid.UUID      `json:"id"`
+	WorkOrderID uuid.UUID      `json:"work_order_id"`
+	BarcodeID   uuid.UUID      `json:"barcode_id"`
+	ScanEventID uuid.UUID      `json:"scan_event_id"`
+	Result      ScanCheckpoint `json:"result"`
+	ScannedBy   uuid.UUID      `json:"scanned_by"`
+	Note        string         `json:"note,omitempty"`
+	CreatedAt   time.Time      `json:"created_at"`
+}
+
 type Service interface {
 	GenerateBarcode(ctx context.Context, in GenerateBarcodeInput) (Barcode, error)
 	LookupBarcode(ctx context.Context, barcodeID uuid.UUID) (Barcode, error)
 	ListBarcodesByWorkOrder(ctx context.Context, workOrderID uuid.UUID) ([]Barcode, error)
 	RecordScan(ctx context.Context, in RecordScanInput) (ScanResult, error)
 	ListScans(ctx context.Context, barcodeID uuid.UUID, params httpkit.CursorParams) (httpkit.CursorResult[ScanEvent], error)
+	// GetQCHistory returns QC scan events for a work order, ordered by created_at DESC.
+	GetQCHistory(ctx context.Context, workOrderID uuid.UUID) ([]QCEvent, error)
 	GenerateQRCode(ctx context.Context, barcodeID uuid.UUID) ([]byte, error)
 	GenerateLabelPDF(ctx context.Context, barcodeID uuid.UUID, size LabelSize) ([]byte, error)
 	GenerateBatchLabelPDF(ctx context.Context, in BatchPrintInput) ([]byte, error)

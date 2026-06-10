@@ -593,6 +593,25 @@ definitions:
     x-enum-varnames:
     - LabelSize50x30
     - LabelSize100x70
+  internal_module_barcode.QCEvent:
+    properties:
+      barcode_id:
+        type: string
+      created_at:
+        type: string
+      id:
+        type: string
+      note:
+        type: string
+      result:
+        $ref: '#/definitions/internal_module_barcode.ScanCheckpoint'
+      scan_event_id:
+        type: string
+      scanned_by:
+        type: string
+      work_order_id:
+        type: string
+    type: object
   internal_module_barcode.RecordScanInput:
     properties:
       checkpoint:
@@ -611,11 +630,15 @@ definitions:
   internal_module_barcode.ScanCheckpoint:
     enum:
     - CNC_COMPLETE
+    - QC_PASSED
+    - QC_FAILED
     - FINISHED_GOODS
     - SHIPPED
     type: string
     x-enum-varnames:
     - CheckpointCNCComplete
+    - CheckpointQCPassed
+    - CheckpointQCFailed
     - CheckpointFinishedGoods
     - CheckpointShipped
   internal_module_barcode.ScanEvent:
@@ -2572,6 +2595,13 @@ definitions:
       wo_updated:
         $ref: '#/definitions/internal_module_production.WorkOrder'
     type: object
+  internal_module_production.ReassignWorkOrderInput:
+    properties:
+      new_user_id:
+        type: string
+      reason:
+        type: string
+    type: object
   internal_module_production.RecordConsumptionInput:
     properties:
       material_id:
@@ -2648,6 +2678,11 @@ definitions:
           PriorityBoost marks that a planner has manually elevated this WO's
           scheduling priority (BR-PL05). Set by BoostPriority; never cleared.
         type: boolean
+      qc_status:
+        description: |-
+          QCStatus is the denormalized last QC result for this work order.
+          Nil means no QC scan has been recorded yet.
+        type: string
       quantity:
         type: integer
       sales_order_line_id:
@@ -9826,6 +9861,50 @@ paths:
       summary: Assign a machine shift slot to a work order
       tags:
       - production
+  /api/v1/work-orders/{id}/claim:
+    post:
+      parameters:
+      - description: work order id (uuid)
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_module_production.WorkOrder'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "412":
+          description: Precondition Failed
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: CNC operator self-claims a PLANNED unassigned work order
+      tags:
+      - production
   /api/v1/work-orders/{id}/consumptions:
     get:
       parameters:
@@ -10102,6 +10181,98 @@ paths:
       security:
       - BearerAuth: []
       summary: Partial-complete a work order
+      tags:
+      - production
+  /api/v1/work-orders/{id}/qc-history:
+    get:
+      parameters:
+      - description: work order id (uuid)
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/internal_module_barcode.QCEvent'
+            type: array
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Get QC scan history for a work order
+      tags:
+      - barcode
+  /api/v1/work-orders/{id}/reassign:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: work order id (uuid)
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: payload
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_module_production.ReassignWorkOrderInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_module_production.WorkOrder'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "412":
+          description: Precondition Failed
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Admin force-reassign a work order to a different CNC operator
       tags:
       - production
   /api/v1/work-orders/{id}/suggest-assignment:

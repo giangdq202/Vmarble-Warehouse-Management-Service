@@ -10551,6 +10551,75 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/work-orders/{id}/claim": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "production"
+                ],
+                "summary": "CNC operator self-claims a PLANNED unassigned work order",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "work order id (uuid)",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_module_production.WorkOrder"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "412": {
+                        "description": "Precondition Failed",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/work-orders/{id}/consumptions": {
             "get": {
                 "security": [
@@ -10962,6 +11031,150 @@ const docTemplate = `{
                     },
                     "409": {
                         "description": "wo not in IN_PROCESSING",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/work-orders/{id}/qc-history": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "barcode"
+                ],
+                "summary": "Get QC scan history for a work order",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "work order id (uuid)",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/internal_module_barcode.QCEvent"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/work-orders/{id}/reassign": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "production"
+                ],
+                "summary": "Admin force-reassign a work order to a different CNC operator",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "work order id (uuid)",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "payload",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_module_production.ReassignWorkOrderInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_module_production.WorkOrder"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "412": {
+                        "description": "Precondition Failed",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -12027,6 +12240,35 @@ const docTemplate = `{
                 "LabelSize100x70"
             ]
         },
+        "internal_module_barcode.QCEvent": {
+            "type": "object",
+            "properties": {
+                "barcode_id": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "note": {
+                    "type": "string"
+                },
+                "result": {
+                    "$ref": "#/definitions/internal_module_barcode.ScanCheckpoint"
+                },
+                "scan_event_id": {
+                    "type": "string"
+                },
+                "scanned_by": {
+                    "type": "string"
+                },
+                "work_order_id": {
+                    "type": "string"
+                }
+            }
+        },
         "internal_module_barcode.RecordScanInput": {
             "type": "object",
             "properties": {
@@ -12054,11 +12296,15 @@ const docTemplate = `{
             "type": "string",
             "enum": [
                 "CNC_COMPLETE",
+                "QC_PASSED",
+                "QC_FAILED",
                 "FINISHED_GOODS",
                 "SHIPPED"
             ],
             "x-enum-varnames": [
                 "CheckpointCNCComplete",
+                "CheckpointQCPassed",
+                "CheckpointQCFailed",
                 "CheckpointFinishedGoods",
                 "CheckpointShipped"
             ]
@@ -15009,6 +15255,17 @@ const docTemplate = `{
                 }
             }
         },
+        "internal_module_production.ReassignWorkOrderInput": {
+            "type": "object",
+            "properties": {
+                "new_user_id": {
+                    "type": "string"
+                },
+                "reason": {
+                    "type": "string"
+                }
+            }
+        },
         "internal_module_production.RecordConsumptionInput": {
             "type": "object",
             "properties": {
@@ -15114,6 +15371,10 @@ const docTemplate = `{
                 "priority_boost": {
                     "description": "PriorityBoost marks that a planner has manually elevated this WO's\nscheduling priority (BR-PL05). Set by BoostPriority; never cleared.",
                     "type": "boolean"
+                },
+                "qc_status": {
+                    "description": "QCStatus is the denormalized last QC result for this work order.\nNil means no QC scan has been recorded yet.",
+                    "type": "string"
                 },
                 "quantity": {
                     "type": "integer"

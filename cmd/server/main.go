@@ -624,6 +624,10 @@ func (a *barcodeWOGatewayAdapter) AdvanceStatus(ctx context.Context, woID uuid.U
 	return a.svc.AdvanceStatus(ctx, woID, production.AdvanceStatusInput{To: to})
 }
 
+func (a *barcodeWOGatewayAdapter) UpdateQCStatus(ctx context.Context, woID uuid.UUID, status string) error {
+	return a.svc.UpdateQCStatus(ctx, woID, status)
+}
+
 type barcodeUserLookupAdapter struct {
 	svc authn.Service
 }
