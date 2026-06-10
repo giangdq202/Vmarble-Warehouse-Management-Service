@@ -80,7 +80,7 @@ workflows:
 
       # Tái hiện rule: Push vào nhánh dev -> Chạy docker-push (và deploy)
       - docker-push:
-          context: vwms-secrets
+          context: lab-stg
           filters:
             branches:
               only: dev
