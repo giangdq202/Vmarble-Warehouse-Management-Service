@@ -55,11 +55,14 @@ type WorkOrder struct {
 	// ShortfallReason explains why the WO came up short. One of
 	// MATERIAL_SHORTAGE | DEFECT | TIME_SHORTAGE | OTHER. Set together with
 	// ActualQty; both nil for full COMPLETED transitions.
-	ShortfallReason *string   `json:"shortfall_reason,omitempty"`
+	ShortfallReason *string `json:"shortfall_reason,omitempty"`
 	// PriorityBoost marks that a planner has manually elevated this WO's
 	// scheduling priority (BR-PL05). Set by BoostPriority; never cleared.
-	PriorityBoost bool      `json:"priority_boost"`
-	CreatedAt     time.Time `json:"created_at"`
+	PriorityBoost bool `json:"priority_boost"`
+	// QCStatus is the denormalized last QC result for this work order.
+	// Nil means no QC scan has been recorded yet.
+	QCStatus  *string   `json:"qc_status,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
 }
 
 type WorkOrderListFilter struct {
@@ -197,9 +200,21 @@ type AssignWorkOrderInput struct {
 	UserID      uuid.UUID
 }
 
+// ReassignWorkOrderInput is the payload for admin-forced WO reassignment (BE #21).
+// Reason is mandatory — stored in wo_reassign_log for audit.
+type ReassignWorkOrderInput struct {
+	WorkOrderID uuid.UUID  `json:"-"`
+	NewUserID   uuid.UUID  `json:"new_user_id"`
+	Reason      string     `json:"reason"`
+	ActorID     uuid.UUID  `json:"-"` // from JWT claims
+}
 
-
-// AdvanceStatusInput is the request to advance a work order's status.
+// ClaimWorkOrderInput is the payload for CNC self-claim (BE #21).
+// The WO must be PLANNED and unassigned; a SELECT FOR UPDATE prevents races.
+type ClaimWorkOrderInput struct {
+	WorkOrderID uuid.UUID `json:"-"`
+	UserID      uuid.UUID `json:"-"` // from JWT claims
+}
 // SheetID is optional — when provided and the target status is IN_CUTTING,
 // the sheet will be pre-assigned to the work order before the transition.
 // CallerID is optional — when provided and the target status is IN_CUTTING,
@@ -280,6 +295,16 @@ type Service interface {
 	ListConsumptions(ctx context.Context, woID uuid.UUID) ([]ConsumptionRecord, error)
 	AssignWorkOrder(ctx context.Context, in AssignWorkOrderInput) (WorkOrder, error)
 	SuggestAssignment(ctx context.Context, woID uuid.UUID) (SuggestAssignmentResult, error)
+	// ReassignWorkOrder allows an admin to forcibly reassign any IN_CUTTING or
+	// IN_PROCESSING work order to a different CNC operator, with a mandatory
+	// reason logged to wo_reassign_log.
+	ReassignWorkOrder(ctx context.Context, in ReassignWorkOrderInput) (WorkOrder, error)
+	// ClaimWorkOrder allows a CNC operator to self-assign a PLANNED, unassigned
+	// work order. Uses SELECT FOR UPDATE to guard against concurrent claims.
+	ClaimWorkOrder(ctx context.Context, in ClaimWorkOrderInput) (WorkOrder, error)
+	// UpdateQCStatus writes the denormalized qc_status column. Called from the
+	// barcode module's WorkOrderGateway adapter after a QC scan is recorded.
+	UpdateQCStatus(ctx context.Context, woID uuid.UUID, status string) error
 
 	// Machine management
 	CreateMachine(ctx context.Context, in CreateMachineInput) (Machine, error)

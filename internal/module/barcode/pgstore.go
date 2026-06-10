@@ -183,6 +183,38 @@ func (s *pgStore) selectScanEventsByBarcodeKeyset(ctx context.Context, barcodeID
 	return out, rows.Err()
 }
 
+func (s *pgStore) insertQCEvent(ctx context.Context, e QCEvent) error {
+	_, err := s.pool.Exec(ctx,
+		`INSERT INTO qc_events (id, work_order_id, barcode_id, scan_event_id, result, scanned_by, note, created_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, NULLIF($7, ''), $8)`,
+		e.ID, e.WorkOrderID, e.BarcodeID, e.ScanEventID, e.Result, e.ScannedBy, e.Note, e.CreatedAt,
+	)
+	return err
+}
+
+func (s *pgStore) selectQCEventsByWorkOrder(ctx context.Context, workOrderID uuid.UUID) ([]QCEvent, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT id, work_order_id, barcode_id, scan_event_id, result, scanned_by, COALESCE(note, ''), created_at
+		 FROM qc_events WHERE work_order_id = $1 ORDER BY created_at DESC`,
+		workOrderID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []QCEvent
+	for rows.Next() {
+		var e QCEvent
+		if err := rows.Scan(&e.ID, &e.WorkOrderID, &e.BarcodeID, &e.ScanEventID,
+			&e.Result, &e.ScannedBy, &e.Note, &e.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
 func (s *pgStore) selectLastScanEventByBarcode(ctx context.Context, barcodeID uuid.UUID) (ScanEvent, error) {
 	var (
 		e          ScanEvent

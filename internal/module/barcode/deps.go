@@ -11,6 +11,9 @@ import (
 type WorkOrderGateway interface {
 	GetWorkOrder(ctx context.Context, woID uuid.UUID) (WorkOrderRef, error)
 	AdvanceStatus(ctx context.Context, woID uuid.UUID, to domain.WorkOrderStatus) error
+	// UpdateQCStatus writes the denormalized qc_status column on work_orders so
+	// dashboards can filter by QC result without joining qc_events.
+	UpdateQCStatus(ctx context.Context, woID uuid.UUID, status string) error
 }
 
 // WorkOrderRef is the minimal work-order shape needed by barcode workflow.
@@ -38,4 +41,11 @@ type UserRef struct {
 // still succeeds.
 type ScanNotifier interface {
 	NotifyScanCheckpoint(ctx context.Context, woID, checkpoint string) error
+}
+
+// PackingSuggester is called when a QC_FAILED scan is recorded to surface
+// packing reassignment suggestions for the resulting shortfall. Optional dep
+// wired in main.go after both services are constructed.
+type PackingSuggester interface {
+	SuggestReassignFG(ctx context.Context, workOrderID uuid.UUID) error
 }

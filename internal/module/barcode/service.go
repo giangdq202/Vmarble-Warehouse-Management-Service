@@ -55,6 +55,7 @@ type service struct {
 	wo       WorkOrderGateway
 	usr      UserLookup
 	notifier ScanNotifier
+	packer   PackingSuggester
 }
 
 func NewService(st store, deps ...any) Service {
@@ -67,6 +68,8 @@ func NewService(st store, deps ...any) Service {
 			svc.usr = d
 		case ScanNotifier:
 			svc.notifier = d
+		case PackingSuggester:
+			svc.packer = d
 		}
 	}
 	return svc
@@ -74,7 +77,8 @@ func NewService(st store, deps ...any) Service {
 
 func validCheckpoint(c ScanCheckpoint) bool {
 	switch c {
-	case CheckpointCNCComplete, CheckpointFinishedGoods, CheckpointShipped:
+	case CheckpointCNCComplete, CheckpointQCPassed, CheckpointQCFailed,
+		CheckpointFinishedGoods, CheckpointShipped:
 		return true
 	default:
 		return false
@@ -85,10 +89,12 @@ func checkpointOrder(c ScanCheckpoint) int {
 	switch c {
 	case CheckpointCNCComplete:
 		return 1
-	case CheckpointFinishedGoods:
+	case CheckpointQCPassed, CheckpointQCFailed:
 		return 2
-	case CheckpointShipped:
+	case CheckpointFinishedGoods:
 		return 3
+	case CheckpointShipped:
+		return 4
 	default:
 		return 0
 	}
@@ -97,6 +103,12 @@ func checkpointOrder(c ScanCheckpoint) int {
 func nextCheckpoint(c ScanCheckpoint) *ScanCheckpoint {
 	switch c {
 	case CheckpointCNCComplete:
+		next := CheckpointQCPassed
+		return &next
+	case CheckpointQCFailed:
+		next := CheckpointQCPassed
+		return &next
+	case CheckpointQCPassed:
 		next := CheckpointFinishedGoods
 		return &next
 	case CheckpointFinishedGoods:
@@ -305,6 +317,33 @@ func (s *service) RecordScan(ctx context.Context, in RecordScanInput) (ScanResul
 		newStatus = domain.WOInProcessing
 	}
 
+	if in.Checkpoint == CheckpointQCPassed || in.Checkpoint == CheckpointQCFailed {
+		qcEvt := QCEvent{
+			ID:          uuid.New(),
+			WorkOrderID: bc.WorkOrderID,
+			BarcodeID:   bc.ID,
+			ScanEventID: e.ID,
+			Result:      in.Checkpoint,
+			ScannedBy:   in.ScannedBy,
+			Note:        in.Note,
+			CreatedAt:   e.ScannedAt,
+		}
+		if err := s.st.insertQCEvent(ctx, qcEvt); err != nil {
+			return ScanResult{}, err
+		}
+		if s.wo != nil {
+			if err := s.wo.UpdateQCStatus(ctx, bc.WorkOrderID, string(in.Checkpoint)); err != nil {
+				return ScanResult{}, err
+			}
+		}
+		if in.Checkpoint == CheckpointQCFailed && s.packer != nil {
+			if err := s.packer.SuggestReassignFG(ctx, bc.WorkOrderID); err != nil {
+				slog.Warn("barcode: suggest reassign fg after qc_failed",
+					"work_order_id", bc.WorkOrderID, "err", err)
+			}
+		}
+	}
+
 	scannedByName := in.ScannedBy.String()
 	if s.usr != nil {
 		u, err := s.usr.GetUser(ctx, in.ScannedBy)
@@ -367,6 +406,17 @@ func (s *service) ListScans(ctx context.Context, barcodeID uuid.UUID, params htt
 	return httpkit.NewCursorResult(rows, params.Limit, func(e ScanEvent) httpkit.Cursor {
 		return httpkit.Cursor{Ts: e.ScannedAt, ID: e.ID}
 	}), nil
+}
+
+func (s *service) GetQCHistory(ctx context.Context, workOrderID uuid.UUID) ([]QCEvent, error) {
+	events, err := s.st.selectQCEventsByWorkOrder(ctx, workOrderID)
+	if err != nil {
+		return nil, err
+	}
+	if events == nil {
+		events = []QCEvent{}
+	}
+	return events, nil
 }
 
 // GenerateQRCode returns a PNG image containing the barcode's key metadata
