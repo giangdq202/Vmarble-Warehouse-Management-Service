@@ -5252,6 +5252,14 @@ paths:
         in: query
         name: wo_id
         type: string
+      - description: filter created_at from (RFC3339 or YYYY-MM-DD)
+        in: query
+        name: from
+        type: string
+      - description: filter created_at to (RFC3339 or YYYY-MM-DD, inclusive day-end)
+        in: query
+        name: to
+        type: string
       produces:
       - application/json
       responses:

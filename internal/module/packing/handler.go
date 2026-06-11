@@ -2,6 +2,7 @@ package packing
 
 import (
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -42,6 +43,8 @@ func (h *Handler) Register(rg *gin.RouterGroup) {
 // @Param        sku_id        query  string  false  "filter by SKU id (uuid)"
 // @Param        so_line_id    query  string  false  "filter by sales order line id (uuid)"
 // @Param        wo_id         query  string  false  "filter by work order id (uuid)"
+// @Param        from          query  string  false  "filter created_at from (RFC3339 or YYYY-MM-DD)"
+// @Param        to            query  string  false  "filter created_at to (RFC3339 or YYYY-MM-DD, inclusive day-end)"
 // @Success      200  {object}  httpkit.PagedResult[FGPool]
 // @Security     BearerAuth
 // @Router       /api/v1/fg-pool [get]
@@ -71,6 +74,30 @@ func (h *Handler) list(c *gin.Context) {
 			return
 		}
 		f.WorkOrderID = &id
+	}
+	fromStr := c.Query("from")
+	toStr := c.Query("to")
+	if (fromStr != "") != (toStr != "") {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "from and to must be provided together"})
+		return
+	}
+	if fromStr != "" {
+		from, err := parseFGDate(fromStr, false)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid from date, use YYYY-MM-DD or RFC3339"})
+			return
+		}
+		to, err := parseFGDate(toStr, true)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid to date, use YYYY-MM-DD or RFC3339"})
+			return
+		}
+		if !from.Before(to) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "from must be before to"})
+			return
+		}
+		f.From = &from
+		f.To = &to
 	}
 	res, err := h.svc.ListFG(c.Request.Context(), p, f)
 	if err != nil {
@@ -255,4 +282,17 @@ func callerID(c *gin.Context) uuid.UUID {
 		return uuid.Nil
 	}
 	return uid
+}
+
+// parseFGDate parses a date string (RFC3339 or YYYY-MM-DD).
+// When inclusiveEnd is true, a date-only string is bumped to midnight of the
+// next day so the filter is inclusive of the named day.
+func parseFGDate(s string, inclusiveEnd bool) (time.Time, error) {
+	if t, err := time.ParseInLocation(time.DateOnly, s, time.UTC); err == nil {
+		if inclusiveEnd {
+			return t.AddDate(0, 0, 1), nil
+		}
+		return t, nil
+	}
+	return time.Parse(time.RFC3339, s)
 }

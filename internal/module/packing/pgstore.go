@@ -132,6 +132,15 @@ func (s *pgStore) selectFGPaged(ctx context.Context, p httpkit.PageParams, f FGL
 	addNullable("fp.sales_order_line_id", f.SOLineID)
 	addNullable("fp.work_order_id", f.WorkOrderID)
 
+	if f.From != nil {
+		args = append(args, *f.From)
+		clauses = append(clauses, "fp.created_at >= $"+strconv.Itoa(len(args)))
+	}
+	if f.To != nil {
+		args = append(args, *f.To)
+		clauses = append(clauses, "fp.created_at < $"+strconv.Itoa(len(args)))
+	}
+
 	where := strings.Join(clauses, " AND ")
 
 	var total int
