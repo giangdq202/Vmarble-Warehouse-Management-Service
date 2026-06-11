@@ -220,6 +220,7 @@ type ContainerListFilter struct {
 	Status        string
 	ContainerType string
 	LoaderID      *uuid.UUID
+	VesselID      *uuid.UUID
 }
 
 // AssignLoaderInput drives POST /containers/:id/assign-loader.
