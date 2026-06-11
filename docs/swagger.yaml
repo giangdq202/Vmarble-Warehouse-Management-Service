@@ -3086,6 +3086,22 @@ definitions:
       unit_price:
         type: integer
     type: object
+  internal_platform_storage.PresignResult:
+    properties:
+      public_url:
+        description: PublicURL is the permanent URL to store in the database.
+        type: string
+      upload_url:
+        description: UploadURL is the short-lived PUT URL the client sends bytes to.
+        type: string
+    type: object
+  internal_platform_storage.presignRequest:
+    properties:
+      content_type:
+        type: string
+    required:
+    - content_type
+    type: object
 info:
   contact: {}
   description: Backend API for warehouse & production management.
@@ -9500,6 +9516,45 @@ paths:
       summary: List active storage locations
       tags:
       - inventory
+  /api/v1/uploads/presign:
+    post:
+      consumes:
+      - application/json
+      description: |-
+        Returns a short-lived PUT URL (5 min) and a permanent public URL.
+        The client PUTs the file bytes directly to upload_url, then stores
+        public_url in the relevant entity (loading exception, defect, rejection).
+      parameters:
+      - description: 'content_type: image/jpeg | image/png | image/webp'
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_platform_storage.presignRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_platform_storage.PresignResult'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "503":
+          description: Service Unavailable
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Generate a presigned upload URL for R2 object storage
+      tags:
+      - uploads
   /api/v1/users/me:
     get:
       produces:

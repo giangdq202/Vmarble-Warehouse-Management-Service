@@ -39,6 +39,7 @@ import (
 	"github.com/vmarble/warehouse-management-service/internal/platform/events"
 	"github.com/vmarble/warehouse-management-service/internal/platform/httpkit"
 	"github.com/vmarble/warehouse-management-service/internal/platform/postgres"
+	"github.com/vmarble/warehouse-management-service/internal/platform/storage"
 
 	_ "github.com/vmarble/warehouse-management-service/docs"
 )
@@ -367,6 +368,23 @@ func main() {
 	scrap.NewHandler(scrapSvc).Register(api)
 	fxrates.NewHandler(fxratesSvc).Register(api)
 	shipping.NewHandler(shippingSvc).Register(api)
+
+	// R2 presign upload — nil presigner when not configured → 503 on call
+	r2Cfg := storage.R2Config{
+		AccountID:     cfg.R2AccountID,
+		AccessKeyID:   cfg.R2AccessKeyID,
+		SecretKey:     cfg.R2SecretKey,
+		BucketName:    cfg.R2BucketName,
+		PublicBaseURL: cfg.R2PublicBaseURL,
+	}
+	var presigner storage.Presigner
+	if r2Cfg.IsConfigured() {
+		presigner = storage.NewR2Presigner(r2Cfg)
+		slog.Info("R2 storage configured", "bucket", r2Cfg.BucketName)
+	} else {
+		slog.Warn("R2 storage not configured — /uploads/presign will return 503")
+	}
+	storage.NewHandler(presigner).Register(api)
 
 	srv := &http.Server{
 		Addr:         ":" + cfg.Port,
