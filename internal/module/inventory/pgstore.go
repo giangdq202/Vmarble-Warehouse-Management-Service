@@ -1774,6 +1774,16 @@ func (s *pgStore) selectRejectionsKeyset(ctx context.Context, f RejectionFilter,
 		args = append(args, *f.LotID)
 		idx++
 	}
+	if f.From != nil {
+		q += fmt.Sprintf(" AND reported_at >= $%d", idx)
+		args = append(args, *f.From)
+		idx++
+	}
+	if f.To != nil {
+		q += fmt.Sprintf(" AND reported_at < $%d", idx)
+		args = append(args, *f.To)
+		idx++
+	}
 	if !cur.IsZero() {
 		q += fmt.Sprintf(" AND (reported_at, id) < ($%d, $%d)", idx, idx+1)
 		args = append(args, cur.Ts, cur.ID)

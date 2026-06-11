@@ -5882,6 +5882,14 @@ paths:
         in: query
         name: lot_id
         type: string
+      - description: filter reported_at from (RFC3339 or YYYY-MM-DD)
+        in: query
+        name: from
+        type: string
+      - description: filter reported_at to (RFC3339 or YYYY-MM-DD, inclusive day-end)
+        in: query
+        name: to
+        type: string
       - description: opaque cursor token; omit for first page
         in: query
         name: cursor
