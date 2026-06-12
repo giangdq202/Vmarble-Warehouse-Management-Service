@@ -2238,6 +2238,8 @@ definitions:
     type: object
   internal_module_packing.FGPool:
     properties:
+      barcode_code:
+        type: string
       barcode_id:
         type: string
       component_type:
@@ -2264,6 +2266,8 @@ definitions:
         type: string
       unit_index:
         type: integer
+      work_order_code:
+        type: string
       work_order_id:
         type: string
     type: object

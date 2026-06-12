@@ -27,11 +27,14 @@ func NewPGStore(pool *pgxpool.Pool) store {
 
 const fgSelectCols = `
 SELECT fp.id, fp.work_order_id, fp.sku_id, s.code, s.name, fp.barcode_id,
+       COALESCE(b.barcode_code, ''), COALESCE(wo.work_order_code, ''),
        fp.sales_order_line_id, fp.status, fp.container_line_id,
        fp.component_type, fp.unit_index,
        fp.qc_passed_at, fp.qc_passed_by, fp.created_at
   FROM fg_pool fp
-  JOIN skus s ON s.id = fp.sku_id`
+  JOIN skus s ON s.id = fp.sku_id
+  LEFT JOIN barcodes b ON b.id = fp.barcode_id
+  LEFT JOIN work_orders wo ON wo.id = fp.work_order_id`
 
 type fgScanner interface {
 	Scan(dest ...any) error
@@ -40,7 +43,8 @@ type fgScanner interface {
 func scanFG(r fgScanner) (FGPool, error) {
 	var fg FGPool
 	if err := r.Scan(&fg.ID, &fg.WorkOrderID, &fg.SKUID, &fg.SKUCode, &fg.SKUName,
-		&fg.BarcodeID, &fg.SalesOrderLineID, &fg.Status, &fg.ContainerLineID,
+		&fg.BarcodeID, &fg.BarcodeCode, &fg.WorkOrderCode,
+		&fg.SalesOrderLineID, &fg.Status, &fg.ContainerLineID,
 		&fg.ComponentType, &fg.UnitIndex,
 		&fg.QCPassedAt, &fg.QCPassedBy, &fg.CreatedAt); err != nil {
 		return FGPool{}, err
@@ -222,6 +226,7 @@ func (s *pgStore) selectDefectByFGID(ctx context.Context, fgID uuid.UUID) (FGDef
 func (s *pgStore) selectAvailableFGsBySKU(ctx context.Context, skuID, excludeID uuid.UUID, limit int) ([]fgSuggestionCandidate, error) {
 	rows, err := s.pool.Query(ctx,
 		`SELECT fp.id, fp.work_order_id, fp.sku_id, s.code, s.name, fp.barcode_id,
+		        COALESCE(b.barcode_code, ''), COALESCE(wo.work_order_code, ''),
 		        fp.sales_order_line_id, fp.status, fp.container_line_id,
 		        fp.component_type, fp.unit_index,
 		        fp.qc_passed_at, fp.qc_passed_by, fp.created_at,
@@ -234,6 +239,8 @@ func (s *pgStore) selectAvailableFGsBySKU(ctx context.Context, skuID, excludeID 
 		        ) AS nearest_cutoff
 		   FROM fg_pool fp
 		   JOIN skus s ON s.id = fp.sku_id
+		   LEFT JOIN barcodes b ON b.id = fp.barcode_id
+		   LEFT JOIN work_orders wo ON wo.id = fp.work_order_id
 		  WHERE fp.sku_id = $1
 		    AND fp.status = 'AVAILABLE'
 		    AND fp.id != $2
@@ -251,7 +258,8 @@ func (s *pgStore) selectAvailableFGsBySKU(ctx context.Context, skuID, excludeID 
 		var cutoff *time.Time
 		if err := rows.Scan(
 			&fg.ID, &fg.WorkOrderID, &fg.SKUID, &fg.SKUCode, &fg.SKUName,
-			&fg.BarcodeID, &fg.SalesOrderLineID, &fg.Status, &fg.ContainerLineID,
+			&fg.BarcodeID, &fg.BarcodeCode, &fg.WorkOrderCode,
+			&fg.SalesOrderLineID, &fg.Status, &fg.ContainerLineID,
 			&fg.ComponentType, &fg.UnitIndex,
 			&fg.QCPassedAt, &fg.QCPassedBy, &fg.CreatedAt,
 			&cutoff,
