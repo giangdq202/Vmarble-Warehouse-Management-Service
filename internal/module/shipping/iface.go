@@ -77,8 +77,11 @@ type BookContainerInput struct {
 }
 
 type VesselListFilter struct {
-	// Optionally narrow to vessels whose cutoff_date is on or after this time.
-	CutoffFrom *time.Time
+	Search     string     // ILIKE match on name OR voyage_number
+	CutoffFrom *time.Time // cutoff_date >= from
+	CutoffTo   *time.Time // cutoff_date < to (exclusive)
+	ETDFrom    *time.Time // etd >= from
+	ETDTo      *time.Time // etd < to (exclusive)
 }
 
 type Service interface {

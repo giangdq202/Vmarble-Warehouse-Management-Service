@@ -3,6 +3,8 @@ package shipping
 import (
 	"context"
 	"errors"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -56,16 +58,52 @@ func (s *pgStore) getVessel(ctx context.Context, id uuid.UUID) (Vessel, error) {
 }
 
 func (s *pgStore) listVessels(ctx context.Context, p httpkit.PageParams, f VesselListFilter) (httpkit.PagedResult[Vessel], error) {
-	rows, err := s.pool.Query(ctx,
-		`SELECT id, name, COALESCE(carrier,''), COALESCE(voyage_number,''),
+	var args []any
+	var clauses []string
+
+	addTime := func(col string, val *time.Time, op string) {
+		if val == nil {
+			return
+		}
+		args = append(args, *val)
+		clauses = append(clauses, col+" "+op+" $"+strconv.Itoa(len(args)))
+	}
+
+	if f.Search != "" {
+		args = append(args, "%"+f.Search+"%")
+		n := strconv.Itoa(len(args))
+		clauses = append(clauses, "(name ILIKE $"+n+" OR COALESCE(voyage_number,'') ILIKE $"+n+")")
+	}
+	addTime("cutoff_date", f.CutoffFrom, ">=")
+	addTime("cutoff_date", f.CutoffTo, "<")
+	addTime("etd", f.ETDFrom, ">=")
+	addTime("etd", f.ETDTo, "<")
+
+	where := "TRUE"
+	if len(clauses) > 0 {
+		where = strings.Join(clauses, " AND ")
+	}
+
+	const cols = `SELECT id, name, COALESCE(carrier,''), COALESCE(voyage_number,''),
 		        etd, eta, cutoff_date,
 		        COALESCE(port_of_loading,''), COALESCE(port_of_discharge,''),
 		        created_by, created_at
-		 FROM vessels
-		 WHERE ($1::timestamptz IS NULL OR cutoff_date >= $1)
-		 ORDER BY cutoff_date ASC, id ASC
-		 LIMIT $2 OFFSET $3`,
-		f.CutoffFrom, p.Limit, p.Offset(),
+		 FROM vessels WHERE `
+
+	var total int
+	if err := s.pool.QueryRow(ctx,
+		`SELECT COUNT(*) FROM vessels WHERE `+where, args...,
+	).Scan(&total); err != nil {
+		return httpkit.PagedResult[Vessel]{}, err
+	}
+
+	args = append(args, p.Limit, p.Offset())
+	limitArg := "$" + strconv.Itoa(len(args)-1)
+	offsetArg := "$" + strconv.Itoa(len(args))
+
+	rows, err := s.pool.Query(ctx,
+		cols+where+` ORDER BY cutoff_date ASC, id ASC LIMIT `+limitArg+` OFFSET `+offsetArg,
+		args...,
 	)
 	if err != nil {
 		return httpkit.PagedResult[Vessel]{}, err
@@ -89,13 +127,6 @@ func (s *pgStore) listVessels(ctx context.Context, p httpkit.PageParams, f Vesse
 		return httpkit.PagedResult[Vessel]{}, err
 	}
 
-	var total int
-	if err := s.pool.QueryRow(ctx,
-		`SELECT COUNT(*) FROM vessels WHERE ($1::timestamptz IS NULL OR cutoff_date >= $1)`,
-		f.CutoffFrom,
-	).Scan(&total); err != nil {
-		return httpkit.PagedResult[Vessel]{}, err
-	}
 	return httpkit.NewPagedResult(vessels, total, p), nil
 }
 
