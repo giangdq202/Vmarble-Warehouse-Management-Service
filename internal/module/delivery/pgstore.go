@@ -107,8 +107,9 @@ func (s *pgStore) selectContainersPaged(ctx context.Context, p httpkit.PageParam
 		  WHERE ($1::text = '' OR status = $1)
 		    AND ($2::text = '' OR container_type = $2)
 		    AND ($3::text = '' OR code ILIKE $3)
-		    AND ($4::uuid IS NULL OR loader_id = $4)`,
-		f.Status, f.ContainerType, search, f.LoaderID,
+		    AND ($4::uuid IS NULL OR loader_id = $4)
+		    AND ($5::uuid IS NULL OR vessel_id = $5)`,
+		f.Status, f.ContainerType, search, f.LoaderID, f.VesselID,
 	).Scan(&total); err != nil {
 		return nil, 0, err
 	}
@@ -119,9 +120,10 @@ func (s *pgStore) selectContainersPaged(ctx context.Context, p httpkit.PageParam
 		    AND ($2::text = '' OR container_type = $2)
 		    AND ($3::text = '' OR code ILIKE $3)
 		    AND ($4::uuid IS NULL OR loader_id = $4)
+		    AND ($5::uuid IS NULL OR vessel_id = $5)
 		  ORDER BY created_at DESC, id DESC
-		 LIMIT $5 OFFSET $6`,
-		f.Status, f.ContainerType, search, f.LoaderID, p.Limit, p.Offset(),
+		 LIMIT $6 OFFSET $7`,
+		f.Status, f.ContainerType, search, f.LoaderID, f.VesselID, p.Limit, p.Offset(),
 	)
 	if err != nil {
 		return nil, 0, err

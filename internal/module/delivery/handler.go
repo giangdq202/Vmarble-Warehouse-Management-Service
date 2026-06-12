@@ -98,6 +98,7 @@ func (h *Handler) create(c *gin.Context) {
 // @Param        status          query  string  false  "filter by status"
 // @Param        container_type  query  string  false  "20GP / 40GP / 40HC"
 // @Param        loader_id       query  string  false  "filter by assigned loader (uuid)"
+// @Param        vessel_id       query  string  false  "filter by vessel (uuid)"
 // @Success      200  {object}  httpkit.PagedResult[Container]
 // @Security     BearerAuth
 // @Router       /api/v1/containers [get]
@@ -111,6 +112,14 @@ func (h *Handler) list(c *gin.Context) {
 			return
 		}
 		f.LoaderID = &lid
+	}
+	if raw := c.Query("vessel_id"); raw != "" {
+		vid, err := uuid.Parse(raw)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid vessel_id"})
+			return
+		}
+		f.VesselID = &vid
 	}
 	res, err := h.svc.ListContainers(c.Request.Context(), p, f)
 	if err != nil {

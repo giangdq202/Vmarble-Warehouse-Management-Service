@@ -3632,6 +3632,10 @@ paths:
         in: query
         name: loader_id
         type: string
+      - description: filter by vessel (uuid)
+        in: query
+        name: vessel_id
+        type: string
       produces:
       - application/json
       responses:

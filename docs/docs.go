@@ -878,6 +878,12 @@ const docTemplate = `{
                         "description": "filter by assigned loader (uuid)",
                         "name": "loader_id",
                         "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "filter by vessel (uuid)",
+                        "name": "vessel_id",
+                        "in": "query"
                     }
                 ],
                 "responses": {
