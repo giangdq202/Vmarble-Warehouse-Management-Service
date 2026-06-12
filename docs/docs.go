@@ -3371,6 +3371,18 @@ const docTemplate = `{
                         "description": "filter by work order id (uuid)",
                         "name": "wo_id",
                         "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "filter created_at from (RFC3339 or YYYY-MM-DD)",
+                        "name": "from",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "filter created_at to (RFC3339 or YYYY-MM-DD, inclusive day-end)",
+                        "name": "to",
+                        "in": "query"
                     }
                 ],
                 "responses": {

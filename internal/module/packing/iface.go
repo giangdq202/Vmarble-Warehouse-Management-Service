@@ -153,10 +153,12 @@ type ResolveDefectInput struct {
 }
 
 type FGListFilter struct {
-	Status         string
-	SKUID          *uuid.UUID
-	SOLineID       *uuid.UUID
-	WorkOrderID    *uuid.UUID
+	Status      string
+	SKUID       *uuid.UUID
+	SOLineID    *uuid.UUID
+	WorkOrderID *uuid.UUID
+	From        *time.Time
+	To          *time.Time
 }
 
 type Service interface {
