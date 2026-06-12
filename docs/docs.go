@@ -14797,6 +14797,9 @@ const docTemplate = `{
         "internal_module_packing.FGPool": {
             "type": "object",
             "properties": {
+                "barcode_code": {
+                    "type": "string"
+                },
                 "barcode_id": {
                     "type": "string"
                 },
@@ -14835,6 +14838,9 @@ const docTemplate = `{
                 },
                 "unit_index": {
                     "type": "integer"
+                },
+                "work_order_code": {
+                    "type": "string"
                 },
                 "work_order_id": {
                     "type": "string"

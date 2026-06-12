@@ -49,6 +49,8 @@ type FGPool struct {
 	SKUCode          string     `json:"sku_code,omitempty"`
 	SKUName          string     `json:"sku_name,omitempty"`
 	BarcodeID        uuid.UUID  `json:"barcode_id"`
+	BarcodeCode      string     `json:"barcode_code,omitempty"`
+	WorkOrderCode    string     `json:"work_order_code,omitempty"`
 	SalesOrderLineID *uuid.UUID `json:"sales_order_line_id,omitempty"`
 	Status           string     `json:"status"`
 	ContainerLineID  *uuid.UUID `json:"container_line_id,omitempty"`
