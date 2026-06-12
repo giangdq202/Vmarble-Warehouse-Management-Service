@@ -77,14 +77,45 @@ func (h *Handler) listVessels(c *gin.Context) {
 		return
 	}
 
-	var f VesselListFilter
-	if v := c.Query("cutoff_from"); v != "" {
-		t, err := time.Parse(time.RFC3339, v)
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid cutoff_from, use RFC3339"})
-			return
+	// parseDateParam accepts YYYY-MM-DD or RFC3339; for "to" bounds with
+	// date-only input it bumps +1 day so the bound is exclusive (end of day).
+	parseDateParam := func(param string, isToBound bool) (*time.Time, bool) {
+		v := c.Query(param)
+		if v == "" {
+			return nil, true
 		}
-		f.CutoffFrom = &t
+		if t, err := time.Parse("2006-01-02", v); err == nil {
+			if isToBound {
+				next := t.AddDate(0, 0, 1)
+				return &next, true
+			}
+			return &t, true
+		}
+		if t, err := time.Parse(time.RFC3339, v); err == nil {
+			return &t, true
+		}
+		return nil, false
+	}
+
+	var f VesselListFilter
+	f.Search = c.Query("search")
+
+	var ok bool
+	if f.CutoffFrom, ok = parseDateParam("cutoff_from", false); !ok {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid cutoff_from: use YYYY-MM-DD or RFC3339"})
+		return
+	}
+	if f.CutoffTo, ok = parseDateParam("cutoff_to", true); !ok {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid cutoff_to: use YYYY-MM-DD or RFC3339"})
+		return
+	}
+	if f.ETDFrom, ok = parseDateParam("etd_from", false); !ok {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid etd_from: use YYYY-MM-DD or RFC3339"})
+		return
+	}
+	if f.ETDTo, ok = parseDateParam("etd_to", true); !ok {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid etd_to: use YYYY-MM-DD or RFC3339"})
+		return
 	}
 
 	result, err := h.svc.ListVessels(c.Request.Context(), params, f)
