@@ -9998,6 +9998,63 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/uploads/presign": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns a short-lived PUT URL (5 min) and a permanent public URL.\nThe client PUTs the file bytes directly to upload_url, then stores\npublic_url in the relevant entity (loading exception, defect, rejection).",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "uploads"
+                ],
+                "summary": "Generate a presigned upload URL for R2 object storage",
+                "parameters": [
+                    {
+                        "description": "content_type: image/jpeg | image/png | image/webp",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_platform_storage.presignRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_platform_storage.PresignResult"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/users/me": {
             "get": {
                 "security": [
@@ -16007,6 +16064,30 @@ const docTemplate = `{
                 },
                 "unit_price": {
                     "type": "integer"
+                }
+            }
+        },
+        "internal_platform_storage.PresignResult": {
+            "type": "object",
+            "properties": {
+                "public_url": {
+                    "description": "PublicURL is the permanent URL to store in the database.",
+                    "type": "string"
+                },
+                "upload_url": {
+                    "description": "UploadURL is the short-lived PUT URL the client sends bytes to.",
+                    "type": "string"
+                }
+            }
+        },
+        "internal_platform_storage.presignRequest": {
+            "type": "object",
+            "required": [
+                "content_type"
+            ],
+            "properties": {
+                "content_type": {
+                    "type": "string"
                 }
             }
         }

@@ -32,6 +32,14 @@ type Config struct {
 	// rejecting realistic packing plans. 5% matches the operational tolerance
 	// the warehouse team has been using by hand.
 	ContainerCBMOverheadPct float64 `env:"CONTAINER_CBM_OVERHEAD_PCT" envDefault:"5"`
+
+	// R2 object storage (Cloudflare). All fields optional; when any is absent
+	// the presign endpoint returns 503 rather than crashing on startup.
+	R2AccountID     string `env:"R2_ACCOUNT_ID"`
+	R2AccessKeyID   string `env:"R2_ACCESS_KEY_ID"`
+	R2SecretKey     string `env:"R2_SECRET_KEY"`
+	R2BucketName    string `env:"R2_BUCKET_NAME"`
+	R2PublicBaseURL string `env:"R2_PUBLIC_BASE_URL"`
 }
 
 func Load() (Config, error) {
