@@ -4368,6 +4368,18 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
+                        "description": "filter reported_at from (RFC3339 or YYYY-MM-DD)",
+                        "name": "from",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "filter reported_at to (RFC3339 or YYYY-MM-DD, inclusive day-end)",
+                        "name": "to",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
                         "description": "opaque cursor token; omit for first page",
                         "name": "cursor",
                         "in": "query"

@@ -1069,6 +1069,8 @@ func (h *Handler) rejectLot(c *gin.Context) {
 // @Produce      json
 // @Param        claim_status  query     string  false  "filter by claim_status (OPEN|APPROVED|REJECTED|PAID)"
 // @Param        lot_id        query     string  false  "filter by lot id (uuid)"
+// @Param        from          query     string  false  "filter reported_at from (RFC3339 or YYYY-MM-DD)"
+// @Param        to            query     string  false  "filter reported_at to (RFC3339 or YYYY-MM-DD, inclusive day-end)"
 // @Param        cursor        query     string  false  "opaque cursor token; omit for first page"
 // @Param        limit         query     int     false  "page size (default 50, max 200)"
 // @Security     BearerAuth
@@ -1084,6 +1086,30 @@ func (h *Handler) listRejections(c *gin.Context) {
 		}
 		f.LotID = &parsed
 	}
+	fromStr := c.Query("from")
+	toStr := c.Query("to")
+	if (fromStr != "") != (toStr != "") {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "from and to must be provided together"})
+		return
+	}
+	if fromStr != "" {
+		from, err := parseRejectionDate(fromStr, false)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid from date, use YYYY-MM-DD or RFC3339"})
+			return
+		}
+		to, err := parseRejectionDate(toStr, true)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid to date, use YYYY-MM-DD or RFC3339"})
+			return
+		}
+		if !from.Before(to) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "from must be before to"})
+			return
+		}
+		f.From = &from
+		f.To = &to
+	}
 	params := httpkit.BindCursorParams(c)
 	res, err := h.svc.ListRejections(c.Request.Context(), f, params)
 	if err != nil {
@@ -1091,6 +1117,19 @@ func (h *Handler) listRejections(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, res)
+}
+
+// parseRejectionDate parses a date string (RFC3339 or YYYY-MM-DD).
+// When inclusiveEnd is true, a date-only string is bumped to midnight of the
+// next day so the filter is inclusive of the named day.
+func parseRejectionDate(s string, inclusiveEnd bool) (time.Time, error) {
+	if t, err := time.ParseInLocation(time.DateOnly, s, time.UTC); err == nil {
+		if inclusiveEnd {
+			return t.AddDate(0, 0, 1), nil
+		}
+		return t, nil
+	}
+	return time.Parse(time.RFC3339, s)
 }
 
 // getRejection godoc

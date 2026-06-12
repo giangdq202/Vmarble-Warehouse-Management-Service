@@ -571,6 +571,8 @@ type UpdateClaimInput struct {
 type RejectionFilter struct {
 	ClaimStatus string
 	LotID       *uuid.UUID
+	From        *time.Time
+	To          *time.Time
 }
 
 // RejectionReport is a per-supplier aggregation row used by /reports/rejections.
