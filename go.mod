@@ -1,6 +1,6 @@
 module github.com/vmarble/warehouse-management-service
 
-go 1.25.0
+go 1.24.0
 
 require (
 	github.com/HdrHistogram/hdrhistogram-go v1.2.0
@@ -23,7 +23,7 @@ require (
 	github.com/testcontainers/testcontainers-go/modules/postgres v0.41.0
 	github.com/xuri/excelize/v2 v2.10.1
 	golang.org/x/crypto v0.49.0
-	golang.org/x/time v0.15.0
+	golang.org/x/time v0.5.0
 )
 
 require (
