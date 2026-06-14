@@ -1,0 +1,14 @@
+inputSet:
+  name: Build_529_stu_Vmarble_Warehouse_Management_Service_1781415326046-push-trigger-input-set
+  identifier: Build_529_stu_Vmarble_Warehouse_Management_Service_1781415326046pushtriggerinputset
+  orgIdentifier: default
+  projectIdentifier: vmarblebe
+  pipeline:
+    identifier: Build_529_stu_Vmarble_Warehouse_Management_Service_1781415326046
+    properties:
+      ci:
+        codebase:
+          build:
+            type: branch
+            spec:
+              branch: <+trigger.branch>
