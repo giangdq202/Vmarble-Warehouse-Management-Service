@@ -1,0 +1,65 @@
+pipeline:
+  identifier: Build_529_stu_Vmarble_Warehouse_Management_Service_1781415326046
+  name: Build Vmarble-Warehouse-Management-Service
+  orgIdentifier: default
+  projectIdentifier: vmarblebe
+  properties:
+    ci:
+      codebase:
+        build: <+input>
+        connectorRef: account.Gitlab
+        repoName: 529-stu/Vmarble-Warehouse-Management-Service
+  stages:
+    - stage:
+        identifier: build
+        name: build
+        spec:
+          caching:
+            enabled: true
+          cloneCodebase: true
+          execution:
+            steps:
+              - step:
+                  identifier: gobuild
+                  name: go_build
+                  spec:
+                    command: go build
+                  timeout: ""
+                  type: Run
+              - step:
+                  identifier: gotestcoverage
+                  name: go_test_coverage
+                  spec:
+                    command: go test -coverprofile=coverage.out ./...
+                  timeout: ""
+                  type: Run
+              - step:
+                  identifier: gotestreport
+                  name: go_test_report
+                  spec:
+                    command: "export GOBIN=/home/harness/go/bin\n\t\texport PATH=/home/harness/go/bin:$PATH\n\t\techo $PATH\n\t\tgo install github.com/jstemmer/go-junit-report/v2@latest\n\t\tgo test -v 2>&1 ./... | go-junit-report -set-exit-code > report.xml"
+                    reports:
+                      spec:
+                        paths:
+                          - /harness/report.xml
+                      type: JUnit
+                  timeout: ""
+                  type: Run
+              - step:
+                  identifier: dockerbuild
+                  name: docker_build
+                  spec:
+                    caching: true
+                    connectorRef: <+input>
+                    repo: hello/world
+                    tags:
+                      - latest
+                  timeout: ""
+                  type: BuildAndPushDockerRegistry
+          platform:
+            arch: Amd64
+            os: Linux
+          runtime:
+            spec: {}
+            type: Cloud
+        type: CI
