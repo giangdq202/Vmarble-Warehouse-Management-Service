@@ -10113,6 +10113,78 @@
                 }
             }
         },
+        "/api/v1/vessels": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "shipping"
+                ],
+                "summary": "List vessels",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "page (default 1)",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "limit (default 10, max 100)",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "ILIKE on vessel name or voyage number",
+                        "name": "search",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "cutoff_date \u003e= (YYYY-MM-DD or RFC3339)",
+                        "name": "cutoff_from",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "cutoff_date \u003c (YYYY-MM-DD or RFC3339, exclusive)",
+                        "name": "cutoff_to",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "etd \u003e= (YYYY-MM-DD or RFC3339)",
+                        "name": "etd_from",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "etd \u003c (YYYY-MM-DD or RFC3339, exclusive)",
+                        "name": "etd_to",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_shipping_Vessel"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/work-orders": {
             "get": {
                 "security": [
@@ -12080,6 +12152,32 @@
                     "type": "array",
                     "items": {
                         "$ref": "#/definitions/internal_module_sales.SalesOrder"
+                    }
+                },
+                "limit": {
+                    "type": "integer"
+                },
+                "total_is_estimate": {
+                    "type": "boolean"
+                },
+                "total_items": {
+                    "type": "integer"
+                },
+                "total_pages": {
+                    "type": "integer"
+                }
+            }
+        },
+        "github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_shipping_Vessel": {
+            "type": "object",
+            "properties": {
+                "current_page": {
+                    "type": "integer"
+                },
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_module_shipping.Vessel"
                     }
                 },
                 "limit": {
@@ -16062,6 +16160,44 @@
                 },
                 "unit_price": {
                     "type": "integer"
+                }
+            }
+        },
+        "internal_module_shipping.Vessel": {
+            "type": "object",
+            "properties": {
+                "carrier": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "created_by": {
+                    "type": "string"
+                },
+                "cutoff_date": {
+                    "type": "string"
+                },
+                "eta": {
+                    "type": "string"
+                },
+                "etd": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "port_of_discharge": {
+                    "type": "string"
+                },
+                "port_of_loading": {
+                    "type": "string"
+                },
+                "voyage_number": {
+                    "type": "string"
                 }
             }
         },

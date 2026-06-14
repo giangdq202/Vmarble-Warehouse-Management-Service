@@ -70,6 +70,19 @@ func (h *Handler) getVessel(c *gin.Context) {
 	c.JSON(http.StatusOK, v)
 }
 
+// @Summary      List vessels
+// @Tags         shipping
+// @Produce      json
+// @Param        page         query  int     false  "page (default 1)"
+// @Param        limit        query  int     false  "limit (default 10, max 100)"
+// @Param        search       query  string  false  "ILIKE on vessel name or voyage number"
+// @Param        cutoff_from  query  string  false  "cutoff_date >= (YYYY-MM-DD or RFC3339)"
+// @Param        cutoff_to    query  string  false  "cutoff_date < (YYYY-MM-DD or RFC3339, exclusive)"
+// @Param        etd_from     query  string  false  "etd >= (YYYY-MM-DD or RFC3339)"
+// @Param        etd_to       query  string  false  "etd < (YYYY-MM-DD or RFC3339, exclusive)"
+// @Success      200  {object}  httpkit.PagedResult[Vessel]
+// @Failure      400  {object}  map[string]string
+// @Router       /api/v1/vessels [get]
 func (h *Handler) listVessels(c *gin.Context) {
 	params := httpkit.BindPageParams(c)
 	if err := httpkit.ValidateOffset(params); err != nil {

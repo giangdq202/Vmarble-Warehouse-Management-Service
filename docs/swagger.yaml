@@ -445,6 +445,23 @@ definitions:
       total_pages:
         type: integer
     type: object
+  github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_shipping_Vessel:
+    properties:
+      current_page:
+        type: integer
+      items:
+        items:
+          $ref: '#/definitions/internal_module_shipping.Vessel'
+        type: array
+      limit:
+        type: integer
+      total_is_estimate:
+        type: boolean
+      total_items:
+        type: integer
+      total_pages:
+        type: integer
+    type: object
   internal_module_authn.CreateUserInput:
     properties:
       email:
@@ -3089,6 +3106,31 @@ definitions:
         type: integer
       unit_price:
         type: integer
+    type: object
+  internal_module_shipping.Vessel:
+    properties:
+      carrier:
+        type: string
+      created_at:
+        type: string
+      created_by:
+        type: string
+      cutoff_date:
+        type: string
+      eta:
+        type: string
+      etd:
+        type: string
+      id:
+        type: string
+      name:
+        type: string
+      port_of_discharge:
+        type: string
+      port_of_loading:
+        type: string
+      voyage_number:
+        type: string
     type: object
   internal_platform_storage.PresignResult:
     properties:
@@ -9620,6 +9662,53 @@ paths:
       summary: List workers for dropdown population
       tags:
       - users
+  /api/v1/vessels:
+    get:
+      parameters:
+      - description: page (default 1)
+        in: query
+        name: page
+        type: integer
+      - description: limit (default 10, max 100)
+        in: query
+        name: limit
+        type: integer
+      - description: ILIKE on vessel name or voyage number
+        in: query
+        name: search
+        type: string
+      - description: cutoff_date >= (YYYY-MM-DD or RFC3339)
+        in: query
+        name: cutoff_from
+        type: string
+      - description: cutoff_date < (YYYY-MM-DD or RFC3339, exclusive)
+        in: query
+        name: cutoff_to
+        type: string
+      - description: etd >= (YYYY-MM-DD or RFC3339)
+        in: query
+        name: etd_from
+        type: string
+      - description: etd < (YYYY-MM-DD or RFC3339, exclusive)
+        in: query
+        name: etd_to
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_shipping_Vessel'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: List vessels
+      tags:
+      - shipping
   /api/v1/work-orders:
     get:
       parameters:
