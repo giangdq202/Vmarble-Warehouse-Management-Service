@@ -1,6 +1,6 @@
 module github.com/vmarble/warehouse-management-service
 
-go 1.24.0
+go 1.25.0
 
 require (
 	github.com/HdrHistogram/hdrhistogram-go v1.2.0

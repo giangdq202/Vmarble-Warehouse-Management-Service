@@ -3,7 +3,7 @@ version: 2.1
 executors:
   go-executor:
     docker:
-      - image: cimg/go:1.24.0
+      - image: cimg/go:1.25.0
     environment:
       # Phục dựng chính xác cấu hình GOCACHE và GOPATH của bạn
       GOPATH: /home/circleci/project/.go
