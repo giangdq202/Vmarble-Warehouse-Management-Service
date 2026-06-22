@@ -122,6 +122,15 @@ func (stubService) ClaimWorkOrder(context.Context, ClaimWorkOrderInput) (WorkOrd
 func (stubService) UpdateQCStatus(context.Context, uuid.UUID, string) error {
 	panic("unexpected call")
 }
+func (stubService) CreateBlocker(context.Context, CreateBlockerInput) (WOBlocker, error) {
+	return WOBlocker{}, nil
+}
+func (stubService) ResolveBlocker(context.Context, ResolveBlockerInput) (WOBlocker, error) {
+	return WOBlocker{}, nil
+}
+func (stubService) ListBlockers(context.Context, uuid.UUID) ([]WOBlocker, error) {
+	return nil, nil
+}
 
 var _ Service = stubService{}
 

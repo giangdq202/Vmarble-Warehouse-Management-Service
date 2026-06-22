@@ -202,6 +202,16 @@ func (svc *service) AdvanceStatus(ctx context.Context, woID uuid.UUID, in Advanc
 		return domain.NewBizError(domain.ErrInvalidTransition, err.Error())
 	}
 
+	// Block advance if there are open blockers on this WO (#35).
+	openCount, err := svc.s.countOpenBlockers(ctx, woID)
+	if err != nil {
+		return fmt.Errorf("count open blockers: %w", err)
+	}
+	if openCount > 0 {
+		return domain.NewBizError(domain.ErrPreconditionFailed,
+			fmt.Sprintf("work order has %d open blocker(s); resolve all blockers before advancing", openCount))
+	}
+
 	// When advancing to IN_CUTTING, enforce assignment invariant (Spec 5.1):
 	// - WO must already be assigned to a CNC operator.
 	// - If a CallerID is provided (from JWT), it must match the assigned operator.
@@ -1051,4 +1061,70 @@ func (svc *service) ClaimWorkOrder(ctx context.Context, in ClaimWorkOrderInput) 
 
 func (svc *service) UpdateQCStatus(ctx context.Context, woID uuid.UUID, status string) error {
 	return svc.s.updateWorkOrderQCStatus(ctx, woID, status)
+}
+
+// ── WO Blockers (#35) ────────────────────────────────────────────────────────
+
+func (svc *service) CreateBlocker(ctx context.Context, in CreateBlockerInput) (WOBlocker, error) {
+	if !in.Reason.Valid() {
+		return WOBlocker{}, domain.NewBizError(domain.ErrInvalidInput,
+			"invalid blocker reason; must be MATERIAL_DELAYED, MATERIAL_REJECTED, MACHINE_DOWN, or OTHER")
+	}
+
+	wo, err := svc.s.selectWorkOrderByID(ctx, in.WorkOrderID)
+	if err != nil {
+		return WOBlocker{}, err
+	}
+	if wo.Status == domain.WOCompleted || wo.Status == domain.WOCosted {
+		return WOBlocker{}, domain.NewBizError(domain.ErrPreconditionFailed,
+			fmt.Sprintf("cannot add blocker to work order in status %s", wo.Status))
+	}
+
+	b := WOBlocker{
+		ID:          uuid.New(),
+		WorkOrderID: in.WorkOrderID,
+		Reason:      in.Reason,
+		Detail:      in.Detail,
+		CreatedBy:   in.CreatedBy,
+		CreatedAt:   time.Now().UTC(),
+	}
+	if err := svc.s.insertBlocker(ctx, b); err != nil {
+		return WOBlocker{}, fmt.Errorf("insert blocker: %w", err)
+	}
+	slog.Info("wo.blocker.created",
+		"work_order_id", in.WorkOrderID,
+		"blocker_id", b.ID,
+		"reason", in.Reason,
+	)
+	return b, nil
+}
+
+func (svc *service) ResolveBlocker(ctx context.Context, in ResolveBlockerInput) (WOBlocker, error) {
+	// Fetch first to give a meaningful 404 before attempting UPDATE.
+	existing, err := svc.s.getBlocker(ctx, in.BlockerID)
+	if err != nil {
+		return WOBlocker{}, err
+	}
+	if existing.ResolvedAt != nil {
+		return WOBlocker{}, domain.NewBizError(domain.ErrPreconditionFailed, "blocker is already resolved")
+	}
+
+	b, err := svc.s.resolveBlocker(ctx, in.BlockerID, in.ResolvedBy, time.Now().UTC())
+	if err != nil {
+		return WOBlocker{}, err
+	}
+	slog.Info("wo.blocker.resolved",
+		"work_order_id", b.WorkOrderID,
+		"blocker_id", b.ID,
+		"resolved_by", in.ResolvedBy,
+	)
+	return b, nil
+}
+
+func (svc *service) ListBlockers(ctx context.Context, woID uuid.UUID) ([]WOBlocker, error) {
+	// Verify WO exists.
+	if _, err := svc.s.selectWorkOrderByID(ctx, woID); err != nil {
+		return nil, err
+	}
+	return svc.s.listBlockers(ctx, woID)
 }
