@@ -45,6 +45,15 @@ func (stubPackingService) CheckComponentsForSeal(context.Context, uuid.UUID) err
 func (stubPackingService) ReassignFG(context.Context, ReassignFGInput) (ReassignFGResult, error) {
 	panic("unexpected")
 }
+func (stubPackingService) ReleaseAllocation(context.Context, ReleaseAllocationInput) (Allocation, error) {
+	return Allocation{}, nil
+}
+func (stubPackingService) ReassignAllocation(context.Context, ReassignAllocationInput) (Allocation, error) {
+	return Allocation{}, nil
+}
+func (stubPackingService) ListAllocations(context.Context, uuid.UUID) ([]Allocation, error) {
+	return nil, nil
+}
 
 var _ Service = stubPackingService{}
 

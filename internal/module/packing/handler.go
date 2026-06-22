@@ -30,6 +30,8 @@ func (h *Handler) Register(rg *gin.RouterGroup) {
 	rg.POST("/packing/defect", auth.RequireWorkerUp(), h.reportDefect)
 	rg.POST("/packing/defect/:id/resolve", auth.RequirePlannerUp(), h.resolveDefect)
 	rg.POST("/fg-pool/:id/reassign", auth.RequirePlannerUp(), h.reassignFG)
+	rg.POST("/allocations/:id/release", auth.RequirePlannerUp(), h.releaseAllocation)
+	rg.GET("/allocations", auth.RequirePlannerUp(), h.listAllocations)
 }
 
 // listFGPool godoc
@@ -282,6 +284,42 @@ func callerID(c *gin.Context) uuid.UUID {
 		return uuid.Nil
 	}
 	return uid
+}
+
+func (h *Handler) releaseAllocation(c *gin.Context) {
+	allocID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid allocation id"})
+		return
+	}
+	out, err := h.svc.ReleaseAllocation(c.Request.Context(), ReleaseAllocationInput{
+		AllocationID: allocID,
+		ActorID:      callerID(c),
+	})
+	if err != nil {
+		httpkit.Error(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, out)
+}
+
+func (h *Handler) listAllocations(c *gin.Context) {
+	solStr := c.Query("so_line_id")
+	if solStr == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "so_line_id query param is required"})
+		return
+	}
+	soLineID, err := uuid.Parse(solStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid so_line_id"})
+		return
+	}
+	out, err := h.svc.ListAllocations(c.Request.Context(), soLineID)
+	if err != nil {
+		httpkit.Error(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"items": out})
 }
 
 // parseFGDate parses a date string (RFC3339 or YYYY-MM-DD).

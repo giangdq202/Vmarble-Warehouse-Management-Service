@@ -53,6 +53,10 @@ func scanFG(r fgScanner) (FGPool, error) {
 }
 
 func (s *pgStore) insertFGBatch(ctx context.Context, rows []FGPool) error {
+	return s.insertFGBatchWithAllocations(ctx, rows, nil)
+}
+
+func (s *pgStore) insertFGBatchWithAllocations(ctx context.Context, rows []FGPool, allocs []Allocation) error {
 	if len(rows) == 0 {
 		return nil
 	}
@@ -72,6 +76,15 @@ func (s *pgStore) insertFGBatch(ctx context.Context, rows []FGPool) error {
 			r.ID, r.WorkOrderID, r.SKUID, r.BarcodeID, r.SalesOrderLineID,
 			r.Status, r.ContainerLineID, r.ComponentType, r.UnitIndex,
 			r.QCPassedAt, r.QCPassedBy, r.CreatedAt,
+		); err != nil {
+			return err
+		}
+	}
+	for _, a := range allocs {
+		if _, err := tx.Exec(ctx,
+			`INSERT INTO allocations (id, fg_pool_id, sales_order_line_id, allocation_type, created_at)
+			 VALUES ($1,$2,$3,$4,$5)`,
+			a.ID, a.FGPoolID, a.SalesOrderLineID, a.AllocationType, a.CreatedAt,
 		); err != nil {
 			return err
 		}
@@ -494,4 +507,105 @@ func (t *pgTxStore) insertReassignLog(ctx context.Context, l FGReassignmentLog) 
 		l.ID, l.FGID, l.FromSOLID, l.ToSOLID, l.ActorID, l.Reason, l.ReassignedAt,
 	)
 	return err
+}
+
+// ── Allocation reads (non-tx) ────────────────────────────────────────────────
+
+const allocCols = `SELECT id, fg_pool_id, sales_order_line_id, allocation_type,
+       released_by, released_at, created_at FROM allocations`
+
+func scanAllocation(row pgx.Row) (Allocation, error) {
+	var a Allocation
+	err := row.Scan(&a.ID, &a.FGPoolID, &a.SalesOrderLineID, &a.AllocationType,
+		&a.ReleasedBy, &a.ReleasedAt, &a.CreatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return a, domain.ErrNotFound
+	}
+	return a, err
+}
+
+func (s *pgStore) selectAllocationByID(ctx context.Context, id uuid.UUID) (Allocation, error) {
+	return scanAllocation(s.pool.QueryRow(ctx, allocCols+` WHERE id = $1`, id))
+}
+
+func (s *pgStore) selectAllocationByFGID(ctx context.Context, fgID uuid.UUID) (Allocation, error) {
+	return scanAllocation(s.pool.QueryRow(ctx, allocCols+` WHERE fg_pool_id = $1`, fgID))
+}
+
+func (s *pgStore) selectAllocationsBySOLine(ctx context.Context, soLineID uuid.UUID) ([]Allocation, error) {
+	rows, err := s.pool.Query(ctx, allocCols+` WHERE sales_order_line_id = $1 ORDER BY created_at`, soLineID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Allocation
+	for rows.Next() {
+		var a Allocation
+		if err := rows.Scan(&a.ID, &a.FGPoolID, &a.SalesOrderLineID, &a.AllocationType,
+			&a.ReleasedBy, &a.ReleasedAt, &a.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, a)
+	}
+	return out, rows.Err()
+}
+
+func (s *pgStore) insertAllocation(ctx context.Context, a Allocation) error {
+	_, err := s.pool.Exec(ctx,
+		`INSERT INTO allocations (id, fg_pool_id, sales_order_line_id, allocation_type, created_at)
+		 VALUES ($1,$2,$3,$4,$5)`,
+		a.ID, a.FGPoolID, a.SalesOrderLineID, a.AllocationType, a.CreatedAt,
+	)
+	return err
+}
+
+// ── Allocation writes (tx) ───────────────────────────────────────────────────
+
+func (t *pgTxStore) lockAllocationForUpdate(ctx context.Context, id uuid.UUID) (Allocation, error) {
+	return scanAllocation(t.tx.QueryRow(ctx, allocCols+` WHERE id = $1 FOR UPDATE`, id))
+}
+
+func (t *pgTxStore) lockAllocationByFGForUpdate(ctx context.Context, fgID uuid.UUID) (Allocation, error) {
+	return scanAllocation(t.tx.QueryRow(ctx, allocCols+` WHERE fg_pool_id = $1 FOR UPDATE`, fgID))
+}
+
+func (t *pgTxStore) updateAllocationType(ctx context.Context, id uuid.UUID, allocType string, releasedBy *uuid.UUID) error {
+	var err error
+	var rowsAffected int64
+	if releasedBy != nil {
+		tag, e := t.tx.Exec(ctx,
+			`UPDATE allocations SET allocation_type=$2, released_by=$3, released_at=NOW() WHERE id=$1`,
+			id, allocType, releasedBy,
+		)
+		err = e
+		rowsAffected = tag.RowsAffected()
+	} else {
+		tag, e := t.tx.Exec(ctx,
+			`UPDATE allocations SET allocation_type=$2 WHERE id=$1`,
+			id, allocType,
+		)
+		err = e
+		rowsAffected = tag.RowsAffected()
+	}
+	if err != nil {
+		return err
+	}
+	if rowsAffected == 0 {
+		return domain.ErrNotFound
+	}
+	return nil
+}
+
+func (t *pgTxStore) updateAllocationSOLine(ctx context.Context, id uuid.UUID, newSOLID uuid.UUID) error {
+	tag, err := t.tx.Exec(ctx,
+		`UPDATE allocations SET sales_order_line_id=$2 WHERE id=$1`,
+		id, newSOLID,
+	)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return domain.ErrNotFound
+	}
+	return nil
 }
