@@ -291,3 +291,31 @@ func TestBookContainer_NoFreightCost_NilInResult(t *testing.T) {
 		t.Errorf("want FreightCost nil, got %+v", b.FreightCost)
 	}
 }
+
+func TestBookContainer_NegativeFreightAmount_Returns400(t *testing.T) {
+	svc := newSvc(&mockStore{vessel: Vessel{ID: uuid.New(), Name: "V", CutoffDate: fixedNow.Add(time.Hour)}})
+	_, err := svc.BookContainer(context.Background(), BookContainerInput{
+		VesselID:    uuid.New(),
+		ContainerID: uuid.New(),
+		BookedBy:    uuid.New(),
+		FreightCost: &domain.Money{Amount: -1, Currency: "VND"},
+	})
+	var biz *domain.BizError
+	if !errors.As(err, &biz) || !errors.Is(biz.Unwrap(), domain.ErrInvalidInput) {
+		t.Fatalf("want ErrInvalidInput for negative amount, got %v", err)
+	}
+}
+
+func TestBookContainer_InvalidCurrencyCode_Returns400(t *testing.T) {
+	svc := newSvc(&mockStore{vessel: Vessel{ID: uuid.New(), Name: "V", CutoffDate: fixedNow.Add(time.Hour)}})
+	_, err := svc.BookContainer(context.Background(), BookContainerInput{
+		VesselID:    uuid.New(),
+		ContainerID: uuid.New(),
+		BookedBy:    uuid.New(),
+		FreightCost: &domain.Money{Amount: 100, Currency: "US"},
+	})
+	var biz *domain.BizError
+	if !errors.As(err, &biz) || !errors.Is(biz.Unwrap(), domain.ErrInvalidInput) {
+		t.Fatalf("want ErrInvalidInput for bad currency, got %v", err)
+	}
+}
