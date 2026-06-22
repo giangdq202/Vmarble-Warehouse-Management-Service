@@ -348,6 +348,11 @@ type Service interface {
 	BoostWOPriority(ctx context.Context, in BoostWOPriorityInput) (BoostWOPriorityResult, error)
 	ListWOPreemptCandidates(ctx context.Context, woID uuid.UUID) ([]WOPreemptCandidate, error)
 	PreemptWO(ctx context.Context, in PreemptWOInput) (PreemptWOResult, error)
+
+	// WO Blockers (#35) — block AdvanceStatus when external issues exist
+	CreateBlocker(ctx context.Context, in CreateBlockerInput) (WOBlocker, error)
+	ResolveBlocker(ctx context.Context, in ResolveBlockerInput) (WOBlocker, error)
+	ListBlockers(ctx context.Context, woID uuid.UUID) ([]WOBlocker, error)
 }
 
 // WOFeasibilityResult is the production module's view of a feasibility check.
@@ -402,4 +407,50 @@ type PreemptWOResult struct {
 	PreemptedAt time.Time
 	AuditID     uuid.UUID
 	FreedQty    int
+}
+
+// ── WO Blockers (#35) ────────────────────────────────────────────────────────
+
+// BlockerReason enumerates the valid reasons for blocking a work order.
+type BlockerReason string
+
+const (
+	BlockerMaterialDelayed  BlockerReason = "MATERIAL_DELAYED"
+	BlockerMaterialRejected BlockerReason = "MATERIAL_REJECTED"
+	BlockerMachineDown      BlockerReason = "MACHINE_DOWN"
+	BlockerOther            BlockerReason = "OTHER"
+)
+
+func (r BlockerReason) Valid() bool {
+	switch r {
+	case BlockerMaterialDelayed, BlockerMaterialRejected, BlockerMachineDown, BlockerOther:
+		return true
+	}
+	return false
+}
+
+// WOBlocker represents a blocking reason on a work order.
+type WOBlocker struct {
+	ID          uuid.UUID      `json:"id"`
+	WorkOrderID uuid.UUID      `json:"work_order_id"`
+	Reason      BlockerReason  `json:"reason"`
+	Detail      string         `json:"detail"`
+	CreatedBy   uuid.UUID      `json:"created_by"`
+	CreatedAt   time.Time      `json:"created_at"`
+	ResolvedBy  *uuid.UUID     `json:"resolved_by,omitempty"`
+	ResolvedAt  *time.Time     `json:"resolved_at,omitempty"`
+}
+
+// CreateBlockerInput is the input for creating a new WO blocker.
+type CreateBlockerInput struct {
+	WorkOrderID uuid.UUID     `json:"work_order_id"`
+	Reason      BlockerReason `json:"reason" binding:"required"`
+	Detail      string        `json:"detail"`
+	CreatedBy   uuid.UUID     `json:"-"`
+}
+
+// ResolveBlockerInput is the input for resolving a WO blocker.
+type ResolveBlockerInput struct {
+	BlockerID  uuid.UUID `json:"blocker_id"`
+	ResolvedBy uuid.UUID `json:"-"`
 }

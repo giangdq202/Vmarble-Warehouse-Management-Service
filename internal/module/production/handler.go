@@ -130,6 +130,11 @@ func (h *Handler) Register(rg *gin.RouterGroup) {
 	rg.POST("/work-orders/:id/unassign-slot", auth.RequireRole(auth.RoleCNCManager, auth.RolePlanner, auth.RoleAdmin), h.unassignSlot)
 	rg.GET("/work-orders/:id/suggest-schedule", auth.RequireRole(auth.RoleCNCManager, auth.RolePlanner, auth.RoleAdmin), h.suggestSchedule)
 
+	// WO Blockers (#35)
+	rg.POST("/work-orders/:id/blockers", auth.RequirePlannerUp(), h.createBlocker)
+	rg.GET("/work-orders/:id/blockers", auth.RequireWorkerUp(), h.listBlockers)
+	rg.PATCH("/work-orders/:id/blockers/:blocker_id/resolve", auth.RequirePlannerUp(), h.resolveBlocker)
+
 	rg.POST("/machines", auth.RequireRole(auth.RoleAdmin, auth.RoleCNCManager), h.createMachine)
 	rg.GET("/machines", h.listMachines)
 	rg.GET("/machines/:id", h.getMachine)
@@ -1017,4 +1022,83 @@ func (h *Handler) claim(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, wo)
+}
+
+// ── WO Blockers (#35) ────────────────────────────────────────────────────────
+
+func (h *Handler) createBlocker(c *gin.Context) {
+	woID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid work order id"})
+		return
+	}
+	identity, ok := auth.FromContext(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "missing auth identity"})
+		return
+	}
+	callerID, err := uuid.Parse(identity.UserID)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid auth identity"})
+		return
+	}
+	var in CreateBlockerInput
+	if !httpkit.Bind(c, &in) {
+		return
+	}
+	in.WorkOrderID = woID
+	in.CreatedBy = callerID
+	b, err := h.svc.CreateBlocker(c.Request.Context(), in)
+	if err != nil {
+		httpkit.Error(c, err)
+		return
+	}
+	c.JSON(http.StatusCreated, b)
+}
+
+func (h *Handler) listBlockers(c *gin.Context) {
+	woID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid work order id"})
+		return
+	}
+	blockers, err := h.svc.ListBlockers(c.Request.Context(), woID)
+	if err != nil {
+		httpkit.Error(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, blockers)
+}
+
+func (h *Handler) resolveBlocker(c *gin.Context) {
+	woID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid work order id"})
+		return
+	}
+	_ = woID // validated for route consistency; service uses blockerID directly
+	blockerID, err := uuid.Parse(c.Param("blocker_id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid blocker id"})
+		return
+	}
+	identity, ok := auth.FromContext(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "missing auth identity"})
+		return
+	}
+	resolvedBy, err := uuid.Parse(identity.UserID)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid auth identity"})
+		return
+	}
+	b, err := h.svc.ResolveBlocker(c.Request.Context(), ResolveBlockerInput{
+		BlockerID:  blockerID,
+		ResolvedBy: resolvedBy,
+	})
+	if err != nil {
+		httpkit.Error(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, b)
 }

@@ -1138,3 +1138,89 @@ func (s *pgStore) preemptAtomically(ctx context.Context, op preemptOp) (uuid.UUI
 	}
 	return auditID, now, fromQty, nil
 }
+
+// ── WO Blockers ──────────────────────────────────────────────────────────────
+
+func (s *pgStore) insertBlocker(ctx context.Context, b WOBlocker) error {
+	_, err := s.pool.Exec(ctx,
+		`INSERT INTO wo_blockers (id, work_order_id, reason, detail, created_by, created_at)
+		 VALUES ($1, $2, $3, $4, $5, $6)`,
+		b.ID, b.WorkOrderID, string(b.Reason), b.Detail, b.CreatedBy, b.CreatedAt,
+	)
+	return err
+}
+
+func (s *pgStore) getBlocker(ctx context.Context, blockerID uuid.UUID) (WOBlocker, error) {
+	var b WOBlocker
+	var resolvedBy *uuid.UUID
+	var resolvedAt *time.Time
+	err := s.pool.QueryRow(ctx,
+		`SELECT id, work_order_id, reason, detail, created_by, created_at, resolved_by, resolved_at
+		 FROM wo_blockers WHERE id = $1`, blockerID,
+	).Scan(&b.ID, &b.WorkOrderID, &b.Reason, &b.Detail, &b.CreatedBy, &b.CreatedAt, &resolvedBy, &resolvedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return WOBlocker{}, domain.NewBizError(domain.ErrNotFound, "blocker not found")
+	}
+	if err != nil {
+		return WOBlocker{}, err
+	}
+	b.ResolvedBy = resolvedBy
+	b.ResolvedAt = resolvedAt
+	return b, nil
+}
+
+func (s *pgStore) resolveBlocker(ctx context.Context, blockerID, resolvedBy uuid.UUID, resolvedAt time.Time) (WOBlocker, error) {
+	var b WOBlocker
+	var rby *uuid.UUID
+	var rat *time.Time
+	err := s.pool.QueryRow(ctx,
+		`UPDATE wo_blockers
+		 SET resolved_by = $2, resolved_at = $3
+		 WHERE id = $1 AND resolved_at IS NULL
+		 RETURNING id, work_order_id, reason, detail, created_by, created_at, resolved_by, resolved_at`,
+		blockerID, resolvedBy, resolvedAt,
+	).Scan(&b.ID, &b.WorkOrderID, &b.Reason, &b.Detail, &b.CreatedBy, &b.CreatedAt, &rby, &rat)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return WOBlocker{}, domain.NewBizError(domain.ErrPreconditionFailed, "blocker not found or already resolved")
+	}
+	if err != nil {
+		return WOBlocker{}, err
+	}
+	b.ResolvedBy = rby
+	b.ResolvedAt = rat
+	return b, nil
+}
+
+func (s *pgStore) listBlockers(ctx context.Context, woID uuid.UUID) ([]WOBlocker, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT id, work_order_id, reason, detail, created_by, created_at, resolved_by, resolved_at
+		 FROM wo_blockers WHERE work_order_id = $1
+		 ORDER BY created_at ASC`, woID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []WOBlocker
+	for rows.Next() {
+		var b WOBlocker
+		var rby *uuid.UUID
+		var rat *time.Time
+		if err := rows.Scan(&b.ID, &b.WorkOrderID, &b.Reason, &b.Detail, &b.CreatedBy, &b.CreatedAt, &rby, &rat); err != nil {
+			return nil, err
+		}
+		b.ResolvedBy = rby
+		b.ResolvedAt = rat
+		out = append(out, b)
+	}
+	return out, rows.Err()
+}
+
+func (s *pgStore) countOpenBlockers(ctx context.Context, woID uuid.UUID) (int, error) {
+	var n int
+	err := s.pool.QueryRow(ctx,
+		`SELECT COUNT(*) FROM wo_blockers WHERE work_order_id = $1 AND resolved_at IS NULL`, woID,
+	).Scan(&n)
+	return n, err
+}

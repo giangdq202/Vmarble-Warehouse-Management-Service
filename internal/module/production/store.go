@@ -100,6 +100,8 @@ type store interface {
 	// PLANNED or IN_CUTTING (rejects IN_PROCESSING+), reverts from_wo to
 	// PLANNED, and inserts a wo_preemption_log row.
 	preemptAtomically(ctx context.Context, op preemptOp) (uuid.UUID, time.Time, int, error)
+
+	blockerStore
 }
 
 // reassignOp carries the payload for reassignWorkOrderAtomically.
@@ -183,4 +185,14 @@ type preemptOp struct {
 	MaterialID uuid.UUID
 	Reason     string
 	ActorID    uuid.UUID
+}
+
+// ── WO Blockers ──────────────────────────────────────────────────────────────
+
+type blockerStore interface {
+	insertBlocker(ctx context.Context, b WOBlocker) error
+	resolveBlocker(ctx context.Context, blockerID, resolvedBy uuid.UUID, resolvedAt time.Time) (WOBlocker, error)
+	listBlockers(ctx context.Context, woID uuid.UUID) ([]WOBlocker, error)
+	countOpenBlockers(ctx context.Context, woID uuid.UUID) (int, error)
+	getBlocker(ctx context.Context, blockerID uuid.UUID) (WOBlocker, error)
 }
