@@ -405,3 +405,110 @@ func TestListPOs_OpenEndedFrom_DoesNotError(t *testing.T) {
 		t.Errorf("from-only must not error, got %v", err)
 	}
 }
+
+// ── CreateFromRejection ──────────────────────────────────────────────────────
+
+func (m *mockStore) selectPOByRejectionID(_ context.Context, _ uuid.UUID) (PurchaseOrder, error) {
+	return m.selectPOResult, m.selectPOErr
+}
+
+func TestCreateFromRejection_HappyPath(t *testing.T) {
+	matID := uuid.New()
+	rejID := uuid.New()
+	actor := uuid.New()
+	st := &mockStore{}
+	svc := newSvc(st, &mockMaterialChecker{}, &mockStockReceiver{})
+
+	po, err := svc.CreateFromRejection(context.Background(), CreateFromRejectionInput{
+		RejectionID: rejID,
+		MaterialID:  matID,
+		Supplier:    "ACME",
+		QtySheets:   5,
+		CreatedBy:   actor,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if po.Status != StatusDraft {
+		t.Errorf("status = %v, want DRAFT", po.Status)
+	}
+	if po.SourceRejectionID == nil || *po.SourceRejectionID != rejID {
+		t.Errorf("source_rejection_id = %v, want %v", po.SourceRejectionID, rejID)
+	}
+	if po.MaterialID != matID {
+		t.Errorf("material_id = %v, want %v", po.MaterialID, matID)
+	}
+}
+
+func TestCreateFromRejection_MissingRejectionID_Returns400(t *testing.T) {
+	svc := newSvc(&mockStore{}, &mockMaterialChecker{}, &mockStockReceiver{})
+	_, err := svc.CreateFromRejection(context.Background(), CreateFromRejectionInput{
+		MaterialID: uuid.New(),
+		QtySheets:  1,
+	})
+	var biz *domain.BizError
+	if !errors.As(err, &biz) || !errors.Is(biz.Unwrap(), domain.ErrInvalidInput) {
+		t.Fatalf("want ErrInvalidInput, got %v", err)
+	}
+}
+
+func TestCreateFromRejection_ZeroQty_Returns400(t *testing.T) {
+	svc := newSvc(&mockStore{}, &mockMaterialChecker{}, &mockStockReceiver{})
+	_, err := svc.CreateFromRejection(context.Background(), CreateFromRejectionInput{
+		RejectionID: uuid.New(),
+		MaterialID:  uuid.New(),
+		QtySheets:   0,
+	})
+	var biz *domain.BizError
+	if !errors.As(err, &biz) || !errors.Is(biz.Unwrap(), domain.ErrInvalidInput) {
+		t.Fatalf("want ErrInvalidInput for zero qty, got %v", err)
+	}
+}
+
+// ── CancelFromRejection ──────────────────────────────────────────────────────
+
+func TestCancelFromRejection_NoPOExists_NoOp(t *testing.T) {
+	st := &mockStore{selectPOErr: domain.ErrNotFound}
+	svc := newSvc(st, &mockMaterialChecker{}, &mockStockReceiver{})
+	if err := svc.CancelFromRejection(context.Background(), uuid.New()); err != nil {
+		t.Fatalf("want no error when no PO exists, got %v", err)
+	}
+}
+
+func TestCancelFromRejection_DraftPO_Cancels(t *testing.T) {
+	po := draftPO()
+	st := &mockStore{selectPOResult: po}
+	svc := newSvc(st, &mockMaterialChecker{}, &mockStockReceiver{})
+	if err := svc.CancelFromRejection(context.Background(), uuid.New()); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !st.updateStatusCalled || st.updateStatusArg != StatusCancelled {
+		t.Error("want updatePOStatus(CANCELLED) called")
+	}
+}
+
+func TestCancelFromRejection_AlreadyReceived_IsNoOp(t *testing.T) {
+	po := draftPO()
+	po.Status = StatusReceived
+	st := &mockStore{selectPOResult: po}
+	svc := newSvc(st, &mockMaterialChecker{}, &mockStockReceiver{})
+	if err := svc.CancelFromRejection(context.Background(), uuid.New()); err != nil {
+		t.Fatalf("want no error for already-received PO, got %v", err)
+	}
+	if st.updateStatusCalled {
+		t.Error("updatePOStatus must NOT be called for already-terminal PO")
+	}
+}
+
+func TestCancelFromRejection_OrderedPO_Cancels(t *testing.T) {
+	po := draftPO()
+	po.Status = StatusOrdered
+	st := &mockStore{selectPOResult: po}
+	svc := newSvc(st, &mockMaterialChecker{}, &mockStockReceiver{})
+	if err := svc.CancelFromRejection(context.Background(), uuid.New()); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !st.updateStatusCalled || st.updateStatusArg != StatusCancelled {
+		t.Error("want updatePOStatus(CANCELLED) called for ORDERED PO")
+	}
+}

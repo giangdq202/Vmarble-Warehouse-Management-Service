@@ -15706,6 +15706,9 @@ const docTemplate = `{
                 "received_at": {
                     "type": "string"
                 },
+                "source_rejection_id": {
+                    "type": "string"
+                },
                 "status": {
                     "$ref": "#/definitions/internal_module_purchasing.POStatus"
                 },

@@ -21,13 +21,14 @@ func NewPGStore(pool *pgxpool.Pool) store {
 	return &pgStore{pool: pool}
 }
 
-const poSelectCols = `id, code, material_id, supplier, status, note, ordered_at, received_at, created_by, created_at`
+const poSelectCols = `id, code, material_id, supplier, status, note, source_rejection_id, ordered_at, received_at, created_by, created_at`
 
 func scanPO(row interface{ Scan(...any) error }) (PurchaseOrder, error) {
 	var po PurchaseOrder
 	err := row.Scan(
 		&po.ID, &po.Code, &po.MaterialID, &po.Supplier,
-		&po.Status, &po.Note, &po.OrderedAt, &po.ReceivedAt,
+		&po.Status, &po.Note, &po.SourceRejectionID,
+		&po.OrderedAt, &po.ReceivedAt,
 		&po.CreatedBy, &po.CreatedAt,
 	)
 	return po, err
@@ -36,10 +37,10 @@ func scanPO(row interface{ Scan(...any) error }) (PurchaseOrder, error) {
 func (s *pgStore) insertPO(ctx context.Context, po PurchaseOrder) error {
 	_, err := s.pool.Exec(ctx,
 		`INSERT INTO material_purchase_orders
-		 (id, code, material_id, supplier, status, note, ordered_at, received_at, created_by, created_at)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+		 (id, code, material_id, supplier, status, note, source_rejection_id, ordered_at, received_at, created_by, created_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
 		po.ID, po.Code, po.MaterialID, po.Supplier, po.Status, po.Note,
-		po.OrderedAt, po.ReceivedAt, po.CreatedBy, po.CreatedAt,
+		po.SourceRejectionID, po.OrderedAt, po.ReceivedAt, po.CreatedBy, po.CreatedAt,
 	)
 	return err
 }
@@ -59,6 +60,19 @@ func (s *pgStore) selectPOByID(ctx context.Context, id uuid.UUID) (PurchaseOrder
 		return PurchaseOrder{}, err
 	}
 	po.Items = items
+	return po, nil
+}
+
+func (s *pgStore) selectPOByRejectionID(ctx context.Context, rejectionID uuid.UUID) (PurchaseOrder, error) {
+	row := s.pool.QueryRow(ctx,
+		`SELECT `+poSelectCols+` FROM material_purchase_orders WHERE source_rejection_id = $1`, rejectionID)
+	po, err := scanPO(row)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return PurchaseOrder{}, domain.ErrNotFound
+		}
+		return PurchaseOrder{}, err
+	}
 	return po, nil
 }
 

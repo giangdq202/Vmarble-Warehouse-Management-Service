@@ -19,17 +19,18 @@ const (
 )
 
 type PurchaseOrder struct {
-	ID         uuid.UUID  `json:"id"`
-	Code       string     `json:"code"`
-	MaterialID uuid.UUID  `json:"material_id"`
-	Supplier   string     `json:"supplier"`
-	Status     POStatus   `json:"status"`
-	Note       string     `json:"note,omitempty"`
-	OrderedAt  *time.Time `json:"ordered_at,omitempty"`
-	ReceivedAt *time.Time `json:"received_at,omitempty"`
-	CreatedBy  uuid.UUID  `json:"created_by"`
-	CreatedAt  time.Time  `json:"created_at"`
-	Items      []POItem   `json:"items,omitempty"`
+	ID                uuid.UUID  `json:"id"`
+	Code              string     `json:"code"`
+	MaterialID        uuid.UUID  `json:"material_id"`
+	Supplier          string     `json:"supplier"`
+	Status            POStatus   `json:"status"`
+	Note              string     `json:"note,omitempty"`
+	SourceRejectionID *uuid.UUID `json:"source_rejection_id,omitempty"`
+	OrderedAt         *time.Time `json:"ordered_at,omitempty"`
+	ReceivedAt        *time.Time `json:"received_at,omitempty"`
+	CreatedBy         uuid.UUID  `json:"created_by"`
+	CreatedAt         time.Time  `json:"created_at"`
+	Items             []POItem   `json:"items,omitempty"`
 }
 
 type POItem struct {
@@ -78,4 +79,22 @@ type Service interface {
 	OrderPO(ctx context.Context, id uuid.UUID) (PurchaseOrder, error)
 	ReceivePO(ctx context.Context, id uuid.UUID) (PurchaseOrder, error)
 	CancelPO(ctx context.Context, id uuid.UUID) (PurchaseOrder, error)
+
+	// CreateFromRejection auto-creates a DRAFT PO to replenish rejected material.
+	// Called by inventory after RejectLot commits.
+	CreateFromRejection(ctx context.Context, in CreateFromRejectionInput) (PurchaseOrder, error)
+
+	// CancelFromRejection cancels the auto-created PO linked to a rejection
+	// when the supplier claim is APPROVED (supplier will replace the material).
+	// No-op if no PO is linked. Best-effort: callers should log but not abort.
+	CancelFromRejection(ctx context.Context, rejectionID uuid.UUID) error
+}
+
+// CreateFromRejectionInput is the minimal data inventory passes to purchasing.
+type CreateFromRejectionInput struct {
+	RejectionID uuid.UUID // source rejection record
+	MaterialID  uuid.UUID
+	Supplier    string
+	QtySheets   int    // placed in the PO note so planner knows scope
+	CreatedBy   uuid.UUID
 }

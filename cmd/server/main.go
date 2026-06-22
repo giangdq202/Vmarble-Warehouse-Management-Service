@@ -118,11 +118,13 @@ func main() {
 	woAdvance := &woAdvanceAdapter{}
 	costingChecker := &costingCheckerAdapter{}
 	barcodeGen := &cutBarcodeAdapter{planSvc: planningSvc}
-	inventorySvc := inventory.NewServiceFull(
+	prAdapter := &inventoryPRAdapter{} // wired after purchasingSvc is constructed
+	inventorySvc := inventory.NewServiceWithAllDeps(
 		inventoryStore,
 		woAdvance,
 		barcodeGen,
 		eventPublisher,
+		prAdapter,
 		cfg.RemnantOverflowThresholdPct,
 	)
 
@@ -170,6 +172,8 @@ func main() {
 		&purchasingMaterialAdapter{svc: catalogSvc},
 		&purchasingStockAdapter{svc: inventorySvc},
 	)
+	// Wire purchasing into the inventory PR adapter now that both services exist.
+	prAdapter.svc = purchasingSvc
 
 	reportsSvc := reports.NewService(
 		&reportsCostingAdapter{pool: pool},
@@ -730,6 +734,34 @@ func (a *purchasingStockAdapter) ReceiveStock(ctx context.Context, in purchasing
 		return uuid.Nil, err
 	}
 	return lot.ID, nil
+}
+
+// inventoryPRAdapter bridges inventory.PurchaseRequestCreator → purchasing.Service.
+// The svc field is set after purchasingSvc is constructed to break the
+// inventory → purchasing → inventory construction cycle.
+type inventoryPRAdapter struct {
+	svc purchasing.Service
+}
+
+func (a *inventoryPRAdapter) CreateFromRejection(ctx context.Context, in inventory.PRFromRejectionInput) error {
+	if a.svc == nil {
+		return nil
+	}
+	_, err := a.svc.CreateFromRejection(ctx, purchasing.CreateFromRejectionInput{
+		RejectionID: in.RejectionID,
+		MaterialID:  in.MaterialID,
+		Supplier:    in.Supplier,
+		QtySheets:   in.QtySheets,
+		CreatedBy:   in.ActorID,
+	})
+	return err
+}
+
+func (a *inventoryPRAdapter) CancelFromRejection(ctx context.Context, rejectionID uuid.UUID) error {
+	if a.svc == nil {
+		return nil
+	}
+	return a.svc.CancelFromRejection(ctx, rejectionID)
 }
 
 // costingCheckerAdapter implements production.CostingChecker.
