@@ -97,6 +97,7 @@ func (svc *service) BookContainer(ctx context.Context, in BookContainerInput) (S
 		BookedBy:    in.BookedBy,
 		BookedAt:    svc.now().UTC(),
 		Note:        in.Note,
+		FreightCost: in.FreightCost,
 		VesselName:  v.Name,
 		CutoffDate:  v.CutoffDate,
 	}

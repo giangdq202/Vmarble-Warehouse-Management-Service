@@ -194,15 +194,19 @@ func (s *pgStore) upsertBooking(ctx context.Context, b ShippingBooking, cutoffDa
 	// Upsert on container_id unique constraint.
 	_, err = tx.Exec(ctx,
 		`INSERT INTO shipping_bookings
-		    (id, vessel_id, container_id, booking_ref, booked_by, booked_at, note)
-		 VALUES ($1,$2,$3,NULLIF($4,''),$5,$6,NULLIF($7,''))
+		    (id, vessel_id, container_id, booking_ref, booked_by, booked_at, note,
+		     freight_cost_cents, freight_cost_currency)
+		 VALUES ($1,$2,$3,NULLIF($4,''),$5,$6,NULLIF($7,''),$8,$9)
 		 ON CONFLICT (container_id) DO UPDATE
-		   SET vessel_id   = EXCLUDED.vessel_id,
-		       booking_ref = EXCLUDED.booking_ref,
-		       booked_by   = EXCLUDED.booked_by,
-		       booked_at   = EXCLUDED.booked_at,
-		       note        = EXCLUDED.note`,
+		   SET vessel_id              = EXCLUDED.vessel_id,
+		       booking_ref            = EXCLUDED.booking_ref,
+		       booked_by              = EXCLUDED.booked_by,
+		       booked_at              = EXCLUDED.booked_at,
+		       note                   = EXCLUDED.note,
+		       freight_cost_cents     = EXCLUDED.freight_cost_cents,
+		       freight_cost_currency  = EXCLUDED.freight_cost_currency`,
 		b.ID, b.VesselID, b.ContainerID, b.BookingRef, b.BookedBy, b.BookedAt, b.Note,
+		freightCents(b.FreightCost), freightCurrency(b.FreightCost),
 	)
 	if err != nil {
 		return ShippingBooking{}, err
@@ -252,10 +256,13 @@ func (s *pgStore) deleteBooking(ctx context.Context, containerID uuid.UUID) erro
 
 func (s *pgStore) getBookingByContainer(ctx context.Context, containerID uuid.UUID) (ShippingBooking, error) {
 	var b ShippingBooking
+	var cents *int64
+	var currency *string
 	err := s.pool.QueryRow(ctx,
 		`SELECT sb.id, sb.vessel_id, sb.container_id,
 		        COALESCE(sb.booking_ref,''), sb.booked_by, sb.booked_at,
 		        COALESCE(sb.note,''),
+		        sb.freight_cost_cents, sb.freight_cost_currency,
 		        v.name, v.cutoff_date
 		 FROM shipping_bookings sb
 		 JOIN vessels v ON v.id = sb.vessel_id
@@ -264,10 +271,14 @@ func (s *pgStore) getBookingByContainer(ctx context.Context, containerID uuid.UU
 		&b.ID, &b.VesselID, &b.ContainerID,
 		&b.BookingRef, &b.BookedBy, &b.BookedAt,
 		&b.Note,
+		&cents, &currency,
 		&b.VesselName, &b.CutoffDate,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ShippingBooking{}, domain.NewBizError(domain.ErrNotFound, "booking not found")
+	}
+	if err == nil {
+		b.FreightCost = buildMoney(cents, currency)
 	}
 	return b, err
 }
@@ -277,6 +288,7 @@ func (s *pgStore) listBookingsByVessel(ctx context.Context, vesselID uuid.UUID) 
 		`SELECT sb.id, sb.vessel_id, sb.container_id,
 		        COALESCE(sb.booking_ref,''), sb.booked_by, sb.booked_at,
 		        COALESCE(sb.note,''),
+		        sb.freight_cost_cents, sb.freight_cost_currency,
 		        v.name, v.cutoff_date
 		 FROM shipping_bookings sb
 		 JOIN vessels v ON v.id = sb.vessel_id
@@ -291,15 +303,44 @@ func (s *pgStore) listBookingsByVessel(ctx context.Context, vesselID uuid.UUID) 
 	var out []ShippingBooking
 	for rows.Next() {
 		var b ShippingBooking
+		var cents *int64
+		var currency *string
 		if err := rows.Scan(
 			&b.ID, &b.VesselID, &b.ContainerID,
 			&b.BookingRef, &b.BookedBy, &b.BookedAt,
 			&b.Note,
+			&cents, &currency,
 			&b.VesselName, &b.CutoffDate,
 		); err != nil {
 			return nil, err
 		}
+		b.FreightCost = buildMoney(cents, currency)
 		out = append(out, b)
 	}
 	return out, rows.Err()
+}
+
+// ── freight_cost helpers ──────────────────────────────────────────────────────
+
+func freightCents(m *domain.Money) *int64 {
+	if m == nil {
+		return nil
+	}
+	v := m.Amount
+	return &v
+}
+
+func freightCurrency(m *domain.Money) *string {
+	if m == nil {
+		return nil
+	}
+	v := m.Currency
+	return &v
+}
+
+func buildMoney(cents *int64, currency *string) *domain.Money {
+	if cents == nil || currency == nil {
+		return nil
+	}
+	return &domain.Money{Amount: *cents, Currency: *currency}
 }

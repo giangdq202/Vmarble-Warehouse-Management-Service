@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/vmarble/warehouse-management-service/internal/domain"
 	"github.com/vmarble/warehouse-management-service/internal/platform/httpkit"
 )
 
@@ -31,13 +32,14 @@ type Vessel struct {
 
 // ShippingBooking links one container to one vessel.
 type ShippingBooking struct {
-	ID          uuid.UUID  `json:"id"`
-	VesselID    uuid.UUID  `json:"vessel_id"`
-	ContainerID uuid.UUID  `json:"container_id"`
-	BookingRef  string     `json:"booking_ref,omitempty"`
-	BookedBy    uuid.UUID  `json:"booked_by"`
-	BookedAt    time.Time  `json:"booked_at"`
-	Note        string     `json:"note,omitempty"`
+	ID          uuid.UUID   `json:"id"`
+	VesselID    uuid.UUID   `json:"vessel_id"`
+	ContainerID uuid.UUID   `json:"container_id"`
+	BookingRef  string      `json:"booking_ref,omitempty"`
+	BookedBy    uuid.UUID   `json:"booked_by"`
+	BookedAt    time.Time   `json:"booked_at"`
+	Note        string      `json:"note,omitempty"`
+	FreightCost *domain.Money `json:"freight_cost,omitempty"`
 
 	// Hydrated fields — populated when reading back the booking.
 	VesselName    string    `json:"vessel_name,omitempty"`
@@ -69,11 +71,12 @@ type UpdateVesselInput struct {
 }
 
 type BookContainerInput struct {
-	VesselID    uuid.UUID `json:"-"`
-	ContainerID uuid.UUID `json:"container_id"`
-	BookingRef  string    `json:"booking_ref,omitempty"`
-	Note        string    `json:"note,omitempty"`
-	BookedBy    uuid.UUID `json:"-"`
+	VesselID    uuid.UUID     `json:"-"`
+	ContainerID uuid.UUID     `json:"container_id"`
+	BookingRef  string        `json:"booking_ref,omitempty"`
+	Note        string        `json:"note,omitempty"`
+	FreightCost *domain.Money `json:"freight_cost,omitempty"`
+	BookedBy    uuid.UUID     `json:"-"`
 }
 
 type VesselListFilter struct {
