@@ -22,6 +22,10 @@ type fgSuggestionCandidate struct {
 // service.go binds to it; pgstore.go provides the production implementation.
 type store interface {
 	insertFGBatch(ctx context.Context, rows []FGPool) error
+	// insertFGBatchWithAllocations atomically inserts FG rows and their HARD
+	// allocation records in a single transaction. allocs may be empty/nil when
+	// no SOL is known (uncommitted-WO FGs).
+	insertFGBatchWithAllocations(ctx context.Context, rows []FGPool, allocs []Allocation) error
 	selectFGByID(ctx context.Context, id uuid.UUID) (FGPool, error)
 	selectFGByBarcodeID(ctx context.Context, barcodeID uuid.UUID) (FGPool, error)
 	selectFGByWorkOrderID(ctx context.Context, woID uuid.UUID) ([]FGPool, error)
@@ -33,12 +37,13 @@ type store interface {
 	selectDefectByID(ctx context.Context, id uuid.UUID) (FGDefect, error)
 	selectDefectByFGID(ctx context.Context, fgID uuid.UUID) (FGDefect, error)
 
-	// selectAvailableFGsBySKU returns up to `limit` AVAILABLE FG rows matching
-	// the given SKU, excluding `excludeID`. Rows are sorted by the earliest
-	// cutoff_date of an open container that holds the same SO line (ASC NULLS
-	// LAST) so the defect suggestion engine surfaces the most urgent replacement
-	// first. Each row carries the resolved cutoff date for the FE badge.
 	selectAvailableFGsBySKU(ctx context.Context, skuID, excludeID uuid.UUID, limit int) ([]fgSuggestionCandidate, error)
+
+	// allocation reads
+	selectAllocationByID(ctx context.Context, id uuid.UUID) (Allocation, error)
+	selectAllocationByFGID(ctx context.Context, fgID uuid.UUID) (Allocation, error)
+	selectAllocationsBySOLine(ctx context.Context, soLineID uuid.UUID) ([]Allocation, error)
+	insertAllocation(ctx context.Context, a Allocation) error
 
 	withTx(ctx context.Context, fn func(tx txStore) error) error
 }
@@ -61,6 +66,12 @@ type txStore interface {
 	rawTx() pgx.Tx
 	updateFGSOLine(ctx context.Context, fgID uuid.UUID, newSOLID *uuid.UUID) error
 	insertReassignLog(ctx context.Context, log FGReassignmentLog) error
+
+	// allocation writes
+	lockAllocationForUpdate(ctx context.Context, id uuid.UUID) (Allocation, error)
+	lockAllocationByFGForUpdate(ctx context.Context, fgID uuid.UUID) (Allocation, error)
+	updateAllocationType(ctx context.Context, id uuid.UUID, allocType string, releasedBy *uuid.UUID) error
+	updateAllocationSOLine(ctx context.Context, id uuid.UUID, newSOLID uuid.UUID) error
 }
 
 type flipStatusInput struct {

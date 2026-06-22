@@ -218,6 +218,18 @@ type Service interface {
 	// The new SOL must reference the same SKU (soft-allocation invariant).
 	// Writes an audit row to fg_reassignment_log.
 	ReassignFG(ctx context.Context, in ReassignFGInput) (ReassignFGResult, error)
+
+	// ReleaseAllocation downgrades an allocation from HARD to SOFT, allowing
+	// the FG to be reserved for a different SO line. Blocked when the FG is
+	// RESERVED (already on a container line).
+	ReleaseAllocation(ctx context.Context, in ReleaseAllocationInput) (Allocation, error)
+
+	// ReassignAllocation changes the SOL on an allocation record and syncs
+	// fg_pool.sales_order_line_id. Blocked when the FG is RESERVED or LOADED.
+	ReassignAllocation(ctx context.Context, in ReassignAllocationInput) (Allocation, error)
+
+	// ListAllocations returns all allocation rows for a given SO line.
+	ListAllocations(ctx context.Context, soLineID uuid.UUID) ([]Allocation, error)
 }
 
 type ReserveInput struct {
@@ -248,4 +260,36 @@ type ReassignFGInput struct {
 type ReassignFGResult struct {
 	FG    FGPool             `json:"fg"`
 	Audit FGReassignmentLog  `json:"audit"`
+}
+
+// ── Allocation types ─────────────────────────────────────────────────────────
+
+const (
+	AllocationTypeHard = "hard"
+	AllocationTypeSoft = "soft"
+)
+
+// Allocation is the explicit link between an FG and the SO line it is
+// destined for. Created automatically (HARD) when a WO completes and an
+// SOL is known. A planner can release to SOFT to allow the FG to serve a
+// different SO.
+type Allocation struct {
+	ID               uuid.UUID  `json:"id"`
+	FGPoolID         uuid.UUID  `json:"fg_pool_id"`
+	SalesOrderLineID uuid.UUID  `json:"sales_order_line_id"`
+	AllocationType   string     `json:"allocation_type"` // hard | soft
+	ReleasedBy       *uuid.UUID `json:"released_by,omitempty"`
+	ReleasedAt       *time.Time `json:"released_at,omitempty"`
+	CreatedAt        time.Time  `json:"created_at"`
+}
+
+type ReleaseAllocationInput struct {
+	AllocationID uuid.UUID `json:"-"`
+	ActorID      uuid.UUID `json:"-"`
+}
+
+type ReassignAllocationInput struct {
+	AllocationID     uuid.UUID `json:"-"`
+	NewSOLineID      uuid.UUID `json:"new_sales_order_line_id"`
+	ActorID          uuid.UUID `json:"-"`
 }

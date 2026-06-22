@@ -166,7 +166,23 @@ func (svc *service) CreateFromCompletedWO(ctx context.Context, in CreateFromComp
 			}
 		}
 	}
-	if err := svc.s.insertFGBatch(ctx, rows); err != nil {
+	// Build HARD allocations alongside FG rows, then insert both atomically.
+	// Using a single tx ensures there is never a window where FG rows exist
+	// without allocation records.
+	var allocs []Allocation
+	if in.SalesOrderLineID != nil {
+		now2 := svc.now()
+		for _, fg := range rows {
+			allocs = append(allocs, Allocation{
+				ID:               uuid.New(),
+				FGPoolID:         fg.ID,
+				SalesOrderLineID: *in.SalesOrderLineID,
+				AllocationType:   AllocationTypeHard,
+				CreatedAt:        now2,
+			})
+		}
+	}
+	if err := svc.s.insertFGBatchWithAllocations(ctx, rows, allocs); err != nil {
 		return nil, err
 	}
 	return rows, nil
@@ -697,4 +713,118 @@ func (svc *service) CheckComponentsForSeal(ctx context.Context, containerID uuid
 			WithDetails(map[string]any{"incomplete_units": missingUnits})
 	}
 	return nil
+}
+
+// ── Allocation management ────────────────────────────────────────────────────
+
+// ReleaseAllocation downgrades an allocation from HARD → SOFT so the FG can
+// serve a different SO. Blocked when the FG is already RESERVED on a container
+// line — releasing at that point would silently change the allocation after the
+// delivery module has committed to delivering it to the original SO.
+func (svc *service) ReleaseAllocation(ctx context.Context, in ReleaseAllocationInput) (Allocation, error) {
+	if in.AllocationID == uuid.Nil || in.ActorID == uuid.Nil {
+		return Allocation{}, domain.NewBizError(domain.ErrInvalidInput, "allocation_id and actor_id are required")
+	}
+	// Read the allocation non-locking first to obtain FGPoolID. We need the FG
+	// ID before entering the tx so we can acquire locks in consistent order:
+	// FG first, then allocation — matching the rest of the codebase and
+	// preventing deadlocks with concurrent ReserveOnContainerAdd flows.
+	alloc0, err := svc.s.selectAllocationByID(ctx, in.AllocationID)
+	if err != nil {
+		return Allocation{}, err
+	}
+	var out Allocation
+	err = svc.s.withTx(ctx, func(tx txStore) error {
+		// Lock FG first, then allocation (consistent lock order).
+		fg, err := tx.lockFGForUpdate(ctx, alloc0.FGPoolID)
+		if err != nil {
+			return err
+		}
+		if fg.Status == FGStatusReserved || fg.Status == FGStatusLoaded {
+			return domain.NewBizError(domain.ErrPreconditionFailed,
+				"cannot release allocation: FG is already reserved or loaded on a container")
+		}
+		alloc, err := tx.lockAllocationForUpdate(ctx, in.AllocationID)
+		if err != nil {
+			return err
+		}
+		if alloc.AllocationType == AllocationTypeSoft {
+			return domain.NewBizError(domain.ErrInvalidTransition, "allocation is already soft")
+		}
+		if err := tx.updateAllocationType(ctx, alloc.ID, AllocationTypeSoft, &in.ActorID); err != nil {
+			return err
+		}
+		alloc.AllocationType = AllocationTypeSoft
+		alloc.ReleasedBy = &in.ActorID
+		out = alloc
+		return nil
+	})
+	return out, err
+}
+
+// ReassignAllocation changes the SOL on an allocation and syncs fg_pool.
+// Blocked when the FG is RESERVED or LOADED. Enforces SKU invariant when
+// solChecker is wired: the new SOL must reference the same SKU as the FG.
+func (svc *service) ReassignAllocation(ctx context.Context, in ReassignAllocationInput) (Allocation, error) {
+	if in.AllocationID == uuid.Nil || in.NewSOLineID == uuid.Nil || in.ActorID == uuid.Nil {
+		return Allocation{}, domain.NewBizError(domain.ErrInvalidInput,
+			"allocation_id, new_sales_order_line_id and actor_id are required")
+	}
+	// Read allocation non-locking to get FGPoolID for consistent lock ordering.
+	alloc0, err := svc.s.selectAllocationByID(ctx, in.AllocationID)
+	if err != nil {
+		return Allocation{}, err
+	}
+	// Validate target SOL SKU matches FG SKU (same invariant as ReassignFG).
+	if svc.solChecker != nil {
+		sol, err := svc.solChecker.GetSOLine(ctx, in.NewSOLineID)
+		if err != nil {
+			return Allocation{}, err
+		}
+		fg0, err := svc.s.selectFGByID(ctx, alloc0.FGPoolID)
+		if err != nil {
+			return Allocation{}, err
+		}
+		if sol.SKUID != fg0.SKUID {
+			return Allocation{}, domain.NewBizError(domain.ErrInvalidInput,
+				"cannot reassign allocation: new SO line references a different SKU")
+		}
+	}
+	var out Allocation
+	err = svc.s.withTx(ctx, func(tx txStore) error {
+		// Lock FG first, then allocation (consistent lock order).
+		fg, err := tx.lockFGForUpdate(ctx, alloc0.FGPoolID)
+		if err != nil {
+			return err
+		}
+		if fg.Status == FGStatusReserved || fg.Status == FGStatusLoaded {
+			return domain.NewBizError(domain.ErrPreconditionFailed,
+				"cannot reassign allocation: FG is reserved or loaded on a container")
+		}
+		alloc, err := tx.lockAllocationForUpdate(ctx, in.AllocationID)
+		if err != nil {
+			return err
+		}
+		if alloc.SalesOrderLineID == in.NewSOLineID {
+			return domain.NewBizError(domain.ErrInvalidInput, "allocation already points to that SO line")
+		}
+		if err := tx.updateAllocationSOLine(ctx, alloc.ID, in.NewSOLineID); err != nil {
+			return err
+		}
+		if err := tx.updateFGSOLine(ctx, fg.ID, &in.NewSOLineID); err != nil {
+			return err
+		}
+		alloc.SalesOrderLineID = in.NewSOLineID
+		out = alloc
+		return nil
+	})
+	return out, err
+}
+
+// ListAllocations returns all allocation rows for a given SO line.
+func (svc *service) ListAllocations(ctx context.Context, soLineID uuid.UUID) ([]Allocation, error) {
+	if soLineID == uuid.Nil {
+		return nil, domain.NewBizError(domain.ErrInvalidInput, "so_line_id is required")
+	}
+	return svc.s.selectAllocationsBySOLine(ctx, soLineID)
 }

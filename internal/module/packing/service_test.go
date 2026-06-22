@@ -21,6 +21,8 @@ type mockStore struct {
 	fgsByWO        map[uuid.UUID][]uuid.UUID
 	defectsByID    map[uuid.UUID]FGDefect
 	defectsByFG    map[uuid.UUID]uuid.UUID
+	allocsByID     map[uuid.UUID]Allocation
+	allocsByFG     map[uuid.UUID]uuid.UUID // fg_id -> allocation_id
 
 	insertBatchErr error
 	// candidatesOverride, when set, is returned verbatim by
@@ -36,10 +38,16 @@ func newMockStore() *mockStore {
 		fgsByWO:      map[uuid.UUID][]uuid.UUID{},
 		defectsByID:  map[uuid.UUID]FGDefect{},
 		defectsByFG:  map[uuid.UUID]uuid.UUID{},
+		allocsByID:   map[uuid.UUID]Allocation{},
+		allocsByFG:   map[uuid.UUID]uuid.UUID{},
 	}
 }
 
 func (m *mockStore) insertFGBatch(_ context.Context, rows []FGPool) error {
+	return m.insertFGBatchWithAllocations(nil, rows, nil)
+}
+
+func (m *mockStore) insertFGBatchWithAllocations(_ context.Context, rows []FGPool, allocs []Allocation) error {
 	if m.insertBatchErr != nil {
 		return m.insertBatchErr
 	}
@@ -47,6 +55,10 @@ func (m *mockStore) insertFGBatch(_ context.Context, rows []FGPool) error {
 		m.fgsByID[r.ID] = r
 		m.fgsByBarcode[r.BarcodeID] = r.ID
 		m.fgsByWO[r.WorkOrderID] = append(m.fgsByWO[r.WorkOrderID], r.ID)
+	}
+	for _, a := range allocs {
+		m.allocsByID[a.ID] = a
+		m.allocsByFG[a.FGPoolID] = a.ID
 	}
 	return nil
 }
@@ -125,6 +137,38 @@ func (m *mockStore) selectReservedFGsByContainer(_ context.Context, _ uuid.UUID)
 		}
 	}
 	return out, nil
+}
+
+func (m *mockStore) selectAllocationByID(_ context.Context, id uuid.UUID) (Allocation, error) {
+	a, ok := m.allocsByID[id]
+	if !ok {
+		return Allocation{}, domain.ErrNotFound
+	}
+	return a, nil
+}
+
+func (m *mockStore) selectAllocationByFGID(_ context.Context, fgID uuid.UUID) (Allocation, error) {
+	id, ok := m.allocsByFG[fgID]
+	if !ok {
+		return Allocation{}, domain.ErrNotFound
+	}
+	return m.allocsByID[id], nil
+}
+
+func (m *mockStore) selectAllocationsBySOLine(_ context.Context, soLineID uuid.UUID) ([]Allocation, error) {
+	var out []Allocation
+	for _, a := range m.allocsByID {
+		if a.SalesOrderLineID == soLineID {
+			out = append(out, a)
+		}
+	}
+	return out, nil
+}
+
+func (m *mockStore) insertAllocation(_ context.Context, a Allocation) error {
+	m.allocsByID[a.ID] = a
+	m.allocsByFG[a.FGPoolID] = a.ID
+	return nil
 }
 
 func (m *mockStore) withTx(ctx context.Context, fn func(tx txStore) error) error {
@@ -255,6 +299,43 @@ func (t *mockTxStore) updateFGSOLine(_ context.Context, fgID uuid.UUID, newSOLID
 }
 
 func (t *mockTxStore) insertReassignLog(_ context.Context, _ FGReassignmentLog) error {
+	return nil
+}
+
+func (t *mockTxStore) lockAllocationForUpdate(_ context.Context, id uuid.UUID) (Allocation, error) {
+	a, ok := t.ms.allocsByID[id]
+	if !ok {
+		return Allocation{}, domain.ErrNotFound
+	}
+	return a, nil
+}
+
+func (t *mockTxStore) lockAllocationByFGForUpdate(_ context.Context, fgID uuid.UUID) (Allocation, error) {
+	id, ok := t.ms.allocsByFG[fgID]
+	if !ok {
+		return Allocation{}, domain.ErrNotFound
+	}
+	return t.ms.allocsByID[id], nil
+}
+
+func (t *mockTxStore) updateAllocationType(_ context.Context, id uuid.UUID, allocType string, releasedBy *uuid.UUID) error {
+	a, ok := t.ms.allocsByID[id]
+	if !ok {
+		return domain.ErrNotFound
+	}
+	a.AllocationType = allocType
+	a.ReleasedBy = releasedBy
+	t.ms.allocsByID[id] = a
+	return nil
+}
+
+func (t *mockTxStore) updateAllocationSOLine(_ context.Context, id uuid.UUID, newSOLID uuid.UUID) error {
+	a, ok := t.ms.allocsByID[id]
+	if !ok {
+		return domain.ErrNotFound
+	}
+	a.SalesOrderLineID = newSOLID
+	t.ms.allocsByID[id] = a
 	return nil
 }
 
@@ -1447,5 +1528,196 @@ func TestCheckComponentsForSeal_NilResolver_ReturnsNil(t *testing.T) {
 	err := h.svc.CheckComponentsForSeal(context.Background(), uuid.New())
 	if err != nil {
 		t.Fatalf("want nil when resolver is nil (bypass), got %v", err)
+	}
+}
+
+// ── Allocation tests ─────────────────────────────────────────────────────────
+
+func (h *harness) seedAllocation(fgID, soLineID uuid.UUID, allocType string) Allocation {
+	a := Allocation{
+		ID:               uuid.New(),
+		FGPoolID:         fgID,
+		SalesOrderLineID: soLineID,
+		AllocationType:   allocType,
+		CreatedAt:        time.Now(),
+	}
+	h.store.allocsByID[a.ID] = a
+	h.store.allocsByFG[fgID] = a.ID
+	return a
+}
+
+func TestReleaseAllocation_HardToSoft(t *testing.T) {
+	h := newHarness()
+	soLineID := uuid.New()
+	fg := h.seedFG(uuid.New(), uuid.New(), &soLineID, FGStatusAvailable)
+	alloc := h.seedAllocation(fg.ID, soLineID, AllocationTypeHard)
+	actorID := uuid.New()
+
+	out, err := h.svc.ReleaseAllocation(context.Background(), ReleaseAllocationInput{
+		AllocationID: alloc.ID,
+		ActorID:      actorID,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out.AllocationType != AllocationTypeSoft {
+		t.Errorf("want soft, got %q", out.AllocationType)
+	}
+	if out.ReleasedBy == nil || *out.ReleasedBy != actorID {
+		t.Errorf("ReleasedBy not set correctly")
+	}
+}
+
+func TestReleaseAllocation_AlreadySoft_ReturnsError(t *testing.T) {
+	h := newHarness()
+	soLineID := uuid.New()
+	fg := h.seedFG(uuid.New(), uuid.New(), &soLineID, FGStatusAvailable)
+	alloc := h.seedAllocation(fg.ID, soLineID, AllocationTypeSoft)
+
+	_, err := h.svc.ReleaseAllocation(context.Background(), ReleaseAllocationInput{
+		AllocationID: alloc.ID,
+		ActorID:      uuid.New(),
+	})
+	if err == nil {
+		t.Fatal("want error releasing already-soft allocation, got nil")
+	}
+}
+
+func TestReleaseAllocation_FGReserved_Blocked(t *testing.T) {
+	h := newHarness()
+	soLineID := uuid.New()
+	clID := uuid.New()
+	fg := h.seedFG(uuid.New(), uuid.New(), &soLineID, FGStatusReserved)
+	fg.ContainerLineID = &clID
+	h.store.fgsByID[fg.ID] = fg
+	alloc := h.seedAllocation(fg.ID, soLineID, AllocationTypeHard)
+
+	_, err := h.svc.ReleaseAllocation(context.Background(), ReleaseAllocationInput{
+		AllocationID: alloc.ID,
+		ActorID:      uuid.New(),
+	})
+	if err == nil {
+		t.Fatal("want error releasing allocation for reserved FG, got nil")
+	}
+}
+
+func TestReassignAllocation_HappyPath(t *testing.T) {
+	h := newHarness()
+	oldSOL := uuid.New()
+	newSOL := uuid.New()
+	fg := h.seedFG(uuid.New(), uuid.New(), &oldSOL, FGStatusAvailable)
+	alloc := h.seedAllocation(fg.ID, oldSOL, AllocationTypeSoft)
+
+	out, err := h.svc.ReassignAllocation(context.Background(), ReassignAllocationInput{
+		AllocationID: alloc.ID,
+		NewSOLineID:  newSOL,
+		ActorID:      uuid.New(),
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out.SalesOrderLineID != newSOL {
+		t.Errorf("want new SOL %v, got %v", newSOL, out.SalesOrderLineID)
+	}
+	// fg_pool.sales_order_line_id must also be updated
+	updatedFG := h.store.fgsByID[fg.ID]
+	if updatedFG.SalesOrderLineID == nil || *updatedFG.SalesOrderLineID != newSOL {
+		t.Errorf("fg_pool.sales_order_line_id not updated")
+	}
+}
+
+func TestReassignAllocation_FGReserved_Blocked(t *testing.T) {
+	h := newHarness()
+	oldSOL := uuid.New()
+	fg := h.seedFG(uuid.New(), uuid.New(), &oldSOL, FGStatusReserved)
+	alloc := h.seedAllocation(fg.ID, oldSOL, AllocationTypeHard)
+
+	_, err := h.svc.ReassignAllocation(context.Background(), ReassignAllocationInput{
+		AllocationID: alloc.ID,
+		NewSOLineID:  uuid.New(),
+		ActorID:      uuid.New(),
+	})
+	if err == nil {
+		t.Fatal("want error reassigning allocation for reserved FG, got nil")
+	}
+}
+
+func TestListAllocations_ReturnsBySOLine(t *testing.T) {
+	h := newHarness()
+	soLineID := uuid.New()
+	otherSOL := uuid.New()
+
+	fg1 := h.seedFG(uuid.New(), uuid.New(), &soLineID, FGStatusAvailable)
+	fg2 := h.seedFG(uuid.New(), uuid.New(), &soLineID, FGStatusAvailable)
+	fg3 := h.seedFG(uuid.New(), uuid.New(), &otherSOL, FGStatusAvailable)
+	h.seedAllocation(fg1.ID, soLineID, AllocationTypeHard)
+	h.seedAllocation(fg2.ID, soLineID, AllocationTypeSoft)
+	h.seedAllocation(fg3.ID, otherSOL, AllocationTypeHard)
+
+	out, err := h.svc.ListAllocations(context.Background(), soLineID)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(out) != 2 {
+		t.Errorf("want 2 allocations for soLineID, got %d", len(out))
+	}
+}
+
+func TestCreateFromCompletedWO_CreatesHardAllocation(t *testing.T) {
+	h := newHarness()
+	woID, skuID := uuid.New(), uuid.New()
+	soLineID := uuid.New()
+
+	rows, err := h.svc.CreateFromCompletedWO(context.Background(), CreateFromCompletedWOInput{
+		WorkOrderID:      woID,
+		SKUID:            skuID,
+		SKUCode:          "SKU-1",
+		Quantity:         2,
+		SalesOrderLineID: &soLineID,
+		QCPassedBy:       uuid.New(),
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("want 2 FG rows, got %d", len(rows))
+	}
+	// Each FG must have a HARD allocation.
+	for _, fg := range rows {
+		allocID, ok := h.store.allocsByFG[fg.ID]
+		if !ok {
+			t.Errorf("no allocation created for FG %v", fg.ID)
+			continue
+		}
+		alloc := h.store.allocsByID[allocID]
+		if alloc.AllocationType != AllocationTypeHard {
+			t.Errorf("want hard allocation, got %q", alloc.AllocationType)
+		}
+		if alloc.SalesOrderLineID != soLineID {
+			t.Errorf("allocation SOL mismatch")
+		}
+	}
+}
+
+func TestCreateFromCompletedWO_NoSOLine_NoAllocation(t *testing.T) {
+	h := newHarness()
+	woID, skuID := uuid.New(), uuid.New()
+
+	rows, err := h.svc.CreateFromCompletedWO(context.Background(), CreateFromCompletedWOInput{
+		WorkOrderID:      woID,
+		SKUID:            skuID,
+		SKUCode:          "SKU-1",
+		Quantity:         1,
+		SalesOrderLineID: nil,
+		QCPassedBy:       uuid.New(),
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("want 1 FG row, got %d", len(rows))
+	}
+	if _, ok := h.store.allocsByFG[rows[0].ID]; ok {
+		t.Error("want no allocation when SOL is nil, but one was created")
 	}
 }
