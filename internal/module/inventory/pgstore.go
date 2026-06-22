@@ -55,6 +55,20 @@ func (s *pgStore) selectLots(ctx context.Context) ([]InventoryLot, error) {
 	return lots, rows.Err()
 }
 
+func (s *pgStore) selectLotByID(ctx context.Context, id uuid.UUID) (InventoryLot, error) {
+	var l InventoryLot
+	err := s.pool.QueryRow(ctx,
+		`SELECT id, material_id, quantity, cost_per_sheet_amount, cost_per_sheet_currency, supplier_ref, is_active, received_at
+		 FROM inventory_lots WHERE id = $1`, id,
+	).Scan(&l.ID, &l.MaterialID, &l.Quantity,
+		&l.CostPerSheet.Amount, &l.CostPerSheet.Currency,
+		&l.SupplierRef, &l.IsActive, &l.ReceivedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return InventoryLot{}, domain.NewBizError(domain.ErrNotFound, "lot not found")
+	}
+	return l, err
+}
+
 // selectLotsPaged returns a page of inventory lots optionally filtered by a
 // case-insensitive keyword match on the supplier_ref column.
 // It returns (items, totalMatchingItems, error).

@@ -23,6 +23,7 @@ type service struct {
 	woa                  WorkOrderAdvancer
 	bcg                  BarcodeGenerator
 	notifier             CutNotifier
+	prCreator            PurchaseRequestCreator
 	overflowThresholdPct float64
 }
 
@@ -53,6 +54,15 @@ func NewServiceFull(st store, woa WorkOrderAdvancer, bcg BarcodeGenerator, notif
 		thresholdPct = defaultOverflowThresholdPct
 	}
 	return &service{st: st, woa: woa, bcg: bcg, notifier: notifier, overflowThresholdPct: thresholdPct}
+}
+
+// NewServiceWithAllDeps wires all optional dependencies including the
+// purchase-request creator for auto-PR-on-rejection (BE #37).
+func NewServiceWithAllDeps(st store, woa WorkOrderAdvancer, bcg BarcodeGenerator, notifier CutNotifier, prCreator PurchaseRequestCreator, thresholdPct float64) Service {
+	if thresholdPct <= 0 || thresholdPct > 100 {
+		thresholdPct = defaultOverflowThresholdPct
+	}
+	return &service{st: st, woa: woa, bcg: bcg, notifier: notifier, prCreator: prCreator, overflowThresholdPct: thresholdPct}
 }
 
 func (s *service) ReceiveStock(ctx context.Context, in ReceiveStockInput) (InventoryLot, error) {
@@ -1449,6 +1459,25 @@ func (s *service) RejectLot(ctx context.Context, in RejectLotInput) (RejectLotRe
 		slog.Warn("inventory: RejectLot audit log failed", "lot_id", in.LotID, "err", err)
 	}
 
+	// Best-effort: auto-create a DRAFT PO to replenish the rejected material.
+	if s.prCreator != nil {
+		lot, lotErr := s.st.selectLotByID(ctx, in.LotID)
+		if lotErr != nil {
+			slog.Warn("inventory: RejectLot could not fetch lot for PR creation", "lot_id", in.LotID, "err", lotErr)
+		} else {
+			if prErr := s.prCreator.CreateFromRejection(ctx, PRFromRejectionInput{
+				RejectionID: rejection.ID,
+				LotID:       in.LotID,
+				MaterialID:  lot.MaterialID,
+				Supplier:    lot.SupplierRef,
+				QtySheets:   in.RejectedQtySheets,
+				ActorID:     in.ActorID,
+			}); prErr != nil {
+				slog.Warn("inventory: RejectLot auto-PR creation failed", "rejection_id", rejection.ID, "err", prErr)
+			}
+		}
+	}
+
 	return RejectLotResult{Rejection: rejection, RejectedSheetIDs: rejectedIDs}, nil
 }
 
@@ -1542,6 +1571,14 @@ func (s *service) UpdateRejectionClaim(ctx context.Context, in UpdateClaimInput)
 		CreatedAt:  now,
 	}); err != nil {
 		slog.Warn("inventory: UpdateRejectionClaim audit log failed", "rejection_id", in.RejectionID, "err", err)
+	}
+
+	// Best-effort: when supplier APPROVES the claim they will replace the
+	// material, so the auto-created PO is no longer needed.
+	if in.ClaimStatus == ClaimStatusApproved && s.prCreator != nil {
+		if cancelErr := s.prCreator.CancelFromRejection(ctx, in.RejectionID); cancelErr != nil {
+			slog.Warn("inventory: UpdateRejectionClaim auto-PR cancel failed", "rejection_id", in.RejectionID, "err", cancelErr)
+		}
 	}
 
 	return updated, nil

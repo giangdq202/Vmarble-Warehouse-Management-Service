@@ -11,6 +11,7 @@ import (
 type store interface {
 	insertPO(ctx context.Context, po PurchaseOrder) error
 	selectPOByID(ctx context.Context, id uuid.UUID) (PurchaseOrder, error)
+	selectPOByRejectionID(ctx context.Context, rejectionID uuid.UUID) (PurchaseOrder, error)
 	selectPOsPaged(ctx context.Context, p httpkit.PageParams, f POListFilter) ([]PurchaseOrder, int, error)
 	updatePOStatus(ctx context.Context, id uuid.UUID, status POStatus, ts *time.Time) error
 	insertPOItem(ctx context.Context, item POItem) error

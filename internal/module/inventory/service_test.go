@@ -26,6 +26,9 @@ type mockStore struct {
 	selectLotsResult []InventoryLot
 	selectLotsErr    error
 
+	// selectLotByID (dedicated — independent from selectLotsErr)
+	selectLotByIDErr error
+
 	// selectLotsPaged
 	selectLotsPagedResult []InventoryLot
 	selectLotsPagedTotal  int
@@ -223,6 +226,15 @@ func (m *mockStore) insertLot(_ context.Context, _ InventoryLot) error {
 }
 func (m *mockStore) selectLots(_ context.Context) ([]InventoryLot, error) {
 	return m.selectLotsResult, m.selectLotsErr
+}
+func (m *mockStore) selectLotByID(_ context.Context, _ uuid.UUID) (InventoryLot, error) {
+	if m.selectLotByIDErr != nil {
+		return InventoryLot{}, m.selectLotByIDErr
+	}
+	if len(m.selectLotsResult) > 0 {
+		return m.selectLotsResult[0], nil
+	}
+	return InventoryLot{}, nil
 }
 func (m *mockStore) selectLotsPaged(_ context.Context, _ httpkit.PageParams) ([]InventoryLot, int, error) {
 	return m.selectLotsPagedResult, m.selectLotsPagedTotal, m.selectLotsPagedErr
@@ -5545,5 +5557,159 @@ func TestExpireStaleRemnants_ReturnsCount(t *testing.T) {
 	}
 	if n != 5 {
 		t.Errorf("n = %d, want 5", n)
+	}
+}
+
+// ── PurchaseRequestCreator (BE #37) ──────────────────────────────────────────
+
+type mockPRCreator struct {
+	createCalled bool
+	createInput  PRFromRejectionInput
+	createErr    error
+	cancelCalled bool
+	cancelID     uuid.UUID
+	cancelErr    error
+}
+
+func (m *mockPRCreator) CreateFromRejection(_ context.Context, in PRFromRejectionInput) error {
+	m.createCalled = true
+	m.createInput = in
+	return m.createErr
+}
+func (m *mockPRCreator) CancelFromRejection(_ context.Context, id uuid.UUID) error {
+	m.cancelCalled = true
+	m.cancelID = id
+	return m.cancelErr
+}
+
+func TestRejectLot_WithPRCreator_SpawnsDraftPO(t *testing.T) {
+	lotID := uuid.New()
+	matID := uuid.New()
+	rejectedIDs := []uuid.UUID{uuid.New()}
+	st := &mockStore{
+		rejectLotResult: rejectedIDs,
+		selectLotsResult: []InventoryLot{
+			{ID: lotID, MaterialID: matID, SupplierRef: "ACME-SUP"},
+		},
+	}
+	pr := &mockPRCreator{}
+	svc := NewServiceWithAllDeps(st, nil, nil, nil, pr, 0).(*service)
+
+	_, err := svc.RejectLot(context.Background(), RejectLotInput{
+		LotID:             lotID,
+		ReasonCode:        RejectionReasonCrack,
+		RejectedQtySheets: 1,
+		ActorID:           uuid.New(),
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !pr.createCalled {
+		t.Fatal("want PurchaseRequestCreator.CreateFromRejection called")
+	}
+	if pr.createInput.MaterialID != matID {
+		t.Errorf("CreateFromRejection material_id = %v, want %v", pr.createInput.MaterialID, matID)
+	}
+	if pr.createInput.Supplier != "ACME-SUP" {
+		t.Errorf("CreateFromRejection supplier = %q, want ACME-SUP", pr.createInput.Supplier)
+	}
+	if pr.createInput.QtySheets != 1 {
+		t.Errorf("CreateFromRejection qty_sheets = %d, want 1", pr.createInput.QtySheets)
+	}
+}
+
+func TestRejectLot_PRCreatorFails_StillSucceeds(t *testing.T) {
+	lotID := uuid.New()
+	st := &mockStore{
+		rejectLotResult:  []uuid.UUID{uuid.New()},
+		selectLotsResult: []InventoryLot{{ID: lotID}},
+	}
+	pr := &mockPRCreator{createErr: errors.New("purchasing unavailable")}
+	svc := NewServiceWithAllDeps(st, nil, nil, nil, pr, 0).(*service)
+
+	_, err := svc.RejectLot(context.Background(), RejectLotInput{
+		LotID:             lotID,
+		ReasonCode:        RejectionReasonDamage,
+		RejectedQtySheets: 1,
+		ActorID:           uuid.New(),
+	})
+	if err != nil {
+		t.Errorf("RejectLot must succeed even when PR creation fails, got %v", err)
+	}
+}
+
+func TestRejectLot_LotFetchFails_PRSkipped(t *testing.T) {
+	st := &mockStore{
+		rejectLotResult:  []uuid.UUID{uuid.New()},
+		selectLotByIDErr: errors.New("db error"),
+	}
+	pr := &mockPRCreator{}
+	svc := NewServiceWithAllDeps(st, nil, nil, nil, pr, 0).(*service)
+
+	_, err := svc.RejectLot(context.Background(), RejectLotInput{
+		LotID:             uuid.New(),
+		ReasonCode:        RejectionReasonCrack,
+		RejectedQtySheets: 1,
+		ActorID:           uuid.New(),
+	})
+	if err != nil {
+		t.Fatalf("RejectLot must succeed even when lot fetch fails, got %v", err)
+	}
+	if pr.createCalled {
+		t.Error("CreateFromRejection must NOT be called when lot fetch fails")
+	}
+}
+
+func TestUpdateRejectionClaim_ApprovedTriggersCancelPR(t *testing.T) {
+	rejectionID := uuid.New()
+	st := &mockStore{
+		selectRejectionResult: MaterialRejection{
+			ID: rejectionID, ClaimStatus: ClaimStatusOpen,
+		},
+		updateClaimResult: MaterialRejection{ID: rejectionID, ClaimStatus: ClaimStatusApproved},
+	}
+	pr := &mockPRCreator{}
+	svc := NewServiceWithAllDeps(st, nil, nil, nil, pr, 0).(*service)
+
+	amount := int64(1_000_000)
+	_, err := svc.UpdateRejectionClaim(context.Background(), UpdateClaimInput{
+		RejectionID:   rejectionID,
+		ClaimStatus:   ClaimStatusApproved,
+		ClaimAmount:   &amount,
+		ClaimCurrency: "VND",
+		ActorID:       uuid.New(),
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !pr.cancelCalled {
+		t.Fatal("want PurchaseRequestCreator.CancelFromRejection called on APPROVED")
+	}
+	if pr.cancelID != rejectionID {
+		t.Errorf("CancelFromRejection id = %v, want %v", pr.cancelID, rejectionID)
+	}
+}
+
+func TestUpdateRejectionClaim_NotApproved_DoesNotCancelPR(t *testing.T) {
+	rejectionID := uuid.New()
+	st := &mockStore{
+		selectRejectionResult: MaterialRejection{
+			ID: rejectionID, ClaimStatus: ClaimStatusOpen,
+		},
+		updateClaimResult: MaterialRejection{ID: rejectionID, ClaimStatus: ClaimStatusRejected},
+	}
+	pr := &mockPRCreator{}
+	svc := NewServiceWithAllDeps(st, nil, nil, nil, pr, 0).(*service)
+
+	_, err := svc.UpdateRejectionClaim(context.Background(), UpdateClaimInput{
+		RejectionID: rejectionID,
+		ClaimStatus: ClaimStatusRejected,
+		ActorID:     uuid.New(),
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if pr.cancelCalled {
+		t.Error("CancelFromRejection must NOT be called for non-APPROVED transitions")
 	}
 }
