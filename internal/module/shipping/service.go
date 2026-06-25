@@ -83,6 +83,14 @@ func (svc *service) BookContainer(ctx context.Context, in BookContainerInput) (S
 	if in.BookedBy == uuid.Nil {
 		return ShippingBooking{}, domain.NewBizError(domain.ErrInvalidInput, "booked_by is required")
 	}
+	if in.FreightCost != nil {
+		if in.FreightCost.Amount < 0 {
+			return ShippingBooking{}, domain.NewBizError(domain.ErrInvalidInput, "freight_cost amount must be non-negative")
+		}
+		if len(in.FreightCost.Currency) != 3 {
+			return ShippingBooking{}, domain.NewBizError(domain.ErrInvalidInput, "freight_cost currency must be a 3-character ISO 4217 code")
+		}
+	}
 
 	v, err := svc.s.getVessel(ctx, in.VesselID)
 	if err != nil {
@@ -97,6 +105,7 @@ func (svc *service) BookContainer(ctx context.Context, in BookContainerInput) (S
 		BookedBy:    in.BookedBy,
 		BookedAt:    svc.now().UTC(),
 		Note:        in.Note,
+		FreightCost: in.FreightCost,
 		VesselName:  v.Name,
 		CutoffDate:  v.CutoffDate,
 	}
