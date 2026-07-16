@@ -73,3 +73,29 @@ type DefectNotifier interface {
 	NotifyFGDefect(ctx context.Context, fgID uuid.UUID, skuCode, reason string) error
 	NotifyFGDefectResolved(ctx context.Context, fgID uuid.UUID, resolution string) error
 }
+
+// SOLineChecker returns the slim SOL projection packing needs to validate a
+// reassignment target. Wired in main.go to sales.Service.GetSOLine.
+type SOLineChecker interface {
+	GetSOLine(ctx context.Context, soLineID uuid.UUID) (SOLineInfo, error)
+}
+
+type SOLineInfo struct {
+	ID    uuid.UUID
+	SKUID uuid.UUID
+}
+
+// SKUComponentResolver fetches the multi-component breakdown for a SKU.
+// Used by CreateFromCompletedWO to create one FG row per component per unit.
+// When a SKU has no components, the result is empty and the caller falls back
+// to single-row-per-unit behaviour (simple / single-box SKU).
+// Wired in main.go to catalog.Service.ListSKUComponents.
+type SKUComponentResolver interface {
+	GetSKUComponents(ctx context.Context, skuID uuid.UUID) ([]SKUComponentInfo, error)
+}
+
+type SKUComponentInfo struct {
+	ComponentType string
+	CbmPerUnit    float64
+	SortOrder     int
+}

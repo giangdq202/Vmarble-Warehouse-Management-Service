@@ -39,6 +39,8 @@ func (h *Handler) Register(rg *gin.RouterGroup) {
 	inv.GET("/cutting-records", h.listCuttingRecords)
 	inv.GET("/remnants", h.listRemnants)
 	inv.GET("/remnants/suggestions", h.suggestRemnants)
+	inv.GET("/remnants/aging", h.getRemnantAging)
+	inv.POST("/remnants/expire", auth.RequireAdminOnly(), h.expireStaleRemnants)
 	inv.GET("/remnants/:id", h.getRemnant)
 	inv.GET("/remnants/:id/lineage", h.getRemnantLineage)
 	inv.GET("/remnants/:id/label.pdf", h.getRemnantLabelPDF)
@@ -58,6 +60,8 @@ func (h *Handler) Register(rg *gin.RouterGroup) {
 	inv.POST("/cycle-counts/:id/cancel", auth.RequireRole(auth.RoleWarehouse, auth.RoleAdmin), h.cancelCycleCount)
 
 	inv.GET("/work-orders/:id/pick-slip", auth.RequireRole(auth.RoleWarehouse, auth.RoleCNC, auth.RoleCNCManager, auth.RoleForeman, auth.RoleAdmin), h.getPickSlipPDF)
+
+	inv.GET("/lots/export.xlsx", h.exportLots)
 
 	rg.GET("/storage-locations", h.listStorageLocations)
 }
@@ -101,8 +105,8 @@ func (h *Handler) receiveStock(c *gin.Context) {
 // @Failure      500  {object}  map[string]string
 // @Router       /api/v1/inventory/lots [get]
 func (h *Handler) listLots(c *gin.Context) {
-	p := httpkit.BindPageParams(c)
-	result, err := h.svc.ListLots(c.Request.Context(), p)
+	p := httpkit.BindCursorParams(c)
+	result, err := h.svc.ListLots(c.Request.Context(), p, c.Query("search"))
 	if err != nil {
 		httpkit.Error(c, err)
 		return
@@ -359,13 +363,15 @@ func (h *Handler) listRemnants(c *gin.Context) {
 
 // suggestRemnants godoc
 //
-// @Summary      Suggest best-fit remnants for a required dimension
-// @Description  Returns up to `limit` AVAILABLE remnants ranked by Best Fit (smallest area) + FIFO (oldest first). Each suggestion includes the remnant's storage location when available.
+// @Summary      Suggest remnants for a required dimension
+// @Description  Returns up to `limit` AVAILABLE remnants ranked by the chosen strategy (best_fit or fifo). Each suggestion includes age_days, score, reason, and storage location when available.
 // @Tags         inventory
 // @Produce      json
-// @Param        length_mm  query     int   true   "required length in mm"
-// @Param        width_mm   query     int   true   "required width in mm"
-// @Param        limit      query     int   false  "max results (default 3, max 10)"
+// @Param        length_mm    query     int     true   "required length in mm"
+// @Param        width_mm     query     int     true   "required width in mm"
+// @Param        limit        query     int     false  "max results (default 3, max 10)"
+// @Param        strategy     query     string  false  "best_fit or fifo (default: material config → best_fit)"  Enums(best_fit,fifo)
+// @Param        material_id  query     string  false  "restrict to remnants from this material"
 // @Security     BearerAuth
 // @Success      200  {array}   RemnantSuggestion
 // @Failure      400  {object}  map[string]string
@@ -383,15 +389,70 @@ func (h *Handler) suggestRemnants(c *gin.Context) {
 	}
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "3"))
 
-	suggestions, err := h.svc.SuggestRemnants(c.Request.Context(), SuggestRemnantsInput{
+	in := SuggestRemnantsInput{
 		RequiredDimension: domain.Dimension{LengthMM: lengthMM, WidthMM: widthMM},
 		Limit:             limit,
-	})
+		Strategy:          RemnantStrategy(c.Query("strategy")),
+	}
+	if matIDStr := c.Query("material_id"); matIDStr != "" {
+		matID, parseErr := uuid.Parse(matIDStr)
+		if parseErr != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "material_id must be a valid UUID"})
+			return
+		}
+		in.MaterialID = &matID
+	}
+
+	suggestions, err := h.svc.SuggestRemnants(c.Request.Context(), in)
 	if err != nil {
 		httpkit.Error(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, suggestions)
+}
+
+// getRemnantAging godoc
+//
+// @Summary      Get remnant aging report
+// @Description  Returns all AVAILABLE remnants with age in days, classified as OK / AT_RISK / EXPIRED.
+// @Tags         inventory
+// @Produce      json
+// @Param        warn_days    query  int  false  "days before AT_RISK (default 60)"
+// @Param        expire_days  query  int  false  "days before EXPIRED candidate (default 90)"
+// @Security     BearerAuth
+// @Success      200  {object}  RemnantAgingSummary
+// @Failure      400  {object}  map[string]string
+// @Router       /api/v1/inventory/remnants/aging [get]
+func (h *Handler) getRemnantAging(c *gin.Context) {
+	warnDays, _ := strconv.Atoi(c.DefaultQuery("warn_days", "0"))
+	expireDays, _ := strconv.Atoi(c.DefaultQuery("expire_days", "0"))
+	summary, err := h.svc.GetRemnantAging(c.Request.Context(), warnDays, expireDays)
+	if err != nil {
+		httpkit.Error(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, summary)
+}
+
+// expireStaleRemnants godoc
+//
+// @Summary      Expire stale AVAILABLE remnants (admin)
+// @Description  Flips AVAILABLE remnants older than age_days to EXPIRED. Default 90 days.
+// @Tags         inventory
+// @Produce      json
+// @Param        age_days  query  int  false  "age threshold in days (default 90)"
+// @Security     BearerAuth
+// @Success      200  {object}  map[string]interface{}
+// @Failure      400  {object}  map[string]string
+// @Router       /api/v1/inventory/remnants/expire [post]
+func (h *Handler) expireStaleRemnants(c *gin.Context) {
+	ageDays, _ := strconv.Atoi(c.DefaultQuery("age_days", "0"))
+	n, err := h.svc.ExpireStaleRemnants(c.Request.Context(), ageDays)
+	if err != nil {
+		httpkit.Error(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"expired_count": n})
 }
 
 // getRemnantLineage godoc
@@ -1008,6 +1069,8 @@ func (h *Handler) rejectLot(c *gin.Context) {
 // @Produce      json
 // @Param        claim_status  query     string  false  "filter by claim_status (OPEN|APPROVED|REJECTED|PAID)"
 // @Param        lot_id        query     string  false  "filter by lot id (uuid)"
+// @Param        from          query     string  false  "filter reported_at from (RFC3339 or YYYY-MM-DD)"
+// @Param        to            query     string  false  "filter reported_at to (RFC3339 or YYYY-MM-DD, inclusive day-end)"
 // @Param        cursor        query     string  false  "opaque cursor token; omit for first page"
 // @Param        limit         query     int     false  "page size (default 50, max 200)"
 // @Security     BearerAuth
@@ -1023,6 +1086,30 @@ func (h *Handler) listRejections(c *gin.Context) {
 		}
 		f.LotID = &parsed
 	}
+	fromStr := c.Query("from")
+	toStr := c.Query("to")
+	if (fromStr != "") != (toStr != "") {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "from and to must be provided together"})
+		return
+	}
+	if fromStr != "" {
+		from, err := parseRejectionDate(fromStr, false)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid from date, use YYYY-MM-DD or RFC3339"})
+			return
+		}
+		to, err := parseRejectionDate(toStr, true)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid to date, use YYYY-MM-DD or RFC3339"})
+			return
+		}
+		if !from.Before(to) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "from must be before to"})
+			return
+		}
+		f.From = &from
+		f.To = &to
+	}
 	params := httpkit.BindCursorParams(c)
 	res, err := h.svc.ListRejections(c.Request.Context(), f, params)
 	if err != nil {
@@ -1030,6 +1117,19 @@ func (h *Handler) listRejections(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, res)
+}
+
+// parseRejectionDate parses a date string (RFC3339 or YYYY-MM-DD).
+// When inclusiveEnd is true, a date-only string is bumped to midnight of the
+// next day so the filter is inclusive of the named day.
+func parseRejectionDate(s string, inclusiveEnd bool) (time.Time, error) {
+	if t, err := time.ParseInLocation(time.DateOnly, s, time.UTC); err == nil {
+		if inclusiveEnd {
+			return t.AddDate(0, 0, 1), nil
+		}
+		return t, nil
+	}
+	return time.Parse(time.RFC3339, s)
 }
 
 // getRejection godoc
@@ -1146,4 +1246,14 @@ func actorIDFromContext(c *gin.Context) (uuid.UUID, bool) {
 		return uuid.Nil, false
 	}
 	return id, true
+}
+
+func (h *Handler) exportLots(c *gin.Context) {
+	p := httpkit.BindPageParams(c)
+	c.Header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+	c.Header("Content-Disposition", "attachment; filename=inventory-lots.xlsx")
+	if err := h.svc.ExportLots(c.Request.Context(), p, c.Writer); err != nil {
+		c.Header("Content-Disposition", "")
+		httpkit.Error(c, err)
+	}
 }

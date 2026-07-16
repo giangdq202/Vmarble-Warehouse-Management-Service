@@ -38,5 +38,5 @@ func Migrate(dsn, migrationsDir string) error {
 	if err := goose.SetDialect("postgres"); err != nil {
 		return fmt.Errorf("set dialect: %w", err)
 	}
-	return goose.Up(db, migrationsDir)
+	return goose.Up(db, migrationsDir, goose.WithAllowMissing())
 }

@@ -4,14 +4,18 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
+	"io"
 	"log/slog"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/xuri/excelize/v2"
 
 	"github.com/vmarble/warehouse-management-service/internal/domain"
+	"github.com/vmarble/warehouse-management-service/internal/platform/auth"
 	"github.com/vmarble/warehouse-management-service/internal/platform/httpkit"
 )
 
@@ -24,8 +28,9 @@ type service struct {
 	skuResolver    CustomerSKUResolver
 	lpAuditor      LoadingPlanAuditLogger
 	planReloader   PlanReloadNotifier
-	pendingExc     PendingExceptionsChecker
-	shortShipped   ShortShippedAutoCreator
+	pendingExc      PendingExceptionsChecker
+	shortShipped    ShortShippedAutoCreator
+	fgCompChecker   FGComponentChecker
 	cbmOverheadPct float64
 	now            func() time.Time // overridable in tests
 }
@@ -83,6 +88,12 @@ func (svc *service) SetPendingExceptionsChecker(c PendingExceptionsChecker) {
 // SHORT_SHIPPED auto-creation at seal time.
 func (svc *service) SetShortShippedAutoCreator(c ShortShippedAutoCreator) {
 	svc.shortShipped = c
+}
+
+// SetFGComponentChecker wires the BR-PK-MULTI03 SEAL pre-check. nil disables
+// the guard (simple / single-box SKU containers skip component validation).
+func (svc *service) SetFGComponentChecker(c FGComponentChecker) {
+	svc.fgCompChecker = c
 }
 
 // ── Container CRUD ──────────────────────────────────────────────────────────
@@ -169,51 +180,60 @@ func (svc *service) ListStatusLog(ctx context.Context, containerID uuid.UUID) ([
 // AddLine honours BR-D01 (status guard), BR-D02/D03 (capacity guard), plus
 // cross-module checks (SKU exists, SO line exists, qty fits within
 // qty_planned - qty_shipped on the underlying SO line).
-func (svc *service) AddLine(ctx context.Context, in AddLineInput) (ContainerLine, error) {
+// BR-D18/D20: hard capacity limit returns ErrInsufficientStock (422).
+// BR-D19: near-capacity warning at 90% sets AddLineResult.NearCapacity.
+// Admin override: AllowOverload=true bypasses the hard limit and writes an
+// audit row atomically (actor must be admin role).
+func (svc *service) AddLine(ctx context.Context, in AddLineInput) (AddLineResult, error) {
 	if in.Qty <= 0 {
-		return ContainerLine{}, domain.NewBizError(domain.ErrInvalidInput, "qty must be > 0")
+		return AddLineResult{}, domain.NewBizError(domain.ErrInvalidInput, "qty must be > 0")
 	}
 	if in.SKUID == uuid.Nil || in.SalesOrderLineID == uuid.Nil {
-		return ContainerLine{}, domain.NewBizError(domain.ErrInvalidInput,
+		return AddLineResult{}, domain.NewBizError(domain.ErrInvalidInput,
 			"sku_id and sales_order_line_id are required")
 	}
 	if in.CBMTotal < 0 || in.WeightKGTotal < 0 {
-		return ContainerLine{}, domain.NewBizError(domain.ErrInvalidInput,
+		return AddLineResult{}, domain.NewBizError(domain.ErrInvalidInput,
 			"cbm_total and weight_kg_total must be non-negative")
 	}
 	if in.AddedBy == uuid.Nil {
-		return ContainerLine{}, domain.NewBizError(domain.ErrInvalidInput, "added_by is required")
+		return AddLineResult{}, domain.NewBizError(domain.ErrInvalidInput, "added_by is required")
+	}
+	if in.AllowOverload && !isAdminRole(in.ActorRole) {
+		return AddLineResult{}, domain.NewBizError(domain.ErrPreconditionFailed,
+			"allow_overload requires admin role")
 	}
 
 	if svc.skuChecker != nil {
 		if _, err := svc.skuChecker.GetSKU(ctx, in.SKUID); err != nil {
-			return ContainerLine{}, err
+			return AddLineResult{}, err
 		}
 	}
 
 	if svc.soLineChecker != nil {
 		soLine, err := svc.soLineChecker.GetSOLine(ctx, in.SalesOrderLineID)
 		if err != nil {
-			return ContainerLine{}, err
+			return AddLineResult{}, err
 		}
 		if soLine.SKUID != in.SKUID {
-			return ContainerLine{}, domain.NewBizError(domain.ErrInvalidInput,
+			return AddLineResult{}, domain.NewBizError(domain.ErrInvalidInput,
 				"sku_id does not match the sales order line's SKU")
 		}
 		switch soLine.SOStatus {
 		case "CONFIRMED", "IN_PRODUCTION", "PARTIALLY_SHIPPED":
 			// allowed
 		default:
-			return ContainerLine{}, domain.NewBizError(domain.ErrInvalidTransition,
+			return AddLineResult{}, domain.NewBizError(domain.ErrInvalidTransition,
 				"sales order must be CONFIRMED or later before loading: got "+soLine.SOStatus)
 		}
 		if soLine.QtyShipped+in.Qty > soLine.QtyPlanned {
-			return ContainerLine{}, domain.NewBizError(domain.ErrInvalidInput,
+			return AddLineResult{}, domain.NewBizError(domain.ErrInvalidInput,
 				"qty exceeds remaining planned quantity for sales order line")
 		}
 	}
 
 	var line ContainerLine
+	var nearCapacity bool
 	err := svc.s.withTx(ctx, func(tx txStore, _ pgx.Tx) error {
 		c, err := tx.lockContainerForUpdate(ctx, in.ContainerID)
 		if err != nil {
@@ -231,9 +251,15 @@ func (svc *service) AddLine(ctx context.Context, in AddLineInput) (ContainerLine
 		if err != nil {
 			return err
 		}
-		if err := svc.checkCapacity(c, curCBM+in.CBMTotal, curWeight+in.WeightKGTotal); err != nil {
-			return err
+		projCBM := curCBM + in.CBMTotal
+		projWeight := curWeight + in.WeightKGTotal
+
+		capErr := svc.checkCapacity(c, projCBM, projWeight)
+		if capErr != nil && !in.AllowOverload {
+			return capErr
 		}
+
+		nearCapacity = svc.isNearCapacity(c, projCBM, projWeight)
 
 		now := svc.now()
 		line = ContainerLine{
@@ -249,6 +275,24 @@ func (svc *service) AddLine(ctx context.Context, in AddLineInput) (ContainerLine
 		}
 		if err := tx.insertLine(ctx, line); err != nil {
 			return err
+		}
+
+		// Write admin override audit atomically with the line insert.
+		if capErr != nil && in.AllowOverload {
+			overlog := ContainerOverloadLog{
+				ID:           uuid.New(),
+				ContainerID:  c.ID,
+				LineID:       line.ID,
+				ProjectedCBM: projCBM,
+				MaxCBM:       c.MaxCBM,
+				ProjectedKG:  projWeight,
+				MaxKG:        c.MaxPayloadKG,
+				ActorID:      in.AddedBy,
+				Reason:       "admin override",
+			}
+			if err := tx.insertOverloadLog(ctx, overlog); err != nil {
+				return err
+			}
 		}
 
 		// First line on an OPEN container flips it to LOADING. Subsequent
@@ -268,7 +312,7 @@ func (svc *service) AddLine(ctx context.Context, in AddLineInput) (ContainerLine
 		return nil
 	})
 	if err != nil {
-		return ContainerLine{}, err
+		return AddLineResult{}, err
 	}
 
 	// Best-effort FG reservation: flip qty matching AVAILABLE rows in the
@@ -291,7 +335,25 @@ func (svc *service) AddLine(ctx context.Context, in AddLineInput) (ContainerLine
 				"line_id", line.ID, "wanted", line.Qty, "reserved", reserved)
 		}
 	}
-	return line, nil
+	return AddLineResult{Line: line, NearCapacity: nearCapacity}, nil
+}
+
+// isNearCapacity returns true when projected CBM or weight exceeds 90% of
+// the container max (BR-D19 near-capacity warning threshold).
+func (svc *service) isNearCapacity(c Container, projCBM, projWeight float64) bool {
+	const nearPct = 0.90
+	if c.MaxCBM > 0 && projCBM > c.MaxCBM*nearPct {
+		return true
+	}
+	if c.MaxPayloadKG > 0 && projWeight > c.MaxPayloadKG*nearPct {
+		return true
+	}
+	return false
+}
+
+// isAdminRole returns true when the role string maps to the ADMIN persona.
+func isAdminRole(role string) bool {
+	return role == "admin"
 }
 
 func (svc *service) DeleteLine(ctx context.Context, containerID, lineID uuid.UUID, _ uuid.UUID) error {
@@ -347,6 +409,11 @@ func (svc *service) TransferLine(ctx context.Context, in TransferLineInput) (Tra
 		return TransferLineResult{}, domain.NewBizError(domain.ErrInvalidInput,
 			"qty must be non-negative")
 	}
+	// BR-D07: reason is mandatory for every transfer.
+	if reasonBlank(in.Reason) {
+		return TransferLineResult{}, domain.NewBizError(domain.ErrInvalidInput,
+			"reason is required for a container line transfer")
+	}
 
 	first, second := orderUUIDs(in.ContainerID, in.TargetContainerID)
 	var result TransferLineResult
@@ -371,6 +438,18 @@ func (svc *service) TransferLine(ctx context.Context, in TransferLineInput) (Tra
 		if !canHoldLines(src.Status) || !canHoldLines(target.Status) {
 			return domain.NewBizError(domain.ErrInvalidTransition,
 				"source and target containers must both be OPEN or LOADING")
+		}
+
+		// BR-D17: cross-plan transfer requires planner tier.
+		// A transfer is cross-plan when the source container has an APPROVED
+		// loading plan (i.e. a version-locked plan that workers scan against).
+		isCrossPlan, err := tx.hasApprovedLoadingPlan(ctx, src.ID)
+		if err != nil {
+			return err
+		}
+		if isCrossPlan && !isPlannerOrAbove(in.ActorRole) {
+			return domain.NewBizError(domain.ErrPreconditionFailed,
+				"transferring lines out of a container with an approved loading plan requires the planner role or above")
 		}
 
 		line, err := tx.lockLineForUpdate(ctx, in.LineID)
@@ -409,7 +488,23 @@ func (svc *service) TransferLine(ctx context.Context, in TransferLineInput) (Tra
 			if err := svc.flipToLoadingIfOpen(ctx, tx, target, in.ActorID); err != nil {
 				return err
 			}
-			result = TransferLineResult{TargetLine: newLine}
+			audit := ContainerTransferAudit{
+				ID:                uuid.New(),
+				SourceContainerID: src.ID,
+				TargetContainerID: target.ID,
+				LineID:            line.ID,
+				SKUID:             line.SKUID,
+				QtyTransferred:    line.Qty,
+				Reason:            in.Reason,
+				IsCrossPlan:       isCrossPlan,
+				ActorID:           in.ActorID,
+				ActorRole:         in.ActorRole,
+				CreatedAt:         now,
+			}
+			if err := tx.insertTransferAudit(ctx, audit); err != nil {
+				return err
+			}
+			result = TransferLineResult{TargetLine: newLine, Audit: audit}
 			return nil
 		}
 
@@ -455,18 +550,44 @@ func (svc *service) TransferLine(ctx context.Context, in TransferLineInput) (Tra
 		if err := svc.flipToLoadingIfOpen(ctx, tx, target, in.ActorID); err != nil {
 			return err
 		}
+		audit := ContainerTransferAudit{
+			ID:                uuid.New(),
+			SourceContainerID: src.ID,
+			TargetContainerID: target.ID,
+			LineID:            line.ID,
+			SKUID:             line.SKUID,
+			QtyTransferred:    moveQty,
+			Reason:            in.Reason,
+			IsCrossPlan:       isCrossPlan,
+			ActorID:           in.ActorID,
+			ActorRole:         in.ActorRole,
+			CreatedAt:         now,
+		}
+		if err := tx.insertTransferAudit(ctx, audit); err != nil {
+			return err
+		}
 		// Source line stays in place with reduced qty.
 		updated := line
 		updated.Qty = remainingQty
 		updated.CBMTotal = remainingCBM
 		updated.WeightKGTotal = remainingWeight
-		result = TransferLineResult{SourceLine: &updated, TargetLine: newLine}
+		result = TransferLineResult{SourceLine: &updated, TargetLine: newLine, Audit: audit}
 		return nil
 	})
 	if err != nil {
 		return TransferLineResult{}, err
 	}
 	return result, nil
+}
+
+// isPlannerOrAbove returns true for the planner and admin persona tiers.
+// Used by BR-D17 to gate cross-plan transfers.
+func isPlannerOrAbove(roleStr string) bool {
+	switch auth.Role(roleStr) {
+	case auth.RolePlanner, auth.RoleAccountant, auth.RoleAdmin:
+		return true
+	}
+	return false
 }
 
 // ── State transitions ───────────────────────────────────────────────────────
@@ -504,6 +625,13 @@ func (svc *service) Seal(ctx context.Context, in SealInput) (Container, error) {
 				})
 		}
 	}
+	// BR-PK-MULTI03: every physical unit must have all expected component
+	// packages present before sealing. Done outside the tx — read-only check.
+	if svc.fgCompChecker != nil {
+		if err := svc.fgCompChecker.CheckComponentsForSeal(ctx, in.ContainerID); err != nil {
+			return Container{}, err
+		}
+	}
 	var sealed Container
 	err := svc.s.withTx(ctx, func(tx txStore, raw pgx.Tx) error {
 		c, err := tx.lockContainerForUpdate(ctx, in.ContainerID)
@@ -516,6 +644,15 @@ func (svc *service) Seal(ctx context.Context, in SealInput) (Container, error) {
 		default:
 			return domain.NewBizError(domain.ErrInvalidTransition,
 				"only OPEN/LOADING containers can be sealed; got "+c.Status)
+		}
+
+		// BR-D08: cannot seal after vessel cutoff_date.
+		if c.CutoffDate != nil && svc.now().After(*c.CutoffDate) {
+			return domain.NewBizError(domain.ErrPreconditionFailed,
+				"cannot seal: vessel cutoff_date has passed").
+				WithDetails(map[string]any{
+					"cutoff_date": c.CutoffDate,
+				})
 		}
 
 		items, err := tx.listLinesForSeal(ctx, in.ContainerID)
@@ -694,11 +831,11 @@ func (svc *service) checkCapacity(c Container, projectedCBM, projectedWeight flo
 		overhead = 1
 	}
 	if projectedCBM > c.MaxCBM*overhead {
-		return domain.NewBizError(domain.ErrInvalidInput,
+		return domain.NewBizError(domain.ErrInsufficientStock,
 			"cbm capacity exceeded for container "+c.Code)
 	}
 	if projectedWeight > c.MaxPayloadKG*overhead {
-		return domain.NewBizError(domain.ErrInvalidInput,
+		return domain.NewBizError(domain.ErrInsufficientStock,
 			"weight capacity exceeded for container "+c.Code)
 	}
 	return nil
@@ -1090,6 +1227,37 @@ func (svc *service) ListContainerLinesHistory(ctx context.Context, containerID u
 	return svc.s.selectContainerLinesHistory(ctx, containerID, planID)
 }
 
+const (
+	atRiskDefaultDays  = 7
+	atRiskRedThreshold = 3 // days_to_cutoff < 3 → RED
+)
+
+func (svc *service) ListAtRisk(ctx context.Context, days int) ([]AtRiskRow, error) {
+	if days <= 0 {
+		days = atRiskDefaultDays
+	}
+	now := svc.now()
+	before := now.AddDate(0, 0, days)
+	rows, err := svc.s.selectAtRiskContainers(ctx, before)
+	if err != nil {
+		return nil, err
+	}
+	for i := range rows {
+		r := &rows[i]
+		daysDiff := int(r.CutoffDate.Sub(now).Hours() / 24)
+		r.DaysToCutoff = daysDiff
+		if r.MaxCBM > 0 {
+			r.FillPctCBM = (r.UsedCBM / r.MaxCBM) * 100
+		}
+		if daysDiff < atRiskRedThreshold {
+			r.RiskLevel = RiskLevelRed
+		} else {
+			r.RiskLevel = RiskLevelOrange
+		}
+	}
+	return rows, nil
+}
+
 func (svc *service) logLoadingPlanAudit(ctx context.Context, in AuditLoadingPlanInput) {
 	if svc.lpAuditor == nil {
 		return
@@ -1102,4 +1270,236 @@ func (svc *service) logLoadingPlanAudit(ctx context.Context, in AuditLoadingPlan
 			"error", err,
 		)
 	}
+}
+
+// ── Loader assignment (#16) ─────────────────────────────────────────────────
+
+// AssignLoader sets or clears the loader on a container (BR-D21). When the
+// container already has a different loader the call is treated as a
+// reassignment and writes a container_loader_log row (BR-D22). Assigning the
+// same loader that is already set is a no-op that still writes an audit row so
+// supervisors can see every explicit confirmation. Only planner+ may call this
+// endpoint (BR-D23) — enforced by the handler middleware, not re-checked here.
+func (svc *service) AssignLoader(ctx context.Context, in AssignLoaderInput) (Container, error) {
+	if in.ContainerID == uuid.Nil {
+		return Container{}, domain.NewBizError(domain.ErrInvalidInput, "container_id is required")
+	}
+	if in.AssignedBy == uuid.Nil {
+		return Container{}, domain.NewBizError(domain.ErrInvalidInput, "assigned_by is required")
+	}
+
+	c, err := svc.s.selectContainerByID(ctx, in.ContainerID)
+	if err != nil {
+		return Container{}, err
+	}
+
+	// BR-D22: reassignment requires a reason.
+	isReassign := c.LoaderID != nil && in.LoaderID != nil && *c.LoaderID != *in.LoaderID
+	if isReassign && reasonBlank(in.Reason) {
+		return Container{}, domain.NewBizError(domain.ErrInvalidInput,
+			"reason is required when reassigning a loader (BR-D22)")
+	}
+
+	entry := ContainerLoaderLog{
+		ID:           uuid.New(),
+		ContainerID:  in.ContainerID,
+		FromLoaderID: c.LoaderID,
+		ToLoaderID:   in.LoaderID,
+		Reason:       in.Reason,
+		AssignedBy:   in.AssignedBy,
+		AssignedAt:   svc.now(),
+	}
+	if err := svc.s.updateContainerLoader(ctx, in.ContainerID, in.LoaderID, entry); err != nil {
+		return Container{}, err
+	}
+	c.LoaderID = in.LoaderID
+	return c, nil
+}
+
+func (svc *service) ListLoaderLog(ctx context.Context, containerID uuid.UUID) ([]ContainerLoaderLog, error) {
+	if containerID == uuid.Nil {
+		return nil, domain.NewBizError(domain.ErrInvalidInput, "container_id is required")
+	}
+	if _, err := svc.s.selectContainerByID(ctx, containerID); err != nil {
+		return nil, err
+	}
+	return svc.s.selectLoaderLog(ctx, containerID)
+}
+
+// ── Packing list Excel export (#18) ─────────────────────────────────────────
+
+func (svc *service) ExportPackingList(ctx context.Context, id uuid.UUID, w io.Writer) error {
+	if id == uuid.Nil {
+		return domain.NewBizError(domain.ErrInvalidInput, "container id is required")
+	}
+	c, err := svc.s.selectContainerByID(ctx, id)
+	if err != nil {
+		return err
+	}
+	if c.Status != ContainerStatusSealed {
+		return domain.NewBizError(domain.ErrPreconditionFailed,
+			fmt.Sprintf("packing list only available for SEALED containers (current status: %s)", c.Status))
+	}
+	lines, err := svc.s.selectContainerLines(ctx, id)
+	if err != nil {
+		return fmt.Errorf("select container lines: %w", err)
+	}
+	return buildPackingListXLSX(c, lines, w)
+}
+
+func buildPackingListXLSX(c Container, lines []ContainerLine, w io.Writer) error {
+	f := excelize.NewFile()
+	defer func() { _ = f.Close() }()
+
+	sheet := "Packing List"
+	if err := f.SetSheetName("Sheet1", sheet); err != nil {
+		return fmt.Errorf("rename sheet: %w", err)
+	}
+
+	bold, err := f.NewStyle(&excelize.Style{Font: &excelize.Font{Bold: true}})
+	if err != nil {
+		return fmt.Errorf("bold style: %w", err)
+	}
+
+	// ── Meta block (rows 1–4) ────────────────────────────────────────────
+	meta := []struct{ label, value string }{
+		{"Container", c.Code},
+		{"Vessel", containerVesselName(c)},
+		{"Cutoff Date", containerCutoffStr(c)},
+		{"Seal Date", containerSealDateStr(c)},
+	}
+	for i, m := range meta {
+		row := fmt.Sprintf("%d", i+1)
+		_ = f.SetCellStyle(sheet, "A"+row, "A"+row, bold)
+		_ = f.SetCellValue(sheet, "A"+row, m.label)
+		_ = f.SetCellValue(sheet, "B"+row, m.value)
+	}
+
+	// ── Column headers (row 6) ───────────────────────────────────────────
+	headers := []string{"No.", "SKU Code", "SKU Name", "Qty", "CBM Total", "Weight KG"}
+	for col, h := range headers {
+		cell, _ := excelize.CoordinatesToCellName(col+1, 6)
+		_ = f.SetCellStyle(sheet, cell, cell, bold)
+		_ = f.SetCellValue(sheet, cell, h)
+	}
+
+	// ── Data rows (from row 7) ───────────────────────────────────────────
+	for i, l := range lines {
+		row := i + 7
+		skuName := l.SKUName
+		if skuName == "" {
+			skuName = l.SKUCode
+		}
+		values := []any{i + 1, l.SKUCode, skuName, l.Qty, l.CBMTotal, l.WeightKGTotal}
+		for col, v := range values {
+			cell, _ := excelize.CoordinatesToCellName(col+1, row)
+			_ = f.SetCellValue(sheet, cell, v)
+		}
+	}
+
+	_ = f.SetColWidth(sheet, "A", "A", 6)
+	_ = f.SetColWidth(sheet, "B", "B", 16)
+	_ = f.SetColWidth(sheet, "C", "C", 32)
+	_ = f.SetColWidth(sheet, "D", "D", 8)
+	_ = f.SetColWidth(sheet, "E", "F", 14)
+
+	return f.Write(w)
+}
+
+func containerVesselName(c Container) string {
+	// VesselName is not on Container struct — vessel info is on the vessel row.
+	// cutoff_date is denormalized; vessel name is not. Return the vessel ID
+	// string as a fallback when the FE has it from context.
+	if c.VesselID != nil {
+		return c.VesselID.String()
+	}
+	return ""
+}
+
+func containerCutoffStr(c Container) string {
+	if c.CutoffDate == nil {
+		return ""
+	}
+	return c.CutoffDate.Format("2006-01-02")
+}
+
+func containerSealDateStr(c Container) string {
+	if c.SealedAt == nil {
+		return ""
+	}
+	return c.SealedAt.Format("2006-01-02")
+}
+
+// ── Destination reassignment (#17) ─────────────────────────────────────────
+
+// ChangeDestination updates destination_code/name on a container (BR-D24).
+// BR-D25: SEALED/SHIPPED containers refuse the change.
+// BR-D26: when destination_code changes, vessel_id + cutoff_date are cleared
+// atomically so planners must rebook — a cleared booking is surfaced by
+// the at-risk dashboard (no cutoff = no risk window = invisible to at-risk).
+// Reason is required when the container already has a destination and the new
+// code differs from the current one.
+func (svc *service) ChangeDestination(ctx context.Context, in ChangeDestinationInput) (Container, error) {
+	if in.ContainerID == uuid.Nil {
+		return Container{}, domain.NewBizError(domain.ErrInvalidInput, "container_id is required")
+	}
+	if in.ActorID == uuid.Nil {
+		return Container{}, domain.NewBizError(domain.ErrInvalidInput, "actor_id is required")
+	}
+	if reasonBlank(in.DestinationCode) {
+		return Container{}, domain.NewBizError(domain.ErrInvalidInput, "destination_code is required")
+	}
+
+	c, err := svc.s.selectContainerByID(ctx, in.ContainerID)
+	if err != nil {
+		return Container{}, err
+	}
+
+	// BR-D25: sealed/shipped containers must not have destination changed.
+	switch c.Status {
+	case ContainerStatusSealed, ContainerStatusShipped:
+		return Container{}, domain.NewBizError(domain.ErrInvalidTransition,
+			"cannot change destination after container is "+c.Status+" (BR-D25)")
+	}
+
+	// BR-D26: destination change → auto-clear vessel booking.
+	isReassign := c.DestinationCode != "" && c.DestinationCode != in.DestinationCode
+	if isReassign && reasonBlank(in.Reason) {
+		return Container{}, domain.NewBizError(domain.ErrInvalidInput,
+			"reason is required when changing destination (BR-D24)")
+	}
+	clearVessel := isReassign && (c.VesselID != nil)
+
+	entry := ContainerRouteChangeLog{
+		ID:          uuid.New(),
+		ContainerID: in.ContainerID,
+		FromDC:      c.DestinationCode,
+		ToDC:        in.DestinationCode,
+		FromDest:    c.DestinationName,
+		ToDest:      in.DestinationName,
+		Reason:      in.Reason,
+		ActorID:     in.ActorID,
+		ChangedAt:   svc.now(),
+	}
+	if err := svc.s.changeDestinationTx(ctx, in.ContainerID, in.DestinationCode, in.DestinationName, clearVessel, entry); err != nil {
+		return Container{}, err
+	}
+
+	c.DestinationCode = in.DestinationCode
+	c.DestinationName = in.DestinationName
+	if clearVessel {
+		c.VesselID = nil
+		c.CutoffDate = nil
+	}
+	return c, nil
+}
+
+func (svc *service) ListRouteLog(ctx context.Context, containerID uuid.UUID) ([]ContainerRouteChangeLog, error) {
+	if containerID == uuid.Nil {
+		return nil, domain.NewBizError(domain.ErrInvalidInput, "container_id is required")
+	}
+	if _, err := svc.s.selectContainerByID(ctx, containerID); err != nil {
+		return nil, err
+	}
+	return svc.s.selectRouteLog(ctx, containerID)
 }

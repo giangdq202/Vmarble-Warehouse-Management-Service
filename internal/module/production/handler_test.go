@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -28,6 +29,9 @@ func (stubService) GetWorkOrder(context.Context, uuid.UUID) (WorkOrder, error) {
 }
 func (s stubService) ListWorkOrders(context.Context, httpkit.PageParams, WorkOrderListFilter) (httpkit.PagedResult[WorkOrder], error) {
 	return s.listResult, nil
+}
+func (stubService) ListWorkOrdersKeyset(context.Context, httpkit.CursorParams, WorkOrderListFilter) (httpkit.CursorResult[WorkOrder], error) {
+	return httpkit.CursorResult[WorkOrder]{}, nil
 }
 func (stubService) ListWorkOrdersByPlan(context.Context, uuid.UUID) ([]WorkOrder, error) {
 	panic("unexpected call")
@@ -93,6 +97,39 @@ func (stubService) ListStatusesByPlan(context.Context, uuid.UUID) ([]domain.Work
 }
 func (stubService) CancelPlannedByPlan(context.Context, uuid.UUID) (int64, error) {
 	panic("unexpected call")
+}
+func (stubService) CheckFeasibility(context.Context, uuid.UUID) (WOFeasibilityResult, error) {
+	panic("unexpected call")
+}
+func (stubService) BoostWOPriority(context.Context, BoostWOPriorityInput) (BoostWOPriorityResult, error) {
+	panic("unexpected call")
+}
+func (stubService) ListWOPreemptCandidates(context.Context, uuid.UUID) ([]WOPreemptCandidate, error) {
+	panic("unexpected call")
+}
+func (stubService) PreemptWO(context.Context, PreemptWOInput) (PreemptWOResult, error) {
+	panic("unexpected call")
+}
+func (stubService) ExportWorkOrders(context.Context, httpkit.PageParams, WorkOrderListFilter, io.Writer) error {
+	panic("unexpected call")
+}
+func (stubService) ReassignWorkOrder(context.Context, ReassignWorkOrderInput) (WorkOrder, error) {
+	panic("unexpected call")
+}
+func (stubService) ClaimWorkOrder(context.Context, ClaimWorkOrderInput) (WorkOrder, error) {
+	panic("unexpected call")
+}
+func (stubService) UpdateQCStatus(context.Context, uuid.UUID, string) error {
+	panic("unexpected call")
+}
+func (stubService) CreateBlocker(context.Context, CreateBlockerInput) (WOBlocker, error) {
+	return WOBlocker{}, nil
+}
+func (stubService) ResolveBlocker(context.Context, ResolveBlockerInput) (WOBlocker, error) {
+	return WOBlocker{}, nil
+}
+func (stubService) ListBlockers(context.Context, uuid.UUID) ([]WOBlocker, error) {
+	return nil, nil
 }
 
 var _ Service = stubService{}

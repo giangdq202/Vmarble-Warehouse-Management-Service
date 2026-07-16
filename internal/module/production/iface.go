@@ -2,6 +2,7 @@ package production
 
 import (
 	"context"
+	"io"
 	"time"
 
 	"github.com/google/uuid"
@@ -54,8 +55,14 @@ type WorkOrder struct {
 	// ShortfallReason explains why the WO came up short. One of
 	// MATERIAL_SHORTAGE | DEFECT | TIME_SHORTAGE | OTHER. Set together with
 	// ActualQty; both nil for full COMPLETED transitions.
-	ShortfallReason *string   `json:"shortfall_reason,omitempty"`
-	CreatedAt       time.Time `json:"created_at"`
+	ShortfallReason *string `json:"shortfall_reason,omitempty"`
+	// PriorityBoost marks that a planner has manually elevated this WO's
+	// scheduling priority (BR-PL05). Set by BoostPriority; never cleared.
+	PriorityBoost bool `json:"priority_boost"`
+	// QCStatus is the denormalized last QC result for this work order.
+	// Nil means no QC scan has been recorded yet.
+	QCStatus  *string   `json:"qc_status,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
 }
 
 type WorkOrderListFilter struct {
@@ -193,9 +200,21 @@ type AssignWorkOrderInput struct {
 	UserID      uuid.UUID
 }
 
+// ReassignWorkOrderInput is the payload for admin-forced WO reassignment (BE #21).
+// Reason is mandatory — stored in wo_reassign_log for audit.
+type ReassignWorkOrderInput struct {
+	WorkOrderID uuid.UUID  `json:"-"`
+	NewUserID   uuid.UUID  `json:"new_user_id"`
+	Reason      string     `json:"reason"`
+	ActorID     uuid.UUID  `json:"-"` // from JWT claims
+}
 
-
-// AdvanceStatusInput is the request to advance a work order's status.
+// ClaimWorkOrderInput is the payload for CNC self-claim (BE #21).
+// The WO must be PLANNED and unassigned; a SELECT FOR UPDATE prevents races.
+type ClaimWorkOrderInput struct {
+	WorkOrderID uuid.UUID `json:"-"`
+	UserID      uuid.UUID `json:"-"` // from JWT claims
+}
 // SheetID is optional — when provided and the target status is IN_CUTTING,
 // the sheet will be pre-assigned to the work order before the transition.
 // CallerID is optional — when provided and the target status is IN_CUTTING,
@@ -261,8 +280,11 @@ type Service interface {
 	CreateWorkOrder(ctx context.Context, in CreateWOInput) (WorkOrder, error)
 	GetWorkOrder(ctx context.Context, woID uuid.UUID) (WorkOrder, error)
 	ListWorkOrders(ctx context.Context, p httpkit.PageParams, f WorkOrderListFilter) (httpkit.PagedResult[WorkOrder], error)
+	ListWorkOrdersKeyset(ctx context.Context, p httpkit.CursorParams, f WorkOrderListFilter) (httpkit.CursorResult[WorkOrder], error)
 	ListWorkOrdersByPlan(ctx context.Context, planID uuid.UUID) ([]WorkOrder, error)
 	ListWorkOrdersByAssignee(ctx context.Context, userID uuid.UUID) ([]WorkOrder, error)
+	// ExportWorkOrders writes up to limit WorkOrders as an .xlsx workbook to w.
+	ExportWorkOrders(ctx context.Context, p httpkit.PageParams, f WorkOrderListFilter, w io.Writer) error
 	AdvanceStatus(ctx context.Context, woID uuid.UUID, in AdvanceStatusInput) error
 	// PartialComplete transitions IN_PROCESSING → PARTIAL_COMPLETE with an
 	// actual_qty < quantity, optionally spawning a carry-over WO for the
@@ -273,6 +295,16 @@ type Service interface {
 	ListConsumptions(ctx context.Context, woID uuid.UUID) ([]ConsumptionRecord, error)
 	AssignWorkOrder(ctx context.Context, in AssignWorkOrderInput) (WorkOrder, error)
 	SuggestAssignment(ctx context.Context, woID uuid.UUID) (SuggestAssignmentResult, error)
+	// ReassignWorkOrder allows an admin to forcibly reassign any IN_CUTTING or
+	// IN_PROCESSING work order to a different CNC operator, with a mandatory
+	// reason logged to wo_reassign_log.
+	ReassignWorkOrder(ctx context.Context, in ReassignWorkOrderInput) (WorkOrder, error)
+	// ClaimWorkOrder allows a CNC operator to self-assign a PLANNED, unassigned
+	// work order. Uses SELECT FOR UPDATE to guard against concurrent claims.
+	ClaimWorkOrder(ctx context.Context, in ClaimWorkOrderInput) (WorkOrder, error)
+	// UpdateQCStatus writes the denormalized qc_status column. Called from the
+	// barcode module's WorkOrderGateway adapter after a QC scan is recorded.
+	UpdateQCStatus(ctx context.Context, woID uuid.UUID, status string) error
 
 	// Machine management
 	CreateMachine(ctx context.Context, in CreateMachineInput) (Machine, error)
@@ -310,4 +342,115 @@ type Service interface {
 	// CANCELED in a single SQL UPDATE and returns the affected row count.
 	// Intended only for the planning cascade-cancel flow.
 	CancelPlannedByPlan(ctx context.Context, planID uuid.UUID) (int64, error)
+
+	// Smart re-allocation (BE #2, BR-PL01–BR-PL09)
+	CheckFeasibility(ctx context.Context, woID uuid.UUID) (WOFeasibilityResult, error)
+	BoostWOPriority(ctx context.Context, in BoostWOPriorityInput) (BoostWOPriorityResult, error)
+	ListWOPreemptCandidates(ctx context.Context, woID uuid.UUID) ([]WOPreemptCandidate, error)
+	PreemptWO(ctx context.Context, in PreemptWOInput) (PreemptWOResult, error)
+
+	// WO Blockers (#35) — block AdvanceStatus when external issues exist
+	CreateBlocker(ctx context.Context, in CreateBlockerInput) (WOBlocker, error)
+	ResolveBlocker(ctx context.Context, in ResolveBlockerInput) (WOBlocker, error)
+	ListBlockers(ctx context.Context, woID uuid.UUID) ([]WOBlocker, error)
+}
+
+// WOFeasibilityResult is the production module's view of a feasibility check.
+type WOFeasibilityResult struct {
+	Feasible    bool
+	Reason      string
+	Suggestions []WOFeasibilitySuggestion
+}
+
+// WOFeasibilitySuggestion is one scored alternative WO (BR-PL02/03).
+type WOFeasibilitySuggestion struct {
+	WOID      uuid.UUID
+	SKUCode   string
+	Score     float64
+	DaysToDue int
+	FreedQty  int
+}
+
+// BoostWOPriorityInput carries the parameters for BoostWOPriority.
+type BoostWOPriorityInput struct {
+	WOID    uuid.UUID
+	Reason  string
+	ActorID uuid.UUID
+}
+
+// BoostWOPriorityResult is the audit stamp returned by BoostWOPriority.
+type BoostWOPriorityResult struct {
+	BoostedAt time.Time
+	AuditID   uuid.UUID
+}
+
+// WOPreemptCandidate is one work order that can be preempted.
+type WOPreemptCandidate struct {
+	WOID          uuid.UUID
+	Status        string
+	CurrentSOCode string
+	SlackDays     int
+	FreedQty      int
+}
+
+// PreemptWOInput carries the parameters for PreemptWO.
+type PreemptWOInput struct {
+	ToWOID     uuid.UUID
+	FromWOID   uuid.UUID
+	MaterialID uuid.UUID
+	Reason     string
+	ActorID    uuid.UUID
+}
+
+// PreemptWOResult is the audit stamp returned by PreemptWO.
+type PreemptWOResult struct {
+	PreemptedAt time.Time
+	AuditID     uuid.UUID
+	FreedQty    int
+}
+
+// ── WO Blockers (#35) ────────────────────────────────────────────────────────
+
+// BlockerReason enumerates the valid reasons for blocking a work order.
+type BlockerReason string
+
+const (
+	BlockerMaterialDelayed  BlockerReason = "MATERIAL_DELAYED"
+	BlockerMaterialRejected BlockerReason = "MATERIAL_REJECTED"
+	BlockerMachineDown      BlockerReason = "MACHINE_DOWN"
+	BlockerOther            BlockerReason = "OTHER"
+)
+
+func (r BlockerReason) Valid() bool {
+	switch r {
+	case BlockerMaterialDelayed, BlockerMaterialRejected, BlockerMachineDown, BlockerOther:
+		return true
+	}
+	return false
+}
+
+// WOBlocker represents a blocking reason on a work order.
+type WOBlocker struct {
+	ID          uuid.UUID      `json:"id"`
+	WorkOrderID uuid.UUID      `json:"work_order_id"`
+	Reason      BlockerReason  `json:"reason"`
+	Detail      string         `json:"detail"`
+	CreatedBy   uuid.UUID      `json:"created_by"`
+	CreatedAt   time.Time      `json:"created_at"`
+	ResolvedBy  *uuid.UUID     `json:"resolved_by,omitempty"`
+	ResolvedAt  *time.Time     `json:"resolved_at,omitempty"`
+}
+
+// CreateBlockerInput is the input for creating a new WO blocker.
+type CreateBlockerInput struct {
+	WorkOrderID uuid.UUID     `json:"work_order_id"`
+	Reason      BlockerReason `json:"reason" binding:"required"`
+	Detail      string        `json:"detail"`
+	CreatedBy   uuid.UUID     `json:"-"`
+}
+
+// ResolveBlockerInput is the input for resolving a WO blocker.
+type ResolveBlockerInput struct {
+	BlockerID  uuid.UUID `json:"blocker_id"`
+	ResolvedBy uuid.UUID `json:"-"`
 }

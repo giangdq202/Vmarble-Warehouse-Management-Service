@@ -23,6 +23,7 @@ type service struct {
 	woa                  WorkOrderAdvancer
 	bcg                  BarcodeGenerator
 	notifier             CutNotifier
+	prCreator            PurchaseRequestCreator
 	overflowThresholdPct float64
 }
 
@@ -53,6 +54,15 @@ func NewServiceFull(st store, woa WorkOrderAdvancer, bcg BarcodeGenerator, notif
 		thresholdPct = defaultOverflowThresholdPct
 	}
 	return &service{st: st, woa: woa, bcg: bcg, notifier: notifier, overflowThresholdPct: thresholdPct}
+}
+
+// NewServiceWithAllDeps wires all optional dependencies including the
+// purchase-request creator for auto-PR-on-rejection (BE #37).
+func NewServiceWithAllDeps(st store, woa WorkOrderAdvancer, bcg BarcodeGenerator, notifier CutNotifier, prCreator PurchaseRequestCreator, thresholdPct float64) Service {
+	if thresholdPct <= 0 || thresholdPct > 100 {
+		thresholdPct = defaultOverflowThresholdPct
+	}
+	return &service{st: st, woa: woa, bcg: bcg, notifier: notifier, prCreator: prCreator, overflowThresholdPct: thresholdPct}
 }
 
 func (s *service) ReceiveStock(ctx context.Context, in ReceiveStockInput) (InventoryLot, error) {
@@ -96,12 +106,18 @@ func (s *service) ReceiveStock(ctx context.Context, in ReceiveStockInput) (Inven
 	return lot, nil
 }
 
-func (s *service) ListLots(ctx context.Context, p httpkit.PageParams) (httpkit.PagedResult[InventoryLot], error) {
-	items, total, err := s.st.selectLotsPaged(ctx, p)
+func (s *service) ListLots(ctx context.Context, p httpkit.CursorParams, search string) (httpkit.CursorResult[InventoryLot], error) {
+	cur, err := p.Decoded()
 	if err != nil {
-		return httpkit.PagedResult[InventoryLot]{}, err
+		return httpkit.CursorResult[InventoryLot]{}, domain.NewBizError(domain.ErrInvalidInput, "invalid cursor")
 	}
-	return httpkit.NewPagedResult(items, total, p), nil
+	rows, err := s.st.selectLotsKeyset(ctx, search, cur, p.Limit+1)
+	if err != nil {
+		return httpkit.CursorResult[InventoryLot]{}, err
+	}
+	return httpkit.NewCursorResult(rows, p.Limit, func(l InventoryLot) httpkit.Cursor {
+		return httpkit.Cursor{Ts: l.ReceivedAt, ID: l.ID}
+	}), nil
 }
 
 func (s *service) DeactivateLot(ctx context.Context, lotID uuid.UUID) error {
@@ -465,7 +481,51 @@ func (s *service) SuggestRemnants(ctx context.Context, in SuggestRemnantsInput) 
 	if limit > maxSuggestionLimit {
 		limit = maxSuggestionLimit
 	}
-	return s.st.selectTopRemnantSuggestions(ctx, in.RequiredDimension, limit)
+
+	strategy := in.Strategy
+	if strategy == "" {
+		if in.MaterialID != nil {
+			mat, err := s.st.selectMaterialStrategy(ctx, *in.MaterialID)
+			if err == nil {
+				strategy = mat
+			}
+		}
+		if strategy == "" {
+			strategy = RemnantStrategyBestFit
+		}
+	}
+	if strategy != RemnantStrategyBestFit && strategy != RemnantStrategyFIFO {
+		return nil, domain.NewBizError(domain.ErrInvalidInput, "strategy must be best_fit or fifo")
+	}
+
+	sugs, err := s.st.selectTopRemnantSuggestions(ctx, in.RequiredDimension, limit, strategy, in.MaterialID)
+	if err != nil {
+		return nil, err
+	}
+
+	reqArea := in.RequiredDimension.LengthMM * in.RequiredDimension.WidthMM
+	for i := range sugs {
+		r := &sugs[i]
+		bbL := r.Remnant.Dimensions.LengthMM
+		bbW := r.Remnant.Dimensions.WidthMM
+		if r.Remnant.BoundingBoxLengthMM != nil {
+			bbL = int(*r.Remnant.BoundingBoxLengthMM)
+		}
+		if r.Remnant.BoundingBoxWidthMM != nil {
+			bbW = int(*r.Remnant.BoundingBoxWidthMM)
+		}
+		remnantArea := bbL * bbW
+		wasteArea := remnantArea - reqArea
+		if remnantArea > 0 {
+			r.Score = 1.0 - float64(wasteArea)/float64(remnantArea)
+		}
+		if strategy == RemnantStrategyFIFO {
+			r.Reason = fmt.Sprintf("FIFO: remnant is %d days old", r.AgeDays)
+		} else {
+			r.Reason = fmt.Sprintf("best fit: %.0f%% area utilisation", r.Score*100)
+		}
+	}
+	return sugs, nil
 }
 
 func (s *service) AllocateRemnant(ctx context.Context, remnantID uuid.UUID, workOrderID uuid.UUID) error {
@@ -555,6 +615,65 @@ func (s *service) StockRemnant(ctx context.Context, remnantID uuid.UUID, locatio
 
 func (s *service) ReleaseExpiredAllocations(ctx context.Context, before time.Time) (int, error) {
 	n, err := s.st.releaseExpiredAllocations(ctx, before)
+	if err != nil {
+		return 0, err
+	}
+	return int(n), nil
+}
+
+const (
+	defaultAgingWarnDays   = 60
+	defaultAgingExpireDays = 90
+)
+
+func (s *service) GetRemnantAging(ctx context.Context, warnDays, expireDays int) (RemnantAgingSummary, error) {
+	if warnDays <= 0 {
+		warnDays = defaultAgingWarnDays
+	}
+	if expireDays <= 0 {
+		expireDays = defaultAgingExpireDays
+	}
+	if warnDays >= expireDays {
+		return RemnantAgingSummary{}, domain.NewBizError(domain.ErrInvalidInput,
+			"warn_days must be less than expire_days")
+	}
+
+	raw, err := s.st.selectRemnantAging(ctx)
+	if err != nil {
+		return RemnantAgingSummary{}, err
+	}
+
+	summary := RemnantAgingSummary{
+		WarnDays:   warnDays,
+		ExpireDays: expireDays,
+		Rows:       make([]RemnantAgingRow, 0, len(raw)),
+	}
+	for _, r := range raw {
+		level := RemnantAgingOK
+		switch {
+		case r.AgeDays >= expireDays:
+			level = RemnantAgingExpired
+			summary.TotalExpired++
+		case r.AgeDays >= warnDays:
+			level = RemnantAgingAtRisk
+			summary.TotalAtRisk++
+		default:
+			summary.TotalOK++
+		}
+		summary.Rows = append(summary.Rows, RemnantAgingRow{
+			Remnant: r.Remnant,
+			AgeDays: r.AgeDays,
+			Level:   level,
+		})
+	}
+	return summary, nil
+}
+
+func (s *service) ExpireStaleRemnants(ctx context.Context, ageDays int) (int, error) {
+	if ageDays <= 0 {
+		ageDays = defaultAgingExpireDays
+	}
+	n, err := s.st.expireStaleRemnants(ctx, ageDays)
 	if err != nil {
 		return 0, err
 	}
@@ -1340,6 +1459,25 @@ func (s *service) RejectLot(ctx context.Context, in RejectLotInput) (RejectLotRe
 		slog.Warn("inventory: RejectLot audit log failed", "lot_id", in.LotID, "err", err)
 	}
 
+	// Best-effort: auto-create a DRAFT PO to replenish the rejected material.
+	if s.prCreator != nil {
+		lot, lotErr := s.st.selectLotByID(ctx, in.LotID)
+		if lotErr != nil {
+			slog.Warn("inventory: RejectLot could not fetch lot for PR creation", "lot_id", in.LotID, "err", lotErr)
+		} else {
+			if prErr := s.prCreator.CreateFromRejection(ctx, PRFromRejectionInput{
+				RejectionID: rejection.ID,
+				LotID:       in.LotID,
+				MaterialID:  lot.MaterialID,
+				Supplier:    lot.SupplierRef,
+				QtySheets:   in.RejectedQtySheets,
+				ActorID:     in.ActorID,
+			}); prErr != nil {
+				slog.Warn("inventory: RejectLot auto-PR creation failed", "rejection_id", rejection.ID, "err", prErr)
+			}
+		}
+	}
+
 	return RejectLotResult{Rejection: rejection, RejectedSheetIDs: rejectedIDs}, nil
 }
 
@@ -1433,6 +1571,14 @@ func (s *service) UpdateRejectionClaim(ctx context.Context, in UpdateClaimInput)
 		CreatedAt:  now,
 	}); err != nil {
 		slog.Warn("inventory: UpdateRejectionClaim audit log failed", "rejection_id", in.RejectionID, "err", err)
+	}
+
+	// Best-effort: when supplier APPROVES the claim they will replace the
+	// material, so the auto-created PO is no longer needed.
+	if in.ClaimStatus == ClaimStatusApproved && s.prCreator != nil {
+		if cancelErr := s.prCreator.CancelFromRejection(ctx, in.RejectionID); cancelErr != nil {
+			slog.Warn("inventory: UpdateRejectionClaim auto-PR cancel failed", "rejection_id", in.RejectionID, "err", cancelErr)
+		}
 	}
 
 	return updated, nil

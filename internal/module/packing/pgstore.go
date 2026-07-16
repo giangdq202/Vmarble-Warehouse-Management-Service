@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -26,10 +27,14 @@ func NewPGStore(pool *pgxpool.Pool) store {
 
 const fgSelectCols = `
 SELECT fp.id, fp.work_order_id, fp.sku_id, s.code, s.name, fp.barcode_id,
+       COALESCE(b.barcode_code, ''), COALESCE(wo.work_order_code, ''),
        fp.sales_order_line_id, fp.status, fp.container_line_id,
+       fp.component_type, fp.unit_index,
        fp.qc_passed_at, fp.qc_passed_by, fp.created_at
   FROM fg_pool fp
-  JOIN skus s ON s.id = fp.sku_id`
+  JOIN skus s ON s.id = fp.sku_id
+  LEFT JOIN barcodes b ON b.id = fp.barcode_id
+  LEFT JOIN work_orders wo ON wo.id = fp.work_order_id`
 
 type fgScanner interface {
 	Scan(dest ...any) error
@@ -38,7 +43,9 @@ type fgScanner interface {
 func scanFG(r fgScanner) (FGPool, error) {
 	var fg FGPool
 	if err := r.Scan(&fg.ID, &fg.WorkOrderID, &fg.SKUID, &fg.SKUCode, &fg.SKUName,
-		&fg.BarcodeID, &fg.SalesOrderLineID, &fg.Status, &fg.ContainerLineID,
+		&fg.BarcodeID, &fg.BarcodeCode, &fg.WorkOrderCode,
+		&fg.SalesOrderLineID, &fg.Status, &fg.ContainerLineID,
+		&fg.ComponentType, &fg.UnitIndex,
 		&fg.QCPassedAt, &fg.QCPassedBy, &fg.CreatedAt); err != nil {
 		return FGPool{}, err
 	}
@@ -46,6 +53,10 @@ func scanFG(r fgScanner) (FGPool, error) {
 }
 
 func (s *pgStore) insertFGBatch(ctx context.Context, rows []FGPool) error {
+	return s.insertFGBatchWithAllocations(ctx, rows, nil)
+}
+
+func (s *pgStore) insertFGBatchWithAllocations(ctx context.Context, rows []FGPool, allocs []Allocation) error {
 	if len(rows) == 0 {
 		return nil
 	}
@@ -59,10 +70,21 @@ func (s *pgStore) insertFGBatch(ctx context.Context, rows []FGPool) error {
 		if _, err := tx.Exec(ctx,
 			`INSERT INTO fg_pool
 			    (id, work_order_id, sku_id, barcode_id, sales_order_line_id,
-			     status, container_line_id, qc_passed_at, qc_passed_by, created_at)
-			 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+			     status, container_line_id, component_type, unit_index,
+			     qc_passed_at, qc_passed_by, created_at)
+			 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
 			r.ID, r.WorkOrderID, r.SKUID, r.BarcodeID, r.SalesOrderLineID,
-			r.Status, r.ContainerLineID, r.QCPassedAt, r.QCPassedBy, r.CreatedAt,
+			r.Status, r.ContainerLineID, r.ComponentType, r.UnitIndex,
+			r.QCPassedAt, r.QCPassedBy, r.CreatedAt,
+		); err != nil {
+			return err
+		}
+	}
+	for _, a := range allocs {
+		if _, err := tx.Exec(ctx,
+			`INSERT INTO allocations (id, fg_pool_id, sales_order_line_id, allocation_type, created_at)
+			 VALUES ($1,$2,$3,$4,$5)`,
+			a.ID, a.FGPoolID, a.SalesOrderLineID, a.AllocationType, a.CreatedAt,
 		); err != nil {
 			return err
 		}
@@ -126,6 +148,15 @@ func (s *pgStore) selectFGPaged(ctx context.Context, p httpkit.PageParams, f FGL
 	addNullable("fp.sku_id", f.SKUID)
 	addNullable("fp.sales_order_line_id", f.SOLineID)
 	addNullable("fp.work_order_id", f.WorkOrderID)
+
+	if f.From != nil {
+		args = append(args, *f.From)
+		clauses = append(clauses, "fp.created_at >= $"+strconv.Itoa(len(args)))
+	}
+	if f.To != nil {
+		args = append(args, *f.To)
+		clauses = append(clauses, "fp.created_at < $"+strconv.Itoa(len(args)))
+	}
 
 	where := strings.Join(clauses, " AND ")
 
@@ -199,6 +230,82 @@ func (s *pgStore) selectDefectByFGID(ctx context.Context, fgID uuid.UUID) (FGDef
 		return FGDefect{}, err
 	}
 	return d, nil
+}
+
+// selectAvailableFGsBySKU returns up to `limit` AVAILABLE FGs for the given
+// SKU, excluding the defective FG. Rows are sorted by the earliest cutoff_date
+// of any open container that holds the same SO line (ASC NULLS LAST) so the
+// most urgent replacement surfaces first (#19).
+func (s *pgStore) selectAvailableFGsBySKU(ctx context.Context, skuID, excludeID uuid.UUID, limit int) ([]fgSuggestionCandidate, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT fp.id, fp.work_order_id, fp.sku_id, s.code, s.name, fp.barcode_id,
+		        COALESCE(b.barcode_code, ''), COALESCE(wo.work_order_code, ''),
+		        fp.sales_order_line_id, fp.status, fp.container_line_id,
+		        fp.component_type, fp.unit_index,
+		        fp.qc_passed_at, fp.qc_passed_by, fp.created_at,
+		        (SELECT MIN(c.cutoff_date)
+		           FROM container_lines cl
+		           JOIN containers c ON c.id = cl.container_id
+		          WHERE cl.sales_order_line_id = fp.sales_order_line_id
+		            AND c.status NOT IN ('SEALED','CANCELLED')
+		            AND fp.sales_order_line_id IS NOT NULL
+		        ) AS nearest_cutoff
+		   FROM fg_pool fp
+		   JOIN skus s ON s.id = fp.sku_id
+		   LEFT JOIN barcodes b ON b.id = fp.barcode_id
+		   LEFT JOIN work_orders wo ON wo.id = fp.work_order_id
+		  WHERE fp.sku_id = $1
+		    AND fp.status = 'AVAILABLE'
+		    AND fp.id != $2
+		  ORDER BY nearest_cutoff ASC NULLS LAST, fp.created_at ASC, fp.id
+		  LIMIT $3`,
+		skuID, excludeID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []fgSuggestionCandidate
+	for rows.Next() {
+		var fg FGPool
+		var cutoff *time.Time
+		if err := rows.Scan(
+			&fg.ID, &fg.WorkOrderID, &fg.SKUID, &fg.SKUCode, &fg.SKUName,
+			&fg.BarcodeID, &fg.BarcodeCode, &fg.WorkOrderCode,
+			&fg.SalesOrderLineID, &fg.Status, &fg.ContainerLineID,
+			&fg.ComponentType, &fg.UnitIndex,
+			&fg.QCPassedAt, &fg.QCPassedBy, &fg.CreatedAt,
+			&cutoff,
+		); err != nil {
+			return nil, err
+		}
+		out = append(out, fgSuggestionCandidate{FG: fg, CutoffDate: cutoff})
+	}
+	return out, rows.Err()
+}
+
+func (s *pgStore) selectReservedFGsByContainer(ctx context.Context, containerID uuid.UUID) ([]FGPool, error) {
+	rows, err := s.pool.Query(ctx,
+		fgSelectCols+`
+		  JOIN container_lines cl ON cl.id = fp.container_line_id
+		 WHERE cl.container_id = $1
+		   AND fp.status = 'RESERVED'
+		 ORDER BY fp.sku_id, fp.unit_index, fp.component_type`,
+		containerID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []FGPool
+	for rows.Next() {
+		fg, err := scanFG(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, fg)
+	}
+	return out, rows.Err()
 }
 
 // ── Tx surface ──────────────────────────────────────────────────────────────
@@ -380,6 +487,125 @@ func (t *pgTxStore) updateDefectResolution(ctx context.Context, in updateResolut
 	}
 	if tag.RowsAffected() == 0 {
 		return domain.NewBizError(domain.ErrInvalidTransition, "defect already resolved or not found")
+	}
+	return nil
+}
+
+func (t *pgTxStore) updateFGSOLine(ctx context.Context, fgID uuid.UUID, newSOLID *uuid.UUID) error {
+	_, err := t.tx.Exec(ctx,
+		`UPDATE fg_pool SET sales_order_line_id = $2 WHERE id = $1`,
+		fgID, newSOLID,
+	)
+	return err
+}
+
+func (t *pgTxStore) insertReassignLog(ctx context.Context, l FGReassignmentLog) error {
+	_, err := t.tx.Exec(ctx,
+		`INSERT INTO fg_reassignment_log
+		    (id, fg_id, from_sol_id, to_sol_id, actor_id, reason, reassigned_at)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+		l.ID, l.FGID, l.FromSOLID, l.ToSOLID, l.ActorID, l.Reason, l.ReassignedAt,
+	)
+	return err
+}
+
+// ── Allocation reads (non-tx) ────────────────────────────────────────────────
+
+const allocCols = `SELECT id, fg_pool_id, sales_order_line_id, allocation_type,
+       released_by, released_at, created_at FROM allocations`
+
+func scanAllocation(row pgx.Row) (Allocation, error) {
+	var a Allocation
+	err := row.Scan(&a.ID, &a.FGPoolID, &a.SalesOrderLineID, &a.AllocationType,
+		&a.ReleasedBy, &a.ReleasedAt, &a.CreatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return a, domain.ErrNotFound
+	}
+	return a, err
+}
+
+func (s *pgStore) selectAllocationByID(ctx context.Context, id uuid.UUID) (Allocation, error) {
+	return scanAllocation(s.pool.QueryRow(ctx, allocCols+` WHERE id = $1`, id))
+}
+
+func (s *pgStore) selectAllocationByFGID(ctx context.Context, fgID uuid.UUID) (Allocation, error) {
+	return scanAllocation(s.pool.QueryRow(ctx, allocCols+` WHERE fg_pool_id = $1`, fgID))
+}
+
+func (s *pgStore) selectAllocationsBySOLine(ctx context.Context, soLineID uuid.UUID) ([]Allocation, error) {
+	rows, err := s.pool.Query(ctx, allocCols+` WHERE sales_order_line_id = $1 ORDER BY created_at`, soLineID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Allocation
+	for rows.Next() {
+		var a Allocation
+		if err := rows.Scan(&a.ID, &a.FGPoolID, &a.SalesOrderLineID, &a.AllocationType,
+			&a.ReleasedBy, &a.ReleasedAt, &a.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, a)
+	}
+	return out, rows.Err()
+}
+
+func (s *pgStore) insertAllocation(ctx context.Context, a Allocation) error {
+	_, err := s.pool.Exec(ctx,
+		`INSERT INTO allocations (id, fg_pool_id, sales_order_line_id, allocation_type, created_at)
+		 VALUES ($1,$2,$3,$4,$5)`,
+		a.ID, a.FGPoolID, a.SalesOrderLineID, a.AllocationType, a.CreatedAt,
+	)
+	return err
+}
+
+// ── Allocation writes (tx) ───────────────────────────────────────────────────
+
+func (t *pgTxStore) lockAllocationForUpdate(ctx context.Context, id uuid.UUID) (Allocation, error) {
+	return scanAllocation(t.tx.QueryRow(ctx, allocCols+` WHERE id = $1 FOR UPDATE`, id))
+}
+
+func (t *pgTxStore) lockAllocationByFGForUpdate(ctx context.Context, fgID uuid.UUID) (Allocation, error) {
+	return scanAllocation(t.tx.QueryRow(ctx, allocCols+` WHERE fg_pool_id = $1 FOR UPDATE`, fgID))
+}
+
+func (t *pgTxStore) updateAllocationType(ctx context.Context, id uuid.UUID, allocType string, releasedBy *uuid.UUID) error {
+	var err error
+	var rowsAffected int64
+	if releasedBy != nil {
+		tag, e := t.tx.Exec(ctx,
+			`UPDATE allocations SET allocation_type=$2, released_by=$3, released_at=NOW() WHERE id=$1`,
+			id, allocType, releasedBy,
+		)
+		err = e
+		rowsAffected = tag.RowsAffected()
+	} else {
+		tag, e := t.tx.Exec(ctx,
+			`UPDATE allocations SET allocation_type=$2 WHERE id=$1`,
+			id, allocType,
+		)
+		err = e
+		rowsAffected = tag.RowsAffected()
+	}
+	if err != nil {
+		return err
+	}
+	if rowsAffected == 0 {
+		return domain.ErrNotFound
+	}
+	return nil
+}
+
+func (t *pgTxStore) updateAllocationSOLine(ctx context.Context, id uuid.UUID, newSOLID uuid.UUID) error {
+	tag, err := t.tx.Exec(ctx,
+		`UPDATE allocations SET sales_order_line_id=$2 WHERE id=$1`,
+		id, newSOLID,
+	)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return domain.ErrNotFound
 	}
 	return nil
 }

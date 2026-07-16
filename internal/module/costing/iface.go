@@ -26,6 +26,12 @@ type CostingRecord struct {
 	AuxiliaryCost domain.Money `json:"auxiliary_cost"`
 	LaborCost     domain.Money `json:"labor_cost"`
 	TotalCost     domain.Money `json:"total_cost"`
+	// SOCurrency is the ISO-4217 currency of the linked sales order line.
+	// Nil for VND orders or when the WO has no SO link.
+	SOCurrency    *string      `json:"so_currency,omitempty"`
+	// FXRateToVND is the closest-on-or-before-WO-completion rate for SOCurrency.
+	// Nil when SOCurrency is nil or "VND".
+	FXRateToVND   *float64     `json:"fx_rate_to_vnd,omitempty"`
 	Finalized     bool         `json:"finalized"`
 	FinalizedAt   *time.Time   `json:"finalized_at,omitempty"`
 	FinalizedBy   *uuid.UUID   `json:"finalized_by,omitempty"`

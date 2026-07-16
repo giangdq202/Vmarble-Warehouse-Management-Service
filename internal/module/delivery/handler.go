@@ -2,6 +2,7 @@ package delivery
 
 import (
 	"net/http"
+	"strconv"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -25,17 +26,26 @@ func NewHandler(s Service) *Handler {
 func (h *Handler) Register(rg *gin.RouterGroup) {
 	rg.POST("/containers", auth.RequirePlannerUp(), h.create)
 	rg.GET("/containers", h.list)
+	rg.GET("/containers/at-risk", auth.RequirePlannerUp(), h.listAtRisk)
 	rg.GET("/containers/:id", h.get)
 	rg.GET("/containers/:id/status-log", h.statusLog)
 
 	rg.POST("/containers/:id/lines", auth.RequireWorkerUp(), h.addLine)
 	rg.DELETE("/containers/:id/lines/:line_id", auth.RequireWorkerUp(), h.deleteLine)
-	rg.POST("/containers/:id/transfer-line", auth.RequirePlannerUp(), h.transferLine)
+	rg.POST("/containers/:id/transfer-line", auth.RequireWorkerUp(), h.transferLine)
 
 	rg.POST("/containers/:id/seal", auth.RequirePlannerUp(), h.seal)
 	rg.POST("/containers/:id/reopen", auth.RequireAdminOnly(), h.reopen)
 	rg.POST("/containers/:id/ship", auth.RequirePlannerUp(), h.ship)
 	rg.POST("/containers/:id/cancel", auth.RequirePlannerUp(), h.cancel)
+
+	// Loader assignment (#16 / BR-D21/22/23).
+	rg.POST("/containers/:id/assign-loader", auth.RequirePlannerUp(), h.assignLoader)
+	rg.GET("/containers/:id/loader-log", auth.RequirePlannerUp(), h.listLoaderLog)
+
+	// Destination reassignment (#17 / BR-D24/D25/D26).
+	rg.POST("/containers/:id/change-destination", auth.RequirePlannerUp(), h.changeDestination)
+	rg.GET("/containers/:id/route-log", auth.RequirePlannerUp(), h.listRouteLog)
 
 	// Loading plans (#301). Upload requires the planner persona; approve is
 	// admin-only because it locks the version that #291's VERIFY-mode kiosk
@@ -43,6 +53,7 @@ func (h *Handler) Register(rg *gin.RouterGroup) {
 	rg.POST("/containers/:id/loading-plan", auth.RequirePlannerUp(), h.uploadLoadingPlan)
 	rg.GET("/containers/:id/loading-plan", h.getActiveLoadingPlan)
 	rg.GET("/containers/:id/lines-history", h.listLinesHistory)
+	rg.GET("/containers/:id/packing-list", auth.RequirePlannerUp(), h.exportPackingList)
 	rg.GET("/loading-plans/:id", h.getLoadingPlan)
 	rg.GET("/loading-plans/:id/diff", h.diffLoadingPlan)
 	rg.POST("/loading-plans/:id/approve", auth.RequireAdminOnly(), h.approveLoadingPlan)
@@ -86,12 +97,30 @@ func (h *Handler) create(c *gin.Context) {
 // @Param        search          query  string  false  "ILIKE on container code"
 // @Param        status          query  string  false  "filter by status"
 // @Param        container_type  query  string  false  "20GP / 40GP / 40HC"
+// @Param        loader_id       query  string  false  "filter by assigned loader (uuid)"
+// @Param        vessel_id       query  string  false  "filter by vessel (uuid)"
 // @Success      200  {object}  httpkit.PagedResult[Container]
 // @Security     BearerAuth
 // @Router       /api/v1/containers [get]
 func (h *Handler) list(c *gin.Context) {
 	p := httpkit.BindPageParams(c)
 	f := ContainerListFilter{Status: c.Query("status"), ContainerType: c.Query("container_type")}
+	if raw := c.Query("loader_id"); raw != "" {
+		lid, err := uuid.Parse(raw)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid loader_id"})
+			return
+		}
+		f.LoaderID = &lid
+	}
+	if raw := c.Query("vessel_id"); raw != "" {
+		vid, err := uuid.Parse(raw)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid vessel_id"})
+			return
+		}
+		f.VesselID = &vid
+	}
 	res, err := h.svc.ListContainers(c.Request.Context(), p, f)
 	if err != nil {
 		httpkit.Error(c, err)
@@ -176,12 +205,15 @@ func (h *Handler) addLine(c *gin.Context) {
 	}
 	in.ContainerID = id
 	in.AddedBy = callerID(c)
-	line, err := h.svc.AddLine(c.Request.Context(), in)
+	if ident, ok := auth.FromContext(c); ok {
+		in.ActorRole = string(ident.Role)
+	}
+	result, err := h.svc.AddLine(c.Request.Context(), in)
 	if err != nil {
 		httpkit.Error(c, err)
 		return
 	}
-	c.JSON(http.StatusCreated, line)
+	c.JSON(http.StatusCreated, result)
 }
 
 // deleteLine godoc
@@ -239,6 +271,9 @@ func (h *Handler) transferLine(c *gin.Context) {
 	}
 	in.ContainerID = id
 	in.ActorID = callerID(c)
+	if identity, ok := auth.FromContext(c); ok {
+		in.ActorRole = string(identity.Role)
+	}
 	out, err := h.svc.TransferLine(c.Request.Context(), in)
 	if err != nil {
 		httpkit.Error(c, err)
@@ -633,4 +668,181 @@ func (h *Handler) listLinesHistory(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, entries)
+}
+
+// listAtRisk godoc
+//
+// @Summary      List at-risk containers — OPEN/LOADING with cutoff within N days
+// @Description  Returns containers whose cutoff_date is within the next `days`
+// @Description  calendar days (default 7). Overdue containers (cutoff in the past)
+// @Description  are included. Sorted by cutoff_date ASC (most urgent first).
+// @Tags         delivery
+// @Produce      json
+// @Param        days  query  int  false  "look-ahead window in days (default 7)"
+// @Success      200   {array}   AtRiskRow
+// @Security     BearerAuth
+// @Router       /api/v1/containers/at-risk [get]
+func (h *Handler) listAtRisk(c *gin.Context) {
+	days := 0
+	if raw := c.Query("days"); raw != "" {
+		if n, err := strconv.Atoi(raw); err == nil {
+			days = n
+		}
+	}
+	rows, err := h.svc.ListAtRisk(c.Request.Context(), days)
+	if err != nil {
+		httpkit.Error(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, rows)
+}
+
+// assignLoader godoc
+//
+// @Summary      Assign or reassign a loader to a container (BR-D21/D22/D23)
+// @Description  Sets loader_id on the container and writes an audit row. When the
+// @Description  container already has a different loader (reassignment), reason is
+// @Description  mandatory (BR-D22). Send loader_id=null to unassign.
+// @Tags         delivery
+// @Accept       json
+// @Produce      json
+// @Param        id    path      string             true  "container id (uuid)"
+// @Param        body  body      AssignLoaderInput  true  "payload"
+// @Success      200   {object}  Container
+// @Failure      400   {object}  map[string]string
+// @Failure      404   {object}  map[string]string
+// @Security     BearerAuth
+// @Router       /api/v1/containers/{id}/assign-loader [post]
+func (h *Handler) assignLoader(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+	var in AssignLoaderInput
+	if !httpkit.Bind(c, &in) {
+		return
+	}
+	in.ContainerID = id
+	in.AssignedBy = callerID(c)
+	out, err := h.svc.AssignLoader(c.Request.Context(), in)
+	if err != nil {
+		httpkit.Error(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, out)
+}
+
+// listLoaderLog godoc
+//
+// @Summary      Loader assignment audit trail for a container
+// @Tags         delivery
+// @Produce      json
+// @Param        id   path      string  true  "container id (uuid)"
+// @Success      200  {array}   ContainerLoaderLog
+// @Failure      404  {object}  map[string]string
+// @Security     BearerAuth
+// @Router       /api/v1/containers/{id}/loader-log [get]
+func (h *Handler) listLoaderLog(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+	entries, err := h.svc.ListLoaderLog(c.Request.Context(), id)
+	if err != nil {
+		httpkit.Error(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, entries)
+}
+
+// changeDestination godoc
+//
+// @Summary      Change container destination — clears vessel booking if DC changes (BR-D24/D25/D26)
+// @Tags         delivery
+// @Accept       json
+// @Produce      json
+// @Param        id    path      string                    true  "container id (uuid)"
+// @Param        body  body      ChangeDestinationInput    true  "payload"
+// @Success      200   {object}  Container
+// @Failure      400   {object}  map[string]string
+// @Failure      404   {object}  map[string]string
+// @Failure      409   {object}  map[string]string  "container is SEALED/SHIPPED"
+// @Security     BearerAuth
+// @Router       /api/v1/containers/{id}/change-destination [post]
+func (h *Handler) changeDestination(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+	var in ChangeDestinationInput
+	if !httpkit.Bind(c, &in) {
+		return
+	}
+	in.ContainerID = id
+	in.ActorID = callerID(c)
+	out, err := h.svc.ChangeDestination(c.Request.Context(), in)
+	if err != nil {
+		httpkit.Error(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, out)
+}
+
+// listRouteLog godoc
+//
+// @Summary      Destination change audit trail for a container
+// @Tags         delivery
+// @Produce      json
+// @Param        id   path      string  true  "container id (uuid)"
+// @Success      200  {array}   ContainerRouteChangeLog
+// @Failure      404  {object}  map[string]string
+// @Security     BearerAuth
+// @Router       /api/v1/containers/{id}/route-log [get]
+func (h *Handler) listRouteLog(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+	entries, err := h.svc.ListRouteLog(c.Request.Context(), id)
+	if err != nil {
+		httpkit.Error(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, entries)
+}
+
+// exportPackingList godoc
+//
+// @Summary      Download packing list as Excel for a SEALED container
+// @Description  Returns a .xlsx file with container metadata and all loaded lines.
+// @Description  Returns 412 when the container is not yet SEALED.
+// @Tags         delivery
+// @Produce      application/vnd.openxmlformats-officedocument.spreadsheetml.sheet
+// @Param        id  path  string  true  "container id (uuid)"
+// @Success      200
+// @Failure      404  {object}  map[string]string
+// @Failure      412  {object}  map[string]string
+// @Security     BearerAuth
+// @Router       /api/v1/containers/{id}/packing-list [get]
+func (h *Handler) exportPackingList(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+	c.Header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+	c.Header("Content-Disposition", "attachment; filename=packing-list.xlsx")
+	if err := h.svc.ExportPackingList(c.Request.Context(), id, c.Writer); err != nil {
+		// Headers already sent — httpkit.Error would write a second body.
+		// Only set error headers when nothing was written yet. In practice
+		// ExportPackingList checks preconditions before writing any bytes,
+		// so errors arrive before the stream starts.
+		c.Header("Content-Type", "application/json")
+		c.Header("Content-Disposition", "")
+		httpkit.Error(c, err)
+	}
 }

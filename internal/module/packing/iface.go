@@ -49,9 +49,13 @@ type FGPool struct {
 	SKUCode          string     `json:"sku_code,omitempty"`
 	SKUName          string     `json:"sku_name,omitempty"`
 	BarcodeID        uuid.UUID  `json:"barcode_id"`
+	BarcodeCode      string     `json:"barcode_code,omitempty"`
+	WorkOrderCode    string     `json:"work_order_code,omitempty"`
 	SalesOrderLineID *uuid.UUID `json:"sales_order_line_id,omitempty"`
 	Status           string     `json:"status"`
 	ContainerLineID  *uuid.UUID `json:"container_line_id,omitempty"`
+	ComponentType    *string    `json:"component_type,omitempty"`
+	UnitIndex        *int       `json:"unit_index,omitempty"`
 	QCPassedAt       time.Time  `json:"qc_passed_at"`
 	QCPassedBy       uuid.UUID  `json:"qc_passed_by"`
 	CreatedAt        time.Time  `json:"created_at"`
@@ -115,6 +119,34 @@ type ReportDefectInput struct {
 	DetectedBy uuid.UUID `json:"-"`
 }
 
+// ShortfallSuggestion is one actionable suggestion returned after a defect
+// creates a container shortfall. Type is REASSIGN (pool has a same-SKU FG
+// available) or CARRY_OVER_WO (pool empty, suggest new work order).
+type ShortfallSuggestion struct {
+	Type   string     `json:"type"`              // REASSIGN | CARRY_OVER_WO
+	Detail string     `json:"detail"`            // human-readable explanation
+	FGID   *uuid.UUID `json:"fg_id,omitempty"`   // for REASSIGN: candidate FG
+	SKUID  uuid.UUID  `json:"sku_id"`
+	// ContainerCutoffDate is the soonest cutoff among open containers that
+	// still need this FG's SO line. Nil when no container is booked yet.
+	ContainerCutoffDate *time.Time `json:"container_cutoff_date,omitempty"`
+	// DaysToCutoff is the integer number of days from now to
+	// ContainerCutoffDate. Negative means the cutoff has already passed.
+	// Nil when ContainerCutoffDate is nil.
+	DaysToCutoff *int `json:"days_to_cutoff,omitempty"`
+}
+
+const (
+	SuggestionReassign    = "REASSIGN"
+	SuggestionCarryOverWO = "CARRY_OVER_WO"
+)
+
+// DefectReportResult wraps the defect record and shortfall suggestions.
+type DefectReportResult struct {
+	Defect      FGDefect              `json:"defect"`
+	Suggestions []ShortfallSuggestion `json:"suggestions"`
+}
+
 type ResolveDefectInput struct {
 	DefectID   uuid.UUID `json:"-"`
 	Resolution string    `json:"resolution"`
@@ -123,10 +155,12 @@ type ResolveDefectInput struct {
 }
 
 type FGListFilter struct {
-	Status         string
-	SKUID          *uuid.UUID
-	SOLineID       *uuid.UUID
-	WorkOrderID    *uuid.UUID
+	Status      string
+	SKUID       *uuid.UUID
+	SOLineID    *uuid.UUID
+	WorkOrderID *uuid.UUID
+	From        *time.Time
+	To          *time.Time
 }
 
 type Service interface {
@@ -148,7 +182,9 @@ type Service interface {
 	// FG was RESERVED, it is first released from its container_line via the
 	// ContainerLineRemover dep so the line stops counting toward the
 	// container's qty. BR-PK02 / BR-PK03.
-	ReportDefect(ctx context.Context, in ReportDefectInput) (FGDefect, error)
+	// After the defect is recorded, the suggestion engine checks the pool for
+	// same-SKU replacements (REASSIGN) or suggests a carry-over WO if empty.
+	ReportDefect(ctx context.Context, in ReportDefectInput) (DefectReportResult, error)
 
 	// ResolveDefect records the resolution + audit columns and flips fg_pool
 	// status: DISCARD/RETURN_NCC -> DISPOSED, REWORK -> AVAILABLE so the FG
@@ -171,6 +207,29 @@ type Service interface {
 	// fg_pool row whose container_line_id is on the sealed container to
 	// LOADED. Idempotent.
 	MarkLoadedOnSeal(ctx context.Context, containerID uuid.UUID) error
+
+	// CheckComponentsForSeal validates BR-PK-MULTI03: every unit_index in the
+	// container's RESERVED FG rows must have all component_types present. Returns
+	// ErrPreconditionFailed with details when incomplete units are found.
+	CheckComponentsForSeal(ctx context.Context, containerID uuid.UUID) error
+
+	// ReassignFG changes the sales_order_line attribution of an FG in the
+	// pool. Allowed only when the FG is AVAILABLE or RESERVED (not sealed).
+	// The new SOL must reference the same SKU (soft-allocation invariant).
+	// Writes an audit row to fg_reassignment_log.
+	ReassignFG(ctx context.Context, in ReassignFGInput) (ReassignFGResult, error)
+
+	// ReleaseAllocation downgrades an allocation from HARD to SOFT, allowing
+	// the FG to be reserved for a different SO line. Blocked when the FG is
+	// RESERVED (already on a container line).
+	ReleaseAllocation(ctx context.Context, in ReleaseAllocationInput) (Allocation, error)
+
+	// ReassignAllocation changes the SOL on an allocation record and syncs
+	// fg_pool.sales_order_line_id. Blocked when the FG is RESERVED or LOADED.
+	ReassignAllocation(ctx context.Context, in ReassignAllocationInput) (Allocation, error)
+
+	// ListAllocations returns all allocation rows for a given SO line.
+	ListAllocations(ctx context.Context, soLineID uuid.UUID) ([]Allocation, error)
 }
 
 type ReserveInput struct {
@@ -178,4 +237,59 @@ type ReserveInput struct {
 	SalesOrderLineID uuid.UUID
 	Qty             int
 	ContainerLineID uuid.UUID
+}
+
+// FGReassignmentLog is the audit record written by ReassignFG.
+type FGReassignmentLog struct {
+	ID           uuid.UUID  `json:"id"`
+	FGID         uuid.UUID  `json:"fg_id"`
+	FromSOLID    *uuid.UUID `json:"from_sol_id,omitempty"`
+	ToSOLID      uuid.UUID  `json:"to_sol_id"`
+	ActorID      uuid.UUID  `json:"actor_id"`
+	Reason       string     `json:"reason"`
+	ReassignedAt time.Time  `json:"reassigned_at"`
+}
+
+type ReassignFGInput struct {
+	FGID          uuid.UUID `json:"-"`
+	NewSOLineID   uuid.UUID `json:"new_sales_order_line_id"`
+	Reason        string    `json:"reason"`
+	ActorID       uuid.UUID `json:"-"`
+}
+
+type ReassignFGResult struct {
+	FG    FGPool             `json:"fg"`
+	Audit FGReassignmentLog  `json:"audit"`
+}
+
+// ── Allocation types ─────────────────────────────────────────────────────────
+
+const (
+	AllocationTypeHard = "hard"
+	AllocationTypeSoft = "soft"
+)
+
+// Allocation is the explicit link between an FG and the SO line it is
+// destined for. Created automatically (HARD) when a WO completes and an
+// SOL is known. A planner can release to SOFT to allow the FG to serve a
+// different SO.
+type Allocation struct {
+	ID               uuid.UUID  `json:"id"`
+	FGPoolID         uuid.UUID  `json:"fg_pool_id"`
+	SalesOrderLineID uuid.UUID  `json:"sales_order_line_id"`
+	AllocationType   string     `json:"allocation_type"` // hard | soft
+	ReleasedBy       *uuid.UUID `json:"released_by,omitempty"`
+	ReleasedAt       *time.Time `json:"released_at,omitempty"`
+	CreatedAt        time.Time  `json:"created_at"`
+}
+
+type ReleaseAllocationInput struct {
+	AllocationID uuid.UUID `json:"-"`
+	ActorID      uuid.UUID `json:"-"`
+}
+
+type ReassignAllocationInput struct {
+	AllocationID     uuid.UUID `json:"-"`
+	NewSOLineID      uuid.UUID `json:"new_sales_order_line_id"`
+	ActorID          uuid.UUID `json:"-"`
 }

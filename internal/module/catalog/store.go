@@ -23,6 +23,15 @@ type store interface {
 	selectSKUsPaged(ctx context.Context, p httpkit.PageParams) ([]SKU, int, error)
 	selectSKUByID(ctx context.Context, id uuid.UUID) (SKU, error)
 	deactivateSKU(ctx context.Context, id uuid.UUID) error
+	updateSKUExportFields(ctx context.Context, in UpdateSKUInput) (SKU, error)
+
+	upsertSKUComponent(ctx context.Context, in UpsertSKUComponentInput) (SKUComponent, error)
+	selectSKUComponentsBySkuID(ctx context.Context, skuID uuid.UUID) ([]SKUComponent, error)
+	deleteSKUComponent(ctx context.Context, skuID uuid.UUID, componentType string) error
+
+	upsertPackingUnit(ctx context.Context, in UpsertPackingUnitInput) (PackingUnit, error)
+	selectPackingUnitsBySkuID(ctx context.Context, skuID uuid.UUID) ([]PackingUnit, error)
+	deletePackingUnit(ctx context.Context, skuID uuid.UUID, unit string) error
 
 	upsertBOM(ctx context.Context, skuID uuid.UUID, components []BOMComponent) error
 	selectBOMBySKU(ctx context.Context, skuID uuid.UUID) (BOM, error)

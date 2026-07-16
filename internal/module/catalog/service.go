@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"regexp"
 	"time"
 
 	"github.com/google/uuid"
@@ -160,6 +161,101 @@ func (s *service) GetSKU(ctx context.Context, skuID uuid.UUID) (SKU, error) {
 
 func (s *service) DeactivateSKU(ctx context.Context, skuID uuid.UUID) error {
 	return s.st.deactivateSKU(ctx, skuID)
+}
+
+var hsCodeRe = regexp.MustCompile(`^\d{6,10}$`)
+
+// UpdateSKU patches the export/shipping fields of a SKU (BR-SKU02).
+func (s *service) UpdateSKU(ctx context.Context, in UpdateSKUInput) (SKU, error) {
+	if in.SKUID == uuid.Nil {
+		return SKU{}, domain.NewBizError(domain.ErrInvalidInput, "sku_id is required")
+	}
+	if in.HSCode != nil {
+		code := *in.HSCode
+		if code != "" && !hsCodeRe.MatchString(code) {
+			return SKU{}, domain.NewBizError(domain.ErrInvalidInput, "hs_code must be 6-10 digits (BR-SKU02)")
+		}
+	}
+	if in.HeightMM != nil && *in.HeightMM < 0 {
+		return SKU{}, domain.NewBizError(domain.ErrInvalidInput, "height_mm must be non-negative")
+	}
+	if in.WeightKg != nil && *in.WeightKg < 0 {
+		return SKU{}, domain.NewBizError(domain.ErrInvalidInput, "weight_kg must be non-negative")
+	}
+	return s.st.updateSKUExportFields(ctx, in)
+}
+
+// UpsertPackingUnit creates or replaces one (sku_id, unit) row (BR-SKU04/05).
+func (s *service) UpsertPackingUnit(ctx context.Context, in UpsertPackingUnitInput) (PackingUnit, error) {
+	if in.SKUID == uuid.Nil {
+		return PackingUnit{}, domain.NewBizError(domain.ErrInvalidInput, "sku_id is required")
+	}
+	switch in.Unit {
+	case "piece", "set", "carton":
+	default:
+		return PackingUnit{}, domain.NewBizError(domain.ErrInvalidInput, "unit must be one of: piece, set, carton")
+	}
+	if in.PiecesPerUnit < 1 {
+		return PackingUnit{}, domain.NewBizError(domain.ErrInvalidInput, "pieces_per_unit must be >= 1")
+	}
+	if _, err := s.st.selectSKUByID(ctx, in.SKUID); err != nil {
+		return PackingUnit{}, err
+	}
+	return s.st.upsertPackingUnit(ctx, in)
+}
+
+func (s *service) ListPackingUnits(ctx context.Context, skuID uuid.UUID) ([]PackingUnit, error) {
+	if _, err := s.st.selectSKUByID(ctx, skuID); err != nil {
+		return nil, err
+	}
+	units, err := s.st.selectPackingUnitsBySkuID(ctx, skuID)
+	if err != nil {
+		return nil, err
+	}
+	if units == nil {
+		units = []PackingUnit{}
+	}
+	return units, nil
+}
+
+func (s *service) DeletePackingUnit(ctx context.Context, skuID uuid.UUID, unit string) error {
+	return s.st.deletePackingUnit(ctx, skuID, unit)
+}
+
+// ── SKU components (BR-PK-MULTI01) ──────────────────────────────────────────
+
+func (s *service) UpsertSKUComponent(ctx context.Context, in UpsertSKUComponentInput) (SKUComponent, error) {
+	if in.SKUID == uuid.Nil {
+		return SKUComponent{}, domain.NewBizError(domain.ErrInvalidInput, "sku_id is required")
+	}
+	if in.ComponentType == "" {
+		return SKUComponent{}, domain.NewBizError(domain.ErrInvalidInput, "component_type is required")
+	}
+	if in.CbmPerUnit < 0 {
+		return SKUComponent{}, domain.NewBizError(domain.ErrInvalidInput, "cbm_per_unit must be non-negative")
+	}
+	if _, err := s.st.selectSKUByID(ctx, in.SKUID); err != nil {
+		return SKUComponent{}, err
+	}
+	return s.st.upsertSKUComponent(ctx, in)
+}
+
+func (s *service) ListSKUComponents(ctx context.Context, skuID uuid.UUID) ([]SKUComponent, error) {
+	if _, err := s.st.selectSKUByID(ctx, skuID); err != nil {
+		return nil, err
+	}
+	comps, err := s.st.selectSKUComponentsBySkuID(ctx, skuID)
+	if err != nil {
+		return nil, err
+	}
+	if comps == nil {
+		comps = []SKUComponent{}
+	}
+	return comps, nil
+}
+
+func (s *service) DeleteSKUComponent(ctx context.Context, skuID uuid.UUID, componentType string) error {
+	return s.st.deleteSKUComponent(ctx, skuID, componentType)
 }
 
 func (s *service) SetBOM(ctx context.Context, in SetBOMInput) (BOM, error) {

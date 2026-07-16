@@ -1,0 +1,87 @@
+version: 2.1
+
+executors:
+  go-executor:
+    docker:
+      - image: cimg/go:1.25.0
+    environment:
+      # Phục dựng chính xác cấu hình GOCACHE và GOPATH của bạn
+      GOPATH: /home/circleci/project/.go
+      GOCACHE: /home/circleci/project/.go/build-cache
+
+  docker-executor:
+    docker:
+      - image: cimg/base:current
+    environment:
+      # Biến toàn cục y hệt file gitlab-ci.yml
+      IMAGE_NAME: registry.gitlab.com/529-stu/vmarble-warehouse-management-service
+
+jobs:
+  go-build:
+    executor: go-executor
+    steps:
+      - checkout
+      - restore_cache:
+          keys:
+            - go-build-cache-{{ checksum "go.sum" }}
+            - go-build-cache-
+      - run:
+          name: Build project
+          command: go build ./...
+      - save_cache:
+          key: go-build-cache-{{ checksum "go.sum" }}
+          paths:
+            - .go/pkg/mod/
+            - .go/build-cache/
+
+  docker-push:
+    executor: docker-executor
+    steps:
+      - checkout
+      - setup_remote_docker:
+          version: docker24
+      - run:
+          name: Prepare Environment Variables
+          command: |
+            # Tạo biến Short SHA (8 ký tự) tương đương $CI_COMMIT_SHORT_SHA của GitLab
+            echo 'export SHORT_SHA="${CIRCLE_SHA1:0:8}"' >> $BASH_ENV
+      - run:
+          name: Docker Build
+          command: |
+            docker build \
+              -t "${IMAGE_NAME}:sha-${SHORT_SHA}" \
+              -t "${IMAGE_NAME}:stg-latest" \
+              .
+      - run:
+          name: Docker Login
+          command: |
+            # Sử dụng Deploy Token thay cho CI_JOB_TOKEN của GitLab (set trong vwms-secrets)
+            echo "$GITLAB_REGISTRY_TOKEN" | docker login registry.gitlab.com -u "$GITLAB_REGISTRY_USER" --password-stdin
+      - run:
+          name: Docker Push
+          command: |
+            docker push "${IMAGE_NAME}:sha-${SHORT_SHA}"
+            docker push "${IMAGE_NAME}:stg-latest"
+      - run:
+          name: Trigger Deploy Webhook
+          command: |
+            curl -sS -f -X POST "$DOKPLOY_BE_WEBHOOK_URL"
+
+workflows:
+  version: 2
+  vwms_backend_pipeline:
+    jobs:
+      # Tái hiện rule: Merge Request vào dev -> Chạy go-build
+      # CircleCI xử lý việc này bằng cách chạy trên TẤT CẢ nhánh, NGOẠI TRỪ dev.
+      - go-build:
+          filters:
+            branches:
+              ignore: dev
+
+      # Tái hiện rule: Push vào nhánh dev -> Chạy docker-push (và deploy)
+      - docker-push:
+          context: lab-stg
+          filters:
+            branches:
+              only: dev
+

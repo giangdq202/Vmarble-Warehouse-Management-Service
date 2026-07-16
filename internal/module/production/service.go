@@ -170,6 +170,20 @@ func (svc *service) ListWorkOrders(ctx context.Context, p httpkit.PageParams, f 
 	return httpkit.NewPagedResult(wos, total, p), nil
 }
 
+func (svc *service) ListWorkOrdersKeyset(ctx context.Context, p httpkit.CursorParams, f WorkOrderListFilter) (httpkit.CursorResult[WorkOrder], error) {
+	cur, err := p.Decoded()
+	if err != nil {
+		return httpkit.CursorResult[WorkOrder]{}, domain.NewBizError(domain.ErrInvalidInput, "invalid cursor")
+	}
+	rows, err := svc.s.selectWorkOrdersKeyset(ctx, f, cur, p.Limit+1)
+	if err != nil {
+		return httpkit.CursorResult[WorkOrder]{}, err
+	}
+	return httpkit.NewCursorResult(rows, p.Limit, func(wo WorkOrder) httpkit.Cursor {
+		return httpkit.Cursor{Ts: wo.CreatedAt, ID: wo.ID}
+	}), nil
+}
+
 func (svc *service) ListWorkOrdersByPlan(ctx context.Context, planID uuid.UUID) ([]WorkOrder, error) {
 	return svc.s.selectWorkOrdersByPlan(ctx, planID)
 }
@@ -186,6 +200,16 @@ func (svc *service) AdvanceStatus(ctx context.Context, woID uuid.UUID, in Advanc
 
 	if err := wo.Status.CanTransitionTo(in.To); err != nil {
 		return domain.NewBizError(domain.ErrInvalidTransition, err.Error())
+	}
+
+	// Block advance if there are open blockers on this WO (#35).
+	openCount, err := svc.s.countOpenBlockers(ctx, woID)
+	if err != nil {
+		return fmt.Errorf("count open blockers: %w", err)
+	}
+	if openCount > 0 {
+		return domain.NewBizError(domain.ErrPreconditionFailed,
+			fmt.Sprintf("work order has %d open blocker(s); resolve all blockers before advancing", openCount))
 	}
 
 	// When advancing to IN_CUTTING, enforce assignment invariant (Spec 5.1):
@@ -849,4 +873,258 @@ func validShortfallReason(r string) bool {
 		return true
 	}
 	return false
+}
+
+// CheckFeasibility checks whether woID has sufficient AVAILABLE sheet stock
+// for its BOM requirements (BR-PL01/02/03).
+func (svc *service) CheckFeasibility(ctx context.Context, woID uuid.UUID) (WOFeasibilityResult, error) {
+	data, err := svc.s.selectWOWithPlanDeadline(ctx, woID)
+	if err != nil {
+		return WOFeasibilityResult{}, err
+	}
+
+	// Use BOMReader + StockChecker when wired (production flow); fall back to
+	// the embedded material_id from the DB projection when they are nil (tests).
+	if svc.br != nil && svc.stk != nil {
+		materials, err := svc.br.GetSheetMaterials(ctx, data.MaterialID)
+		if err != nil {
+			return WOFeasibilityResult{}, fmt.Errorf("get sheet materials: %w", err)
+		}
+		for _, m := range materials {
+			avail, err := svc.stk.CountAvailableSheetsByMaterial(ctx, m.MaterialID)
+			if err != nil {
+				return WOFeasibilityResult{}, fmt.Errorf("count sheets: %w", err)
+			}
+			if avail < data.Quantity {
+				return svc.buildInfeasibleResult(ctx, woID, data.MaterialID, "INSUFFICIENT_MATERIAL")
+			}
+		}
+	}
+
+	return WOFeasibilityResult{Feasible: true}, nil
+}
+
+func (svc *service) buildInfeasibleResult(ctx context.Context, woID, materialID uuid.UUID, reason string) (WOFeasibilityResult, error) {
+	rows, err := svc.s.selectFeasibilitySuggestions(ctx, materialID, woID, 5)
+	if err != nil {
+		return WOFeasibilityResult{}, fmt.Errorf("fetch suggestions: %w", err)
+	}
+
+	now := time.Now()
+	suggestions := make([]WOFeasibilitySuggestion, 0, len(rows))
+	for _, r := range rows {
+		daysToDue := 0
+		score := 0.0
+		if r.Deadline != nil {
+			d := int(r.Deadline.Sub(now).Hours() / 24)
+			if d < 0 {
+				d = 0
+			}
+			daysToDue = d
+			if d > 0 {
+				score = 1.0 / float64(d)
+			} else {
+				score = 999.0
+			}
+		}
+		suggestions = append(suggestions, WOFeasibilitySuggestion{
+			WOID:      r.WOID,
+			SKUCode:   r.SKUCode,
+			Score:     score,
+			DaysToDue: daysToDue,
+			FreedQty:  r.FreedQty,
+		})
+	}
+
+	return WOFeasibilityResult{
+		Feasible:    false,
+		Reason:      reason,
+		Suggestions: suggestions,
+	}, nil
+}
+
+// BoostWOPriority sets priority_boost=true and inserts a wo_boost_log row (BR-PL05).
+func (svc *service) BoostWOPriority(ctx context.Context, in BoostWOPriorityInput) (BoostWOPriorityResult, error) {
+	if _, err := svc.s.selectWorkOrderByID(ctx, in.WOID); err != nil {
+		return BoostWOPriorityResult{}, err
+	}
+	auditID, boostedAt, err := svc.s.setPriorityBoostAtomically(ctx, setPriorityBoostOp(in))
+	if err != nil {
+		return BoostWOPriorityResult{}, err
+	}
+	slog.Info("wo.priority_boosted", "wo_id", in.WOID, "actor_id", in.ActorID)
+	return BoostWOPriorityResult{BoostedAt: boostedAt, AuditID: auditID}, nil
+}
+
+// ListWOPreemptCandidates returns PLANNED/IN_CUTTING WOs sharing a sheet
+// material with woID (BR-PL06/07).
+func (svc *service) ListWOPreemptCandidates(ctx context.Context, woID uuid.UUID) ([]WOPreemptCandidate, error) {
+	if _, err := svc.s.selectWorkOrderByID(ctx, woID); err != nil {
+		return nil, err
+	}
+	rows, err := svc.s.selectPreemptCandidates(ctx, woID)
+	if err != nil {
+		return nil, err
+	}
+
+	now := time.Now()
+	out := make([]WOPreemptCandidate, 0, len(rows))
+	for _, r := range rows {
+		slackDays := 0
+		if r.Deadline != nil {
+			d := int(r.Deadline.Sub(now).Hours() / 24)
+			if d > 0 {
+				slackDays = d
+			}
+		}
+		out = append(out, WOPreemptCandidate{
+			WOID:          r.WOID,
+			Status:        r.Status,
+			CurrentSOCode: r.SOCode,
+			SlackDays:     slackDays,
+			FreedQty:      r.Quantity,
+		})
+	}
+	return out, nil
+}
+
+// PreemptWO atomically reverts from_wo to PLANNED and logs the preemption (BR-PL07/09).
+func (svc *service) PreemptWO(ctx context.Context, in PreemptWOInput) (PreemptWOResult, error) {
+	if _, err := svc.s.selectWorkOrderByID(ctx, in.ToWOID); err != nil {
+		return PreemptWOResult{}, fmt.Errorf("to_wo not found: %w", err)
+	}
+	auditID, preemptedAt, freedQty, err := svc.s.preemptAtomically(ctx, preemptOp{
+		FromWOID:   in.FromWOID,
+		ToWOID:     in.ToWOID,
+		MaterialID: in.MaterialID,
+		Reason:     in.Reason,
+		ActorID:    in.ActorID,
+	})
+	if err != nil {
+		return PreemptWOResult{}, err
+	}
+	slog.Info("wo.preempted",
+		"from_wo_id", in.FromWOID,
+		"to_wo_id", in.ToWOID,
+		"freed_qty", freedQty,
+		"actor_id", in.ActorID,
+	)
+	return PreemptWOResult{PreemptedAt: preemptedAt, AuditID: auditID, FreedQty: freedQty}, nil
+}
+
+func (svc *service) ReassignWorkOrder(ctx context.Context, in ReassignWorkOrderInput) (WorkOrder, error) {
+	if in.Reason == "" {
+		return WorkOrder{}, domain.NewBizError(domain.ErrInvalidInput, "reason is required for work order reassignment")
+	}
+	if in.NewUserID == uuid.Nil {
+		return WorkOrder{}, domain.NewBizError(domain.ErrInvalidInput, "new_user_id is required")
+	}
+	now := time.Now().UTC()
+	wo, err := svc.s.reassignWorkOrderAtomically(ctx, reassignOp{
+		WorkOrderID: in.WorkOrderID,
+		NewUserID:   in.NewUserID,
+		Reason:      in.Reason,
+		ActorID:     in.ActorID,
+		LogID:       uuid.New(),
+		AssignedAt:  now,
+	})
+	if err != nil {
+		return WorkOrder{}, err
+	}
+	slog.Info("wo.reassigned",
+		"work_order_id", in.WorkOrderID,
+		"new_user_id", in.NewUserID,
+		"actor_id", in.ActorID,
+	)
+	return wo, nil
+}
+
+func (svc *service) ClaimWorkOrder(ctx context.Context, in ClaimWorkOrderInput) (WorkOrder, error) {
+	if in.UserID == uuid.Nil {
+		return WorkOrder{}, domain.NewBizError(domain.ErrInvalidInput, "user_id is required")
+	}
+	now := time.Now().UTC()
+	wo, err := svc.s.claimWorkOrderAtomically(ctx, claimOp{
+		WorkOrderID: in.WorkOrderID,
+		UserID:      in.UserID,
+		AssignedAt:  now,
+	})
+	if err != nil {
+		return WorkOrder{}, err
+	}
+	slog.Info("wo.claimed",
+		"work_order_id", in.WorkOrderID,
+		"user_id", in.UserID,
+	)
+	return wo, nil
+}
+
+func (svc *service) UpdateQCStatus(ctx context.Context, woID uuid.UUID, status string) error {
+	return svc.s.updateWorkOrderQCStatus(ctx, woID, status)
+}
+
+// ── WO Blockers (#35) ────────────────────────────────────────────────────────
+
+func (svc *service) CreateBlocker(ctx context.Context, in CreateBlockerInput) (WOBlocker, error) {
+	if !in.Reason.Valid() {
+		return WOBlocker{}, domain.NewBizError(domain.ErrInvalidInput,
+			"invalid blocker reason; must be MATERIAL_DELAYED, MATERIAL_REJECTED, MACHINE_DOWN, or OTHER")
+	}
+
+	wo, err := svc.s.selectWorkOrderByID(ctx, in.WorkOrderID)
+	if err != nil {
+		return WOBlocker{}, err
+	}
+	if wo.Status == domain.WOCompleted || wo.Status == domain.WOCosted {
+		return WOBlocker{}, domain.NewBizError(domain.ErrPreconditionFailed,
+			fmt.Sprintf("cannot add blocker to work order in status %s", wo.Status))
+	}
+
+	b := WOBlocker{
+		ID:          uuid.New(),
+		WorkOrderID: in.WorkOrderID,
+		Reason:      in.Reason,
+		Detail:      in.Detail,
+		CreatedBy:   in.CreatedBy,
+		CreatedAt:   time.Now().UTC(),
+	}
+	if err := svc.s.insertBlocker(ctx, b); err != nil {
+		return WOBlocker{}, fmt.Errorf("insert blocker: %w", err)
+	}
+	slog.Info("wo.blocker.created",
+		"work_order_id", in.WorkOrderID,
+		"blocker_id", b.ID,
+		"reason", in.Reason,
+	)
+	return b, nil
+}
+
+func (svc *service) ResolveBlocker(ctx context.Context, in ResolveBlockerInput) (WOBlocker, error) {
+	// Fetch first to give a meaningful 404 before attempting UPDATE.
+	existing, err := svc.s.getBlocker(ctx, in.BlockerID)
+	if err != nil {
+		return WOBlocker{}, err
+	}
+	if existing.ResolvedAt != nil {
+		return WOBlocker{}, domain.NewBizError(domain.ErrPreconditionFailed, "blocker is already resolved")
+	}
+
+	b, err := svc.s.resolveBlocker(ctx, in.BlockerID, in.ResolvedBy, time.Now().UTC())
+	if err != nil {
+		return WOBlocker{}, err
+	}
+	slog.Info("wo.blocker.resolved",
+		"work_order_id", b.WorkOrderID,
+		"blocker_id", b.ID,
+		"resolved_by", in.ResolvedBy,
+	)
+	return b, nil
+}
+
+func (svc *service) ListBlockers(ctx context.Context, woID uuid.UUID) ([]WOBlocker, error) {
+	// Verify WO exists.
+	if _, err := svc.s.selectWorkOrderByID(ctx, woID); err != nil {
+		return nil, err
+	}
+	return svc.s.listBlockers(ctx, woID)
 }

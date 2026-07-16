@@ -110,6 +110,18 @@ type mockStore struct {
 	partialCompleteParent WorkOrder
 	partialCompleteCarry  WorkOrder
 	partialCompleteErr    error
+
+	// WO Blockers (#35)
+	insertBlockerErr       error
+	insertBlockerCalled    bool
+	getBlockerResult       WOBlocker
+	getBlockerErr          error
+	resolveBlockerResult   WOBlocker
+	resolveBlockerErr      error
+	listBlockersResult     []WOBlocker
+	listBlockersErr        error
+	countOpenBlockersResult int
+	countOpenBlockersErr    error
 }
 
 func (m *mockStore) insertWorkOrder(_ context.Context, _ WorkOrder) error {
@@ -119,6 +131,9 @@ func (m *mockStore) insertWorkOrder(_ context.Context, _ WorkOrder) error {
 func (m *mockStore) selectWorkOrdersPaged(_ context.Context, _ httpkit.PageParams, f WorkOrderListFilter) ([]WorkOrder, int, error) {
 	m.selectWorkOrdersFilter = f
 	return m.selectWorkOrdersResult, len(m.selectWorkOrdersResult), m.selectWorkOrdersErr
+}
+func (m *mockStore) selectWorkOrdersKeyset(_ context.Context, _ WorkOrderListFilter, _ httpkit.Cursor, _ int) ([]WorkOrder, error) {
+	panic("unexpected call")
 }
 func (m *mockStore) selectWorkOrderByID(_ context.Context, _ uuid.UUID) (WorkOrder, error) {
 	return m.selectWorkOrderByIDResult, m.selectWorkOrderByIDErr
@@ -214,6 +229,49 @@ func (m *mockStore) listStatusesByPlan(_ context.Context, _ uuid.UUID) ([]string
 func (m *mockStore) cancelPlannedByPlan(_ context.Context, _ uuid.UUID) (int64, error) {
 	m.cancelPlannedByPlanCalled = true
 	return m.cancelPlannedByPlanResult, m.cancelPlannedByPlanErr
+}
+func (m *mockStore) selectWOWithPlanDeadline(_ context.Context, _ uuid.UUID) (woFeasibilityData, error) {
+	return woFeasibilityData{}, nil
+}
+func (m *mockStore) selectFeasibilitySuggestions(_ context.Context, _ uuid.UUID, _ uuid.UUID, _ int) ([]woSuggestionRow, error) {
+	return nil, nil
+}
+func (m *mockStore) setPriorityBoostAtomically(_ context.Context, _ setPriorityBoostOp) (uuid.UUID, time.Time, error) {
+	return uuid.Nil, time.Time{}, nil
+}
+func (m *mockStore) selectPreemptCandidates(_ context.Context, _ uuid.UUID) ([]preemptCandidateRow, error) {
+	return nil, nil
+}
+func (m *mockStore) preemptAtomically(_ context.Context, _ preemptOp) (uuid.UUID, time.Time, int, error) {
+	return uuid.Nil, time.Time{}, 0, nil
+}
+
+func (m *mockStore) reassignWorkOrderAtomically(_ context.Context, _ reassignOp) (WorkOrder, error) {
+	return WorkOrder{}, nil
+}
+func (m *mockStore) claimWorkOrderAtomically(_ context.Context, _ claimOp) (WorkOrder, error) {
+	return WorkOrder{}, nil
+}
+func (m *mockStore) updateWorkOrderQCStatus(_ context.Context, _ uuid.UUID, _ string) error {
+	return nil
+}
+
+// blockerStore mock methods
+func (m *mockStore) insertBlocker(_ context.Context, _ WOBlocker) error {
+	m.insertBlockerCalled = true
+	return m.insertBlockerErr
+}
+func (m *mockStore) getBlocker(_ context.Context, _ uuid.UUID) (WOBlocker, error) {
+	return m.getBlockerResult, m.getBlockerErr
+}
+func (m *mockStore) resolveBlocker(_ context.Context, _ uuid.UUID, _ uuid.UUID, _ time.Time) (WOBlocker, error) {
+	return m.resolveBlockerResult, m.resolveBlockerErr
+}
+func (m *mockStore) listBlockers(_ context.Context, _ uuid.UUID) ([]WOBlocker, error) {
+	return m.listBlockersResult, m.listBlockersErr
+}
+func (m *mockStore) countOpenBlockers(_ context.Context, _ uuid.UUID) (int, error) {
+	return m.countOpenBlockersResult, m.countOpenBlockersErr
 }
 
 // mockPlanChecker satisfies PlanChecker.
@@ -332,6 +390,11 @@ func (m *mockRemnantAdvisor) LogRemnantBypass(_ context.Context, in LogRemnantBy
 
 func newSvc(st *mockStore, pc *mockPlanChecker, sc *mockSKUChecker) Service {
 	return NewService(st, pc, sc, &mockUserChecker{}, nil, nil, nil)
+}
+
+// newTestService creates a minimal service suitable for blocker tests.
+func newTestService(st *mockStore) Service {
+	return NewService(st, &mockPlanChecker{}, &mockSKUChecker{}, &mockUserChecker{}, nil, nil, nil)
 }
 
 func newSvcWithUser(st *mockStore, pc *mockPlanChecker, sc *mockSKUChecker, uc *mockUserChecker) Service {
@@ -3388,5 +3451,172 @@ func TestWorkOrderStatus_PartialComplete_Transitions(t *testing.T) {
 	}
 	if err := domain.WOPartialComplete.CanTransitionTo(domain.WOCompleted); err == nil {
 		t.Error("PARTIAL_COMPLETE -> COMPLETED must be rejected")
+	}
+}
+
+// ── WO Blockers (#35) tests ───────────────────────────────────────────────────
+
+func TestCreateBlocker_HappyPath(t *testing.T) {
+	woID := uuid.New()
+	callerID := uuid.New()
+	st := &mockStore{
+		selectWorkOrderByIDResult: WorkOrder{ID: woID, Status: domain.WOPlanned},
+	}
+	svc := newTestService(st)
+	b, err := svc.CreateBlocker(context.Background(), CreateBlockerInput{
+		WorkOrderID: woID,
+		Reason:      BlockerMaterialDelayed,
+		Detail:      "supplier delayed shipment",
+		CreatedBy:   callerID,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if b.WorkOrderID != woID {
+		t.Errorf("work_order_id=%v, want %v", b.WorkOrderID, woID)
+	}
+	if b.Reason != BlockerMaterialDelayed {
+		t.Errorf("reason=%v, want MATERIAL_DELAYED", b.Reason)
+	}
+	if !st.insertBlockerCalled {
+		t.Error("expected insertBlocker to be called")
+	}
+}
+
+func TestCreateBlocker_InvalidReason(t *testing.T) {
+	woID := uuid.New()
+	st := &mockStore{
+		selectWorkOrderByIDResult: WorkOrder{ID: woID, Status: domain.WOPlanned},
+	}
+	svc := newTestService(st)
+	_, err := svc.CreateBlocker(context.Background(), CreateBlockerInput{
+		WorkOrderID: woID,
+		Reason:      BlockerReason("INVALID"),
+		CreatedBy:   uuid.New(),
+	})
+	if err == nil {
+		t.Fatal("expected error for invalid reason, got nil")
+	}
+}
+
+func TestCreateBlocker_CompletedWO_Rejected(t *testing.T) {
+	woID := uuid.New()
+	st := &mockStore{
+		selectWorkOrderByIDResult: WorkOrder{ID: woID, Status: domain.WOCompleted},
+	}
+	svc := newTestService(st)
+	_, err := svc.CreateBlocker(context.Background(), CreateBlockerInput{
+		WorkOrderID: woID,
+		Reason:      BlockerMachineDown,
+		CreatedBy:   uuid.New(),
+	})
+	if err == nil {
+		t.Fatal("expected error for COMPLETED WO, got nil")
+	}
+}
+
+func TestAdvanceStatus_BlockedByOpenBlocker(t *testing.T) {
+	woID := uuid.New()
+	st := &mockStore{
+		selectWorkOrderByIDResult: WorkOrder{ID: woID, Status: domain.WOPlanned, AssignedTo: func() *uuid.UUID { id := uuid.New(); return &id }()},
+		countOpenBlockersResult:   1,
+	}
+	svc := newTestService(st)
+	err := svc.AdvanceStatus(context.Background(), woID, AdvanceStatusInput{
+		To: domain.WOInCutting,
+	})
+	if err == nil {
+		t.Fatal("expected ErrPreconditionFailed due to open blocker, got nil")
+	}
+	if !errors.Is(err, domain.ErrPreconditionFailed) {
+		t.Errorf("expected ErrPreconditionFailed, got %v", err)
+	}
+	if st.updateWorkOrderStatusCalled {
+		t.Error("updateWorkOrderStatus must not be called when blocker exists")
+	}
+}
+
+func TestAdvanceStatus_NoBlockers_Proceeds(t *testing.T) {
+	woID := uuid.New()
+	assignee := uuid.New()
+	st := &mockStore{
+		selectWorkOrderByIDResult: WorkOrder{ID: woID, Status: domain.WOPlanned, AssignedTo: &assignee},
+		countOpenBlockersResult:   0,
+	}
+	svc := newTestService(st)
+	err := svc.AdvanceStatus(context.Background(), woID, AdvanceStatusInput{
+		To:         domain.WOInCutting,
+		CallerID:   &assignee,
+		CallerRole: auth.RoleCNC,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !st.updateWorkOrderStatusCalled {
+		t.Error("expected updateWorkOrderStatus to be called")
+	}
+}
+
+func TestResolveBlocker_HappyPath(t *testing.T) {
+	blockerID := uuid.New()
+	woID := uuid.New()
+	resolverID := uuid.New()
+	now := time.Now().UTC()
+	existing := WOBlocker{ID: blockerID, WorkOrderID: woID, Reason: BlockerMachineDown}
+	resolved := WOBlocker{ID: blockerID, WorkOrderID: woID, Reason: BlockerMachineDown, ResolvedBy: &resolverID, ResolvedAt: &now}
+	st := &mockStore{
+		getBlockerResult:     existing,
+		resolveBlockerResult: resolved,
+	}
+	svc := newTestService(st)
+	b, err := svc.ResolveBlocker(context.Background(), ResolveBlockerInput{
+		BlockerID:  blockerID,
+		ResolvedBy: resolverID,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if b.ResolvedAt == nil {
+		t.Error("expected ResolvedAt to be set")
+	}
+}
+
+func TestResolveBlocker_AlreadyResolved(t *testing.T) {
+	blockerID := uuid.New()
+	now := time.Now().UTC()
+	resolvedBy := uuid.New()
+	existing := WOBlocker{
+		ID:         blockerID,
+		ResolvedBy: &resolvedBy,
+		ResolvedAt: &now,
+	}
+	st := &mockStore{getBlockerResult: existing}
+	svc := newTestService(st)
+	_, err := svc.ResolveBlocker(context.Background(), ResolveBlockerInput{
+		BlockerID:  blockerID,
+		ResolvedBy: uuid.New(),
+	})
+	if err == nil {
+		t.Fatal("expected error for already-resolved blocker, got nil")
+	}
+}
+
+func TestListBlockers_ReturnsAll(t *testing.T) {
+	woID := uuid.New()
+	blockers := []WOBlocker{
+		{ID: uuid.New(), WorkOrderID: woID, Reason: BlockerMaterialDelayed},
+		{ID: uuid.New(), WorkOrderID: woID, Reason: BlockerMachineDown},
+	}
+	st := &mockStore{
+		selectWorkOrderByIDResult: WorkOrder{ID: woID, Status: domain.WOPlanned},
+		listBlockersResult:        blockers,
+	}
+	svc := newTestService(st)
+	result, err := svc.ListBlockers(context.Background(), woID)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(result) != 2 {
+		t.Errorf("expected 2 blockers, got %d", len(result))
 	}
 }

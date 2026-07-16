@@ -84,8 +84,14 @@ type CancelPlanInput struct {
 type Service interface {
 	CreatePlan(ctx context.Context, in CreatePlanInput) (Plan, error)
 	GetPlan(ctx context.Context, planID uuid.UUID) (Plan, error)
-	ListPlans(ctx context.Context, p httpkit.PageParams, status string, from, to *time.Time) (httpkit.PagedResult[Plan], error)
+	ListPlans(ctx context.Context, p httpkit.CursorParams, status, search string, from, to *time.Time) (httpkit.CursorResult[Plan], error)
 	LookupPlans(ctx context.Context, in LookupPlansInput) (httpkit.PagedResult[PlanLookupItem], error)
 	ApprovePlan(ctx context.Context, planID uuid.UUID) error
 	CancelPlan(ctx context.Context, in CancelPlanInput) error
+
+	// Smart re-allocation (BR-PL01–BR-PL09, BE #2)
+	CheckFeasibility(ctx context.Context, woID uuid.UUID) (FeasibilityResult, error)
+	BoostWorkOrderPriority(ctx context.Context, in BoostPriorityInput) (BoostPriorityResult, error)
+	ListPreemptCandidates(ctx context.Context, woID uuid.UUID) ([]PreemptCandidate, error)
+	PreemptWorkOrder(ctx context.Context, in PreemptInput) (PreemptResult, error)
 }

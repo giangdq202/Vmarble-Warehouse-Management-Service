@@ -42,12 +42,14 @@ definitions:
     - ALLOCATED
     - CONSUMED
     - WASTE
+    - EXPIRED
     type: string
     x-enum-varnames:
     - RemnantAvailable
     - RemnantAllocated
     - RemnantConsumed
     - RemnantWaste
+    - RemnantExpired
   github_com_vmarble_warehouse-management-service_internal_domain.WorkOrderStatus:
     enum:
     - PLANNED
@@ -76,6 +78,10 @@ definitions:
         type: array
       next_cursor:
         type: string
+      total:
+        type: integer
+      total_is_estimate:
+        type: boolean
     type: object
   github_com_vmarble_warehouse-management-service_internal_platform_httpkit.CursorResult-internal_module_costing_CostingRecord:
     properties:
@@ -87,6 +93,10 @@ definitions:
         type: array
       next_cursor:
         type: string
+      total:
+        type: integer
+      total_is_estimate:
+        type: boolean
     type: object
   github_com_vmarble_warehouse-management-service_internal_platform_httpkit.CursorResult-internal_module_inventory_AuditLogEntry:
     properties:
@@ -98,6 +108,10 @@ definitions:
         type: array
       next_cursor:
         type: string
+      total:
+        type: integer
+      total_is_estimate:
+        type: boolean
     type: object
   ? github_com_vmarble_warehouse-management-service_internal_platform_httpkit.CursorResult-internal_module_inventory_CuttingRecordReport
   : properties:
@@ -109,6 +123,10 @@ definitions:
         type: array
       next_cursor:
         type: string
+      total:
+        type: integer
+      total_is_estimate:
+        type: boolean
     type: object
   ? github_com_vmarble_warehouse-management-service_internal_platform_httpkit.CursorResult-internal_module_inventory_MaterialRejection
   : properties:
@@ -120,6 +138,10 @@ definitions:
         type: array
       next_cursor:
         type: string
+      total:
+        type: integer
+      total_is_estimate:
+        type: boolean
     type: object
   ? github_com_vmarble_warehouse-management-service_internal_platform_httpkit.CursorResult-internal_module_loading_exception_LoadingException
   : properties:
@@ -131,6 +153,10 @@ definitions:
         type: array
       next_cursor:
         type: string
+      total:
+        type: integer
+      total_is_estimate:
+        type: boolean
     type: object
   github_com_vmarble_warehouse-management-service_internal_platform_httpkit.CursorResult-internal_module_scrap_ScrapSale:
     properties:
@@ -142,6 +168,10 @@ definitions:
         type: array
       next_cursor:
         type: string
+      total:
+        type: integer
+      total_is_estimate:
+        type: boolean
     type: object
   github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_authn_UserDetail:
     properties:
@@ -415,6 +445,23 @@ definitions:
       total_pages:
         type: integer
     type: object
+  github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_shipping_Vessel:
+    properties:
+      current_page:
+        type: integer
+      items:
+        items:
+          $ref: '#/definitions/internal_module_shipping.Vessel'
+        type: array
+      limit:
+        type: integer
+      total_is_estimate:
+        type: boolean
+      total_items:
+        type: integer
+      total_pages:
+        type: integer
+    type: object
   internal_module_authn.CreateUserInput:
     properties:
       email:
@@ -563,6 +610,25 @@ definitions:
     x-enum-varnames:
     - LabelSize50x30
     - LabelSize100x70
+  internal_module_barcode.QCEvent:
+    properties:
+      barcode_id:
+        type: string
+      created_at:
+        type: string
+      id:
+        type: string
+      note:
+        type: string
+      result:
+        $ref: '#/definitions/internal_module_barcode.ScanCheckpoint'
+      scan_event_id:
+        type: string
+      scanned_by:
+        type: string
+      work_order_id:
+        type: string
+    type: object
   internal_module_barcode.RecordScanInput:
     properties:
       checkpoint:
@@ -581,11 +647,15 @@ definitions:
   internal_module_barcode.ScanCheckpoint:
     enum:
     - CNC_COMPLETE
+    - QC_PASSED
+    - QC_FAILED
     - FINISHED_GOODS
     - SHIPPED
     type: string
     x-enum-varnames:
     - CheckpointCNCComplete
+    - CheckpointQCPassed
+    - CheckpointQCFailed
     - CheckpointFinishedGoods
     - CheckpointShipped
   internal_module_barcode.ScanEvent:
@@ -746,14 +816,31 @@ definitions:
     - MaterialTypeGlue
     - MaterialTypeMetal
     - MaterialTypeOther
+  internal_module_catalog.PackingUnit:
+    properties:
+      is_default:
+        type: boolean
+      pieces_per_unit:
+        type: integer
+      sku_id:
+        type: string
+      unit:
+        type: string
+    type: object
   internal_module_catalog.SKU:
     properties:
+      cbm_per_unit:
+        type: number
       code:
         type: string
       created_at:
         type: string
       dimensions:
         $ref: '#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.Dimension'
+      height_mm:
+        type: integer
+      hs_code:
+        type: string
       id:
         type: string
       is_active:
@@ -762,6 +849,8 @@ definitions:
         type: string
       requires_metal:
         type: boolean
+      weight_kg:
+        type: number
     type: object
   internal_module_catalog.SetBOMInput:
     properties:
@@ -778,6 +867,28 @@ definitions:
         type: integer
       min_remnant_width_mm:
         type: integer
+    type: object
+  internal_module_catalog.UpdateSKUInput:
+    properties:
+      heightMM:
+        type: integer
+      hscode:
+        type: string
+      skuid:
+        type: string
+      weightKg:
+        type: number
+    type: object
+  internal_module_catalog.UpsertPackingUnitInput:
+    properties:
+      is_default:
+        type: boolean
+      pieces_per_unit:
+        type: integer
+      sku_id:
+        type: string
+      unit:
+        type: string
     type: object
   internal_module_costing.CostingAdjustment:
     properties:
@@ -814,6 +925,11 @@ definitions:
         type: string
       finalized_by:
         type: string
+      fx_rate_to_vnd:
+        description: |-
+          FXRateToVND is the closest-on-or-before-WO-completion rate for SOCurrency.
+          Nil when SOCurrency is nil or "VND".
+        type: number
       id:
         type: string
       labor_cost:
@@ -821,6 +937,11 @@ definitions:
       material_cost:
         $ref: '#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.Money'
       sku_id:
+        type: string
+      so_currency:
+        description: |-
+          SOCurrency is the ISO-4217 currency of the linked sales order line.
+          Nil for VND orders or when the WO has no SO link.
         type: string
       total_cost:
         $ref: '#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.Money'
@@ -1042,6 +1163,8 @@ definitions:
     type: object
   internal_module_delivery.AddLineInput:
     properties:
+      allow_overload:
+        type: boolean
       cbm_total:
         type: number
       qty:
@@ -1053,6 +1176,48 @@ definitions:
       weight_kg_total:
         type: number
     type: object
+  internal_module_delivery.AssignLoaderInput:
+    properties:
+      loader_id:
+        description: nil = unassign
+        type: string
+      reason:
+        type: string
+    type: object
+  internal_module_delivery.AtRiskRow:
+    properties:
+      code:
+        type: string
+      cutoff_date:
+        type: string
+      days_to_cutoff:
+        type: integer
+      fill_pct_cbm:
+        description: 0–100, 0 when max_cbm=0
+        type: number
+      id:
+        type: string
+      line_count:
+        type: integer
+      max_cbm:
+        type: number
+      risk_level:
+        description: RED | ORANGE
+        type: string
+      used_cbm:
+        type: number
+      vessel_name:
+        type: string
+    type: object
+  internal_module_delivery.ChangeDestinationInput:
+    properties:
+      destination_code:
+        type: string
+      destination_name:
+        type: string
+      reason:
+        type: string
+    type: object
   internal_module_delivery.Container:
     properties:
       code:
@@ -1062,6 +1227,12 @@ definitions:
       created_at:
         type: string
       created_by:
+        type: string
+      cutoff_date:
+        type: string
+      destination_code:
+        type: string
+      destination_name:
         type: string
       fill_pct_cbm:
         type: number
@@ -1076,6 +1247,8 @@ definitions:
         items:
           $ref: '#/definitions/internal_module_delivery.ContainerLine'
         type: array
+      loader_id:
+        type: string
       max_cbm:
         type: number
       max_payload_kg:
@@ -1092,6 +1265,8 @@ definitions:
         type: number
       used_weight_kg:
         type: number
+      vessel_id:
+        type: string
     type: object
   internal_module_delivery.ContainerLine:
     properties:
@@ -1143,6 +1318,44 @@ definitions:
       superseded_by_user:
         type: string
     type: object
+  internal_module_delivery.ContainerLoaderLog:
+    properties:
+      assigned_at:
+        type: string
+      assigned_by:
+        type: string
+      container_id:
+        type: string
+      from_loader_id:
+        type: string
+      id:
+        type: string
+      reason:
+        type: string
+      to_loader_id:
+        type: string
+    type: object
+  internal_module_delivery.ContainerRouteChangeLog:
+    properties:
+      actor_id:
+        type: string
+      changed_at:
+        type: string
+      container_id:
+        type: string
+      from_dc:
+        type: string
+      from_dest:
+        type: string
+      id:
+        type: string
+      reason:
+        type: string
+      to_dc:
+        type: string
+      to_dest:
+        type: string
+    type: object
   internal_module_delivery.ContainerStatusLogEntry:
     properties:
       actor_id:
@@ -1158,6 +1371,31 @@ definitions:
       note:
         type: string
       to_status:
+        type: string
+    type: object
+  internal_module_delivery.ContainerTransferAudit:
+    properties:
+      actor_id:
+        type: string
+      actor_role:
+        type: string
+      created_at:
+        type: string
+      id:
+        type: string
+      is_cross_plan:
+        type: boolean
+      line_id:
+        type: string
+      qty_transferred:
+        type: integer
+      reason:
+        type: string
+      sku_id:
+        type: string
+      source_container_id:
+        type: string
+      target_container_id:
         type: string
     type: object
   internal_module_delivery.CreateContainerInput:
@@ -1297,6 +1535,8 @@ definitions:
         type: string
       qty:
         type: integer
+      reason:
+        type: string
       target_container_id:
         type: string
       weight_kg_total:
@@ -1304,6 +1544,8 @@ definitions:
     type: object
   internal_module_delivery.TransferLineResult:
     properties:
+      audit:
+        $ref: '#/definitions/internal_module_delivery.ContainerTransferAudit'
       source_line:
         allOf:
         - $ref: '#/definitions/internal_module_delivery.ContainerLine'
@@ -1687,14 +1929,59 @@ definitions:
       supplier_code:
         type: string
     type: object
+  internal_module_inventory.RemnantAgingLevel:
+    enum:
+    - OK
+    - AT_RISK
+    - EXPIRED
+    type: string
+    x-enum-comments:
+      RemnantAgingAtRisk: age >= warn_days
+      RemnantAgingExpired: age >= expire_days (candidate for auto-expire)
+    x-enum-varnames:
+    - RemnantAgingOK
+    - RemnantAgingAtRisk
+    - RemnantAgingExpired
+  internal_module_inventory.RemnantAgingRow:
+    properties:
+      age_days:
+        type: integer
+      level:
+        $ref: '#/definitions/internal_module_inventory.RemnantAgingLevel'
+      remnant:
+        $ref: '#/definitions/internal_module_inventory.Remnant'
+    type: object
+  internal_module_inventory.RemnantAgingSummary:
+    properties:
+      expire_days:
+        type: integer
+      rows:
+        items:
+          $ref: '#/definitions/internal_module_inventory.RemnantAgingRow'
+        type: array
+      total_at_risk:
+        type: integer
+      total_expired:
+        type: integer
+      total_ok:
+        type: integer
+      warn_days:
+        type: integer
+    type: object
   internal_module_inventory.RemnantSuggestion:
     properties:
+      age_days:
+        type: integer
       location:
         $ref: '#/definitions/internal_module_inventory.StorageLocation'
       rank:
         type: integer
+      reason:
+        type: string
       remnant:
         $ref: '#/definitions/internal_module_inventory.Remnant'
+      score:
+        type: number
     type: object
   internal_module_inventory.StorageLocation:
     properties:
@@ -1968,7 +2255,11 @@ definitions:
     type: object
   internal_module_packing.FGPool:
     properties:
+      barcode_code:
+        type: string
       barcode_id:
+        type: string
+      component_type:
         type: string
       container_line_id:
         type: string
@@ -1989,6 +2280,10 @@ definitions:
       sku_name:
         type: string
       status:
+        type: string
+      unit_index:
+        type: integer
+      work_order_code:
         type: string
       work_order_id:
         type: string
@@ -2033,6 +2328,13 @@ definitions:
     required:
     - barcode_id
     type: object
+  internal_module_planning.BoostPriorityResult:
+    properties:
+      audit_id:
+        type: string
+      boosted_at:
+        type: string
+    type: object
   internal_module_planning.CreatePlanInput:
     properties:
       deadline:
@@ -2044,6 +2346,30 @@ definitions:
       po_id:
         type: string
       sales_order_id:
+        type: string
+    type: object
+  internal_module_planning.FeasibilityResult:
+    properties:
+      feasible:
+        type: boolean
+      reason:
+        type: string
+      suggestions:
+        items:
+          $ref: '#/definitions/internal_module_planning.FeasibilitySuggestion'
+        type: array
+    type: object
+  internal_module_planning.FeasibilitySuggestion:
+    properties:
+      days_to_due:
+        type: integer
+      freed_qty:
+        type: integer
+      score:
+        type: number
+      sku_code:
+        type: string
+      wo_id:
         type: string
     type: object
   internal_module_planning.Plan:
@@ -2110,8 +2436,42 @@ definitions:
       status:
         $ref: '#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.PlanStatus'
     type: object
+  internal_module_planning.PreemptCandidate:
+    properties:
+      current_so_code:
+        type: string
+      freed_qty:
+        type: integer
+      slack_days:
+        type: integer
+      status:
+        type: string
+      wo_id:
+        type: string
+    type: object
+  internal_module_planning.PreemptResult:
+    properties:
+      audit_id:
+        type: string
+      freed_qty:
+        type: integer
+      preempted_at:
+        type: string
+    type: object
+  internal_module_planning.boostPriorityRequest:
+    properties:
+      reason:
+        type: string
+    type: object
   internal_module_planning.cancelPlanRequest:
     properties:
+      reason:
+        type: string
+    type: object
+  internal_module_planning.preemptRequest:
+    properties:
+      from_wo_id:
+        type: string
       reason:
         type: string
     type: object
@@ -2256,6 +2616,13 @@ definitions:
       wo_updated:
         $ref: '#/definitions/internal_module_production.WorkOrder'
     type: object
+  internal_module_production.ReassignWorkOrderInput:
+    properties:
+      new_user_id:
+        type: string
+      reason:
+        type: string
+    type: object
   internal_module_production.RecordConsumptionInput:
     properties:
       material_id:
@@ -2326,6 +2693,16 @@ definitions:
           Set on auto-spawned carry-over WOs; nil otherwise.
         type: string
       plan_id:
+        type: string
+      priority_boost:
+        description: |-
+          PriorityBoost marks that a planner has manually elevated this WO's
+          scheduling priority (BR-PL05). Set by BoostPriority; never cleared.
+        type: boolean
+      qc_status:
+        description: |-
+          QCStatus is the denormalized last QC result for this work order.
+          Nil means no QC scan has been recorded yet.
         type: string
       quantity:
         type: integer
@@ -2425,6 +2802,8 @@ definitions:
       ordered_at:
         type: string
       received_at:
+        type: string
+      source_rejection_id:
         type: string
       status:
         $ref: '#/definitions/internal_module_purchasing.POStatus'
@@ -2729,6 +3108,47 @@ definitions:
         type: integer
       unit_price:
         type: integer
+    type: object
+  internal_module_shipping.Vessel:
+    properties:
+      carrier:
+        type: string
+      created_at:
+        type: string
+      created_by:
+        type: string
+      cutoff_date:
+        type: string
+      eta:
+        type: string
+      etd:
+        type: string
+      id:
+        type: string
+      name:
+        type: string
+      port_of_discharge:
+        type: string
+      port_of_loading:
+        type: string
+      voyage_number:
+        type: string
+    type: object
+  internal_platform_storage.PresignResult:
+    properties:
+      public_url:
+        description: PublicURL is the permanent URL to store in the database.
+        type: string
+      upload_url:
+        description: UploadURL is the short-lived PUT URL the client sends bytes to.
+        type: string
+    type: object
+  internal_platform_storage.presignRequest:
+    properties:
+      content_type:
+        type: string
+    required:
+    - content_type
     type: object
 info:
   contact: {}
@@ -3272,6 +3692,14 @@ paths:
         in: query
         name: container_type
         type: string
+      - description: filter by assigned loader (uuid)
+        in: query
+        name: loader_id
+        type: string
+      - description: filter by vessel (uuid)
+        in: query
+        name: vessel_id
+        type: string
       produces:
       - application/json
       responses:
@@ -3344,6 +3772,50 @@ paths:
       summary: Get container with lines + fill_pct
       tags:
       - delivery
+  /api/v1/containers/{id}/assign-loader:
+    post:
+      consumes:
+      - application/json
+      description: |-
+        Sets loader_id on the container and writes an audit row. When the
+        container already has a different loader (reassignment), reason is
+        mandatory (BR-D22). Send loader_id=null to unassign.
+      parameters:
+      - description: container id (uuid)
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: payload
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_module_delivery.AssignLoaderInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_module_delivery.Container'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Assign or reassign a loader to a container (BR-D21/D22/D23)
+      tags:
+      - delivery
   /api/v1/containers/{id}/cancel:
     post:
       consumes:
@@ -3375,6 +3847,53 @@ paths:
       security:
       - BearerAuth: []
       summary: Cancel an OPEN/LOADING container
+      tags:
+      - delivery
+  /api/v1/containers/{id}/change-destination:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: container id (uuid)
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: payload
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_module_delivery.ChangeDestinationInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_module_delivery.Container'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "409":
+          description: container is SEALED/SHIPPED
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Change container destination — clears vessel booking if DC changes
+        (BR-D24/D25/D26)
       tags:
       - delivery
   /api/v1/containers/{id}/exceptions:
@@ -3567,6 +4086,34 @@ paths:
       summary: Remove a line from a container
       tags:
       - delivery
+  /api/v1/containers/{id}/loader-log:
+    get:
+      parameters:
+      - description: container id (uuid)
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/internal_module_delivery.ContainerLoaderLog'
+            type: array
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Loader assignment audit trail for a container
+      tags:
+      - delivery
   /api/v1/containers/{id}/loading-plan:
     get:
       parameters:
@@ -3642,6 +4189,39 @@ paths:
       summary: Upload customer packing-list Excel as a loading plan (PARSED)
       tags:
       - delivery
+  /api/v1/containers/{id}/packing-list:
+    get:
+      description: |-
+        Returns a .xlsx file with container metadata and all loaded lines.
+        Returns 412 when the container is not yet SEALED.
+      parameters:
+      - description: container id (uuid)
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/vnd.openxmlformats-officedocument.spreadsheetml.sheet
+      responses:
+        "200":
+          description: OK
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "412":
+          description: Precondition Failed
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Download packing list as Excel for a SEALED container
+      tags:
+      - delivery
   /api/v1/containers/{id}/reopen:
     post:
       consumes:
@@ -3686,6 +4266,34 @@ paths:
       security:
       - BearerAuth: []
       summary: Reopen sealed container (admin only, requires reason)
+      tags:
+      - delivery
+  /api/v1/containers/{id}/route-log:
+    get:
+      parameters:
+      - description: container id (uuid)
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/internal_module_delivery.ContainerRouteChangeLog'
+            type: array
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Destination change audit trail for a container
       tags:
       - delivery
   /api/v1/containers/{id}/seal:
@@ -3838,6 +4446,31 @@ paths:
       security:
       - BearerAuth: []
       summary: Transfer a line (full or partial) to another container
+      tags:
+      - delivery
+  /api/v1/containers/at-risk:
+    get:
+      description: |-
+        Returns containers whose cutoff_date is within the next `days`
+        calendar days (default 7). Overdue containers (cutoff in the past)
+        are included. Sorted by cutoff_date ASC (most urgent first).
+      parameters:
+      - description: look-ahead window in days (default 7)
+        in: query
+        name: days
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/internal_module_delivery.AtRiskRow'
+            type: array
+      security:
+      - BearerAuth: []
+      summary: List at-risk containers — OPEN/LOADING with cutoff within N days
       tags:
       - delivery
   /api/v1/costing:
@@ -4687,6 +5320,14 @@ paths:
         in: query
         name: wo_id
         type: string
+      - description: filter created_at from (RFC3339 or YYYY-MM-DD)
+        in: query
+        name: from
+        type: string
+      - description: filter created_at to (RFC3339 or YYYY-MM-DD, inclusive day-end)
+        in: query
+        name: to
+        type: string
       produces:
       - application/json
       responses:
@@ -5317,6 +5958,14 @@ paths:
         in: query
         name: lot_id
         type: string
+      - description: filter reported_at from (RFC3339 or YYYY-MM-DD)
+        in: query
+        name: from
+        type: string
+      - description: filter reported_at to (RFC3339 or YYYY-MM-DD, inclusive day-end)
+        in: query
+        name: to
+        type: string
       - description: opaque cursor token; omit for first page
         in: query
         name: cursor
@@ -5704,11 +6353,70 @@ paths:
       summary: Mark remnant as waste
       tags:
       - inventory
+  /api/v1/inventory/remnants/aging:
+    get:
+      description: Returns all AVAILABLE remnants with age in days, classified as
+        OK / AT_RISK / EXPIRED.
+      parameters:
+      - description: days before AT_RISK (default 60)
+        in: query
+        name: warn_days
+        type: integer
+      - description: days before EXPIRED candidate (default 90)
+        in: query
+        name: expire_days
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_module_inventory.RemnantAgingSummary'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Get remnant aging report
+      tags:
+      - inventory
+  /api/v1/inventory/remnants/expire:
+    post:
+      description: Flips AVAILABLE remnants older than age_days to EXPIRED. Default
+        90 days.
+      parameters:
+      - description: age threshold in days (default 90)
+        in: query
+        name: age_days
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Expire stale AVAILABLE remnants (admin)
+      tags:
+      - inventory
   /api/v1/inventory/remnants/suggestions:
     get:
-      description: Returns up to `limit` AVAILABLE remnants ranked by Best Fit (smallest
-        area) + FIFO (oldest first). Each suggestion includes the remnant's storage
-        location when available.
+      description: Returns up to `limit` AVAILABLE remnants ranked by the chosen strategy
+        (best_fit or fifo). Each suggestion includes age_days, score, reason, and
+        storage location when available.
       parameters:
       - description: required length in mm
         in: query
@@ -5724,6 +6432,17 @@ paths:
         in: query
         name: limit
         type: integer
+      - description: 'best_fit or fifo (default: material config → best_fit)'
+        enum:
+        - best_fit
+        - fifo
+        in: query
+        name: strategy
+        type: string
+      - description: restrict to remnants from this material
+        in: query
+        name: material_id
+        type: string
       produces:
       - application/json
       responses:
@@ -5741,7 +6460,7 @@ paths:
             type: object
       security:
       - BearerAuth: []
-      summary: Suggest best-fit remnants for a required dimension
+      summary: Suggest remnants for a required dimension
       tags:
       - inventory
   /api/v1/inventory/reports/rejections:
@@ -6839,6 +7558,134 @@ paths:
       summary: Scan FG barcode at packing station
       tags:
       - packing
+  /api/v1/planning/work-orders/{id}/boost-priority:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: work order id (uuid)
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: reason
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_module_planning.boostPriorityRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_module_planning.BoostPriorityResult'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Boost work order priority
+      tags:
+      - planning
+  /api/v1/planning/work-orders/{id}/check-feasibility:
+    post:
+      parameters:
+      - description: work order id (uuid)
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_module_planning.FeasibilityResult'
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Check work order material feasibility
+      tags:
+      - planning
+  /api/v1/planning/work-orders/{id}/preempt:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: target work order id (uuid)
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: from_wo_id + reason
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_module_planning.preemptRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_module_planning.PreemptResult'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "412":
+          description: Precondition Failed
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Preempt a work order to free materials for another
+      tags:
+      - planning
+  /api/v1/planning/work-orders/{id}/preempt-candidates:
+    get:
+      parameters:
+      - description: work order id (uuid)
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/internal_module_planning.PreemptCandidate'
+            type: array
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: List preemption candidates for a work order
+      tags:
+      - planning
   /api/v1/plans:
     get:
       parameters:
@@ -8316,6 +9163,51 @@ paths:
       summary: Get SKU
       tags:
       - catalog
+    patch:
+      consumes:
+      - application/json
+      parameters:
+      - description: sku id (uuid)
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: payload
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_module_catalog.UpdateSKUInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_module_catalog.SKU'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Update SKU export/shipping fields (BR-SKU02)
+      tags:
+      - catalog
   /api/v1/skus/{id}/bom:
     get:
       parameters:
@@ -8401,6 +9293,137 @@ paths:
       security:
       - BearerAuth: []
       summary: Set BOM for SKU
+      tags:
+      - catalog
+  /api/v1/skus/{id}/packing-units:
+    get:
+      parameters:
+      - description: sku id (uuid)
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/internal_module_catalog.PackingUnit'
+            type: array
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: List packing units for a SKU
+      tags:
+      - catalog
+  /api/v1/skus/{id}/packing-units/{unit}:
+    delete:
+      parameters:
+      - description: sku id (uuid)
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: 'unit: piece|set|carton'
+        in: path
+        name: unit
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "204":
+          description: No Content
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Delete a packing unit for a SKU
+      tags:
+      - catalog
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: sku id (uuid)
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: 'unit: piece|set|carton'
+        in: path
+        name: unit
+        required: true
+        type: string
+      - description: payload
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_module_catalog.UpsertPackingUnitInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_module_catalog.PackingUnit'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Create or replace a packing unit for a SKU (BR-SKU04/05)
       tags:
       - catalog
   /api/v1/skus/{id}/variants:
@@ -8561,6 +9584,45 @@ paths:
       summary: List active storage locations
       tags:
       - inventory
+  /api/v1/uploads/presign:
+    post:
+      consumes:
+      - application/json
+      description: |-
+        Returns a short-lived PUT URL (5 min) and a permanent public URL.
+        The client PUTs the file bytes directly to upload_url, then stores
+        public_url in the relevant entity (loading exception, defect, rejection).
+      parameters:
+      - description: 'content_type: image/jpeg | image/png | image/webp'
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_platform_storage.presignRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_platform_storage.PresignResult'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "503":
+          description: Service Unavailable
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Generate a presigned upload URL for R2 object storage
+      tags:
+      - uploads
   /api/v1/users/me:
     get:
       produces:
@@ -8602,6 +9664,53 @@ paths:
       summary: List workers for dropdown population
       tags:
       - users
+  /api/v1/vessels:
+    get:
+      parameters:
+      - description: page (default 1)
+        in: query
+        name: page
+        type: integer
+      - description: limit (default 10, max 100)
+        in: query
+        name: limit
+        type: integer
+      - description: ILIKE on vessel name or voyage number
+        in: query
+        name: search
+        type: string
+      - description: cutoff_date >= (YYYY-MM-DD or RFC3339)
+        in: query
+        name: cutoff_from
+        type: string
+      - description: cutoff_date < (YYYY-MM-DD or RFC3339, exclusive)
+        in: query
+        name: cutoff_to
+        type: string
+      - description: etd >= (YYYY-MM-DD or RFC3339)
+        in: query
+        name: etd_from
+        type: string
+      - description: etd < (YYYY-MM-DD or RFC3339, exclusive)
+        in: query
+        name: etd_to
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_shipping_Vessel'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: List vessels
+      tags:
+      - shipping
   /api/v1/work-orders:
     get:
       parameters:
@@ -8922,6 +10031,50 @@ paths:
       summary: Assign a machine shift slot to a work order
       tags:
       - production
+  /api/v1/work-orders/{id}/claim:
+    post:
+      parameters:
+      - description: work order id (uuid)
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_module_production.WorkOrder'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "412":
+          description: Precondition Failed
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: CNC operator self-claims a PLANNED unassigned work order
+      tags:
+      - production
   /api/v1/work-orders/{id}/consumptions:
     get:
       parameters:
@@ -9198,6 +10351,98 @@ paths:
       security:
       - BearerAuth: []
       summary: Partial-complete a work order
+      tags:
+      - production
+  /api/v1/work-orders/{id}/qc-history:
+    get:
+      parameters:
+      - description: work order id (uuid)
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/internal_module_barcode.QCEvent'
+            type: array
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Get QC scan history for a work order
+      tags:
+      - barcode
+  /api/v1/work-orders/{id}/reassign:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: work order id (uuid)
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: payload
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_module_production.ReassignWorkOrderInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_module_production.WorkOrder'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "412":
+          description: Precondition Failed
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Admin force-reassign a work order to a different CNC operator
       tags:
       - production
   /api/v1/work-orders/{id}/suggest-assignment:

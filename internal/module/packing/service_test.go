@@ -21,8 +21,14 @@ type mockStore struct {
 	fgsByWO        map[uuid.UUID][]uuid.UUID
 	defectsByID    map[uuid.UUID]FGDefect
 	defectsByFG    map[uuid.UUID]uuid.UUID
+	allocsByID     map[uuid.UUID]Allocation
+	allocsByFG     map[uuid.UUID]uuid.UUID // fg_id -> allocation_id
 
 	insertBatchErr error
+	// candidatesOverride, when set, is returned verbatim by
+	// selectAvailableFGsBySKU (bypasses the map scan). Used by cutoff-sort
+	// tests that need to control the exact candidate list and cutoff dates.
+	candidatesOverride []fgSuggestionCandidate
 }
 
 func newMockStore() *mockStore {
@@ -32,10 +38,16 @@ func newMockStore() *mockStore {
 		fgsByWO:      map[uuid.UUID][]uuid.UUID{},
 		defectsByID:  map[uuid.UUID]FGDefect{},
 		defectsByFG:  map[uuid.UUID]uuid.UUID{},
+		allocsByID:   map[uuid.UUID]Allocation{},
+		allocsByFG:   map[uuid.UUID]uuid.UUID{},
 	}
 }
 
 func (m *mockStore) insertFGBatch(_ context.Context, rows []FGPool) error {
+	return m.insertFGBatchWithAllocations(nil, rows, nil)
+}
+
+func (m *mockStore) insertFGBatchWithAllocations(_ context.Context, rows []FGPool, allocs []Allocation) error {
 	if m.insertBatchErr != nil {
 		return m.insertBatchErr
 	}
@@ -43,6 +55,10 @@ func (m *mockStore) insertFGBatch(_ context.Context, rows []FGPool) error {
 		m.fgsByID[r.ID] = r
 		m.fgsByBarcode[r.BarcodeID] = r.ID
 		m.fgsByWO[r.WorkOrderID] = append(m.fgsByWO[r.WorkOrderID], r.ID)
+	}
+	for _, a := range allocs {
+		m.allocsByID[a.ID] = a
+		m.allocsByFG[a.FGPoolID] = a.ID
 	}
 	return nil
 }
@@ -94,6 +110,65 @@ func (m *mockStore) selectDefectByFGID(_ context.Context, fgID uuid.UUID) (FGDef
 		return FGDefect{}, domain.ErrNotFound
 	}
 	return m.defectsByID[id], nil
+}
+
+func (m *mockStore) selectAvailableFGsBySKU(_ context.Context, skuID, excludeID uuid.UUID, limit int) ([]fgSuggestionCandidate, error) {
+	if m.candidatesOverride != nil {
+		return m.candidatesOverride, nil
+	}
+	var out []fgSuggestionCandidate
+	for _, fg := range m.fgsByID {
+		if fg.SKUID != skuID || fg.Status != FGStatusAvailable || fg.ID == excludeID {
+			continue
+		}
+		out = append(out, fgSuggestionCandidate{FG: fg})
+		if len(out) >= limit {
+			break
+		}
+	}
+	return out, nil
+}
+
+func (m *mockStore) selectReservedFGsByContainer(_ context.Context, _ uuid.UUID) ([]FGPool, error) {
+	var out []FGPool
+	for _, fg := range m.fgsByID {
+		if fg.Status == FGStatusReserved {
+			out = append(out, fg)
+		}
+	}
+	return out, nil
+}
+
+func (m *mockStore) selectAllocationByID(_ context.Context, id uuid.UUID) (Allocation, error) {
+	a, ok := m.allocsByID[id]
+	if !ok {
+		return Allocation{}, domain.ErrNotFound
+	}
+	return a, nil
+}
+
+func (m *mockStore) selectAllocationByFGID(_ context.Context, fgID uuid.UUID) (Allocation, error) {
+	id, ok := m.allocsByFG[fgID]
+	if !ok {
+		return Allocation{}, domain.ErrNotFound
+	}
+	return m.allocsByID[id], nil
+}
+
+func (m *mockStore) selectAllocationsBySOLine(_ context.Context, soLineID uuid.UUID) ([]Allocation, error) {
+	var out []Allocation
+	for _, a := range m.allocsByID {
+		if a.SalesOrderLineID == soLineID {
+			out = append(out, a)
+		}
+	}
+	return out, nil
+}
+
+func (m *mockStore) insertAllocation(_ context.Context, a Allocation) error {
+	m.allocsByID[a.ID] = a
+	m.allocsByFG[a.FGPoolID] = a.ID
+	return nil
 }
 
 func (m *mockStore) withTx(ctx context.Context, fn func(tx txStore) error) error {
@@ -210,6 +285,57 @@ func (t *mockTxStore) updateDefectResolution(_ context.Context, in updateResolut
 	d.ResolvedAt = &now
 	d.ResolvedBy = &in.ResolvedBy
 	t.ms.defectsByID[in.DefectID] = d
+	return nil
+}
+
+func (t *mockTxStore) updateFGSOLine(_ context.Context, fgID uuid.UUID, newSOLID *uuid.UUID) error {
+	fg, ok := t.ms.fgsByID[fgID]
+	if !ok {
+		return domain.NewBizError(domain.ErrNotFound, "fg not found")
+	}
+	fg.SalesOrderLineID = newSOLID
+	t.ms.fgsByID[fgID] = fg
+	return nil
+}
+
+func (t *mockTxStore) insertReassignLog(_ context.Context, _ FGReassignmentLog) error {
+	return nil
+}
+
+func (t *mockTxStore) lockAllocationForUpdate(_ context.Context, id uuid.UUID) (Allocation, error) {
+	a, ok := t.ms.allocsByID[id]
+	if !ok {
+		return Allocation{}, domain.ErrNotFound
+	}
+	return a, nil
+}
+
+func (t *mockTxStore) lockAllocationByFGForUpdate(_ context.Context, fgID uuid.UUID) (Allocation, error) {
+	id, ok := t.ms.allocsByFG[fgID]
+	if !ok {
+		return Allocation{}, domain.ErrNotFound
+	}
+	return t.ms.allocsByID[id], nil
+}
+
+func (t *mockTxStore) updateAllocationType(_ context.Context, id uuid.UUID, allocType string, releasedBy *uuid.UUID) error {
+	a, ok := t.ms.allocsByID[id]
+	if !ok {
+		return domain.ErrNotFound
+	}
+	a.AllocationType = allocType
+	a.ReleasedBy = releasedBy
+	t.ms.allocsByID[id] = a
+	return nil
+}
+
+func (t *mockTxStore) updateAllocationSOLine(_ context.Context, id uuid.UUID, newSOLID uuid.UUID) error {
+	a, ok := t.ms.allocsByID[id]
+	if !ok {
+		return domain.ErrNotFound
+	}
+	a.SalesOrderLineID = newSOLID
+	t.ms.allocsByID[id] = a
 	return nil
 }
 
@@ -522,14 +648,18 @@ func TestReportDefect_AvailableFG_FlipsToDefect(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected: %v", err)
 	}
-	if out.Reason != DefectReasonBroken {
-		t.Errorf("want reason BROKEN, got %s", out.Reason)
+	if out.Defect.Reason != DefectReasonBroken {
+		t.Errorf("want reason BROKEN, got %s", out.Defect.Reason)
 	}
 	if got := h.store.fgsByID[fg.ID].Status; got != FGStatusDefect {
 		t.Errorf("want fg status DEFECT, got %s", got)
 	}
 	if h.notif.defectCalls != 1 {
 		t.Errorf("want 1 notify call, got %d", h.notif.defectCalls)
+	}
+	// No container line → no shortfall → no suggestions
+	if len(out.Suggestions) != 0 {
+		t.Errorf("want 0 suggestions for AVAILABLE FG without container, got %d", len(out.Suggestions))
 	}
 }
 
@@ -613,7 +743,7 @@ func TestResolveDefect_Discard_DisposesFG(t *testing.T) {
 		t.Fatalf("seed defect: %v", err)
 	}
 	_, err = h.svc.ResolveDefect(context.Background(), ResolveDefectInput{
-		DefectID:   d.ID,
+		DefectID:   d.Defect.ID,
 		Resolution: DefectResolutionDiscard,
 		ResolvedBy: uuid.New(),
 	})
@@ -637,7 +767,7 @@ func TestResolveDefect_Rework_ReturnsToAvailable(t *testing.T) {
 		DetectedBy: uuid.New(),
 	})
 	_, err := h.svc.ResolveDefect(context.Background(), ResolveDefectInput{
-		DefectID:   d.ID,
+		DefectID:   d.Defect.ID,
 		Resolution: DefectResolutionRework,
 		ResolvedBy: uuid.New(),
 	})
@@ -658,7 +788,7 @@ func TestResolveDefect_ReturnNCC_DisposesFG(t *testing.T) {
 		DetectedBy: uuid.New(),
 	})
 	_, err := h.svc.ResolveDefect(context.Background(), ResolveDefectInput{
-		DefectID:   d.ID,
+		DefectID:   d.Defect.ID,
 		Resolution: DefectResolutionReturnNCC,
 		Note:       "kiện NCC lô 2026-05-22",
 		ResolvedBy: uuid.New(),
@@ -680,12 +810,12 @@ func TestResolveDefect_DoubleResolve_Rejected(t *testing.T) {
 		DetectedBy: uuid.New(),
 	})
 	_, _ = h.svc.ResolveDefect(context.Background(), ResolveDefectInput{
-		DefectID:   d.ID,
+		DefectID:   d.Defect.ID,
 		Resolution: DefectResolutionDiscard,
 		ResolvedBy: uuid.New(),
 	})
 	_, err := h.svc.ResolveDefect(context.Background(), ResolveDefectInput{
-		DefectID:   d.ID,
+		DefectID:   d.Defect.ID,
 		Resolution: DefectResolutionRework,
 		ResolvedBy: uuid.New(),
 	})
@@ -851,5 +981,743 @@ func TestValidResolution(t *testing.T) {
 	}
 	if validResolution("BURN") {
 		t.Error("want invalid for BURN")
+	}
+}
+
+// ── ReassignFG ────────────────────────────────────────────────────────────────
+
+type mockSOLineChecker struct {
+	lines map[uuid.UUID]SOLineInfo
+}
+
+func (m *mockSOLineChecker) GetSOLine(_ context.Context, id uuid.UUID) (SOLineInfo, error) {
+	sol, ok := m.lines[id]
+	if !ok {
+		return SOLineInfo{}, domain.NewBizError(domain.ErrNotFound, "sol not found")
+	}
+	return sol, nil
+}
+
+func newHarnessWithSOL() (*harness, *mockSOLineChecker) {
+	h := newHarness()
+	sol := &mockSOLineChecker{lines: map[uuid.UUID]SOLineInfo{}}
+	h.svc.(*service).solChecker = sol
+	return h, sol
+}
+
+func TestReassignFG_MissingFGID_Returns400(t *testing.T) {
+	h, _ := newHarnessWithSOL()
+	_, err := h.svc.ReassignFG(context.Background(), ReassignFGInput{
+		NewSOLineID: uuid.New(),
+		Reason:      "customer swap",
+		ActorID:     uuid.New(),
+	})
+	var biz *domain.BizError
+	if !errors.As(err, &biz) || !errors.Is(biz.Unwrap(), domain.ErrInvalidInput) {
+		t.Fatalf("want ErrInvalidInput, got %v", err)
+	}
+}
+
+func TestReassignFG_MissingSOLineID_Returns400(t *testing.T) {
+	h, _ := newHarnessWithSOL()
+	_, err := h.svc.ReassignFG(context.Background(), ReassignFGInput{
+		FGID:    uuid.New(),
+		Reason:  "customer swap",
+		ActorID: uuid.New(),
+	})
+	var biz *domain.BizError
+	if !errors.As(err, &biz) || !errors.Is(biz.Unwrap(), domain.ErrInvalidInput) {
+		t.Fatalf("want ErrInvalidInput, got %v", err)
+	}
+}
+
+func TestReassignFG_EmptyReason_Returns400(t *testing.T) {
+	h, _ := newHarnessWithSOL()
+	_, err := h.svc.ReassignFG(context.Background(), ReassignFGInput{
+		FGID:        uuid.New(),
+		NewSOLineID: uuid.New(),
+		ActorID:     uuid.New(),
+	})
+	var biz *domain.BizError
+	if !errors.As(err, &biz) || !errors.Is(biz.Unwrap(), domain.ErrInvalidInput) {
+		t.Fatalf("want ErrInvalidInput, got %v", err)
+	}
+}
+
+func TestReassignFG_LoadedFG_Returns412(t *testing.T) {
+	h, sol := newHarnessWithSOL()
+	skuID := uuid.New()
+	newSOLID := uuid.New()
+	sol.lines[newSOLID] = SOLineInfo{ID: newSOLID, SKUID: skuID}
+	fg := h.seedFG(uuid.New(), skuID, nil, FGStatusLoaded)
+
+	_, err := h.svc.ReassignFG(context.Background(), ReassignFGInput{
+		FGID:        fg.ID,
+		NewSOLineID: newSOLID,
+		Reason:      "swap",
+		ActorID:     uuid.New(),
+	})
+	var biz *domain.BizError
+	if !errors.As(err, &biz) || !errors.Is(biz.Unwrap(), domain.ErrPreconditionFailed) {
+		t.Fatalf("want ErrPreconditionFailed for LOADED fg, got %v", err)
+	}
+}
+
+func TestReassignFG_SKUMismatch_Returns422(t *testing.T) {
+	h, sol := newHarnessWithSOL()
+	skuA := uuid.New()
+	skuB := uuid.New()
+	newSOLID := uuid.New()
+	sol.lines[newSOLID] = SOLineInfo{ID: newSOLID, SKUID: skuB} // different SKU
+	fg := h.seedFG(uuid.New(), skuA, nil, FGStatusAvailable)
+
+	_, err := h.svc.ReassignFG(context.Background(), ReassignFGInput{
+		FGID:        fg.ID,
+		NewSOLineID: newSOLID,
+		Reason:      "swap",
+		ActorID:     uuid.New(),
+	})
+	var biz *domain.BizError
+	if !errors.As(err, &biz) || !errors.Is(biz.Unwrap(), domain.ErrInvalidInput) {
+		t.Fatalf("want ErrInvalidInput for SKU mismatch, got %v", err)
+	}
+}
+
+func TestReassignFG_HappyPath_UpdatesSOLAndWritesAudit(t *testing.T) {
+	h, sol := newHarnessWithSOL()
+	skuID := uuid.New()
+	oldSOLID := uuid.New()
+	newSOLID := uuid.New()
+	sol.lines[newSOLID] = SOLineInfo{ID: newSOLID, SKUID: skuID}
+	fg := h.seedFG(uuid.New(), skuID, &oldSOLID, FGStatusAvailable)
+
+	result, err := h.svc.ReassignFG(context.Background(), ReassignFGInput{
+		FGID:        fg.ID,
+		NewSOLineID: newSOLID,
+		Reason:      "customer swap",
+		ActorID:     uuid.New(),
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.FG.SalesOrderLineID == nil || *result.FG.SalesOrderLineID != newSOLID {
+		t.Errorf("fg.sales_order_line_id = %v, want %v", result.FG.SalesOrderLineID, newSOLID)
+	}
+	if result.Audit.FromSOLID == nil || *result.Audit.FromSOLID != oldSOLID {
+		t.Errorf("audit.from_sol_id = %v, want %v", result.Audit.FromSOLID, oldSOLID)
+	}
+	if result.Audit.ToSOLID != newSOLID {
+		t.Errorf("audit.to_sol_id = %v, want %v", result.Audit.ToSOLID, newSOLID)
+	}
+}
+
+func TestReassignFG_ReservedFG_Allowed(t *testing.T) {
+	h, sol := newHarnessWithSOL()
+	skuID := uuid.New()
+	newSOLID := uuid.New()
+	sol.lines[newSOLID] = SOLineInfo{ID: newSOLID, SKUID: skuID}
+	fg := h.seedFG(uuid.New(), skuID, nil, FGStatusReserved)
+
+	_, err := h.svc.ReassignFG(context.Background(), ReassignFGInput{
+		FGID:        fg.ID,
+		NewSOLineID: newSOLID,
+		Reason:      "swap",
+		ActorID:     uuid.New(),
+	})
+	if err != nil {
+		t.Fatalf("RESERVED fg should be reassignable, got %v", err)
+	}
+}
+
+// ── Shortfall Suggestions ──────────────────────────────────────────────────
+
+func TestReportDefect_ReservedFG_PoolHasMatches_SuggestsReassign(t *testing.T) {
+	h := newHarness()
+	skuID := uuid.New()
+	soLineID := uuid.New()
+
+	// The FG that will be defected — RESERVED on a container line
+	fg := h.seedFG(uuid.New(), skuID, &soLineID, FGStatusReserved)
+	clID := uuid.New()
+	fg.ContainerLineID = &clID
+	h.store.fgsByID[fg.ID] = fg
+
+	// Seed 3 AVAILABLE FGs of same SKU as replacement candidates
+	cand1 := h.seedFG(uuid.New(), skuID, &soLineID, FGStatusAvailable)
+	cand2 := h.seedFG(uuid.New(), skuID, &soLineID, FGStatusAvailable)
+	cand3 := h.seedFG(uuid.New(), skuID, &soLineID, FGStatusAvailable)
+
+	out, err := h.svc.ReportDefect(context.Background(), ReportDefectInput{
+		BarcodeID:  fg.BarcodeID,
+		Reason:     DefectReasonBroken,
+		DetectedBy: uuid.New(),
+	})
+	if err != nil {
+		t.Fatalf("unexpected: %v", err)
+	}
+	if len(out.Suggestions) == 0 {
+		t.Fatal("want REASSIGN suggestions, got none")
+	}
+	for _, s := range out.Suggestions {
+		if s.Type != SuggestionReassign {
+			t.Errorf("want type REASSIGN, got %s", s.Type)
+		}
+		if s.FGID == nil {
+			t.Error("REASSIGN suggestion must have fg_id")
+		}
+		if s.SKUID != skuID {
+			t.Errorf("want sku_id=%v, got %v", skuID, s.SKUID)
+		}
+	}
+	_ = cand1
+	_ = cand2
+	_ = cand3
+}
+
+func TestReportDefect_ReservedFG_PoolEmpty_SuggestsCarryOverWO(t *testing.T) {
+	h := newHarness()
+	skuID := uuid.New()
+	soLineID := uuid.New()
+
+	// The FG that will be defected — RESERVED on a container line
+	fg := h.seedFG(uuid.New(), skuID, &soLineID, FGStatusReserved)
+	clID := uuid.New()
+	fg.ContainerLineID = &clID
+	h.store.fgsByID[fg.ID] = fg
+
+	// No other AVAILABLE FGs of the same SKU
+
+	out, err := h.svc.ReportDefect(context.Background(), ReportDefectInput{
+		BarcodeID:  fg.BarcodeID,
+		Reason:     DefectReasonWrongSize,
+		DetectedBy: uuid.New(),
+	})
+	if err != nil {
+		t.Fatalf("unexpected: %v", err)
+	}
+	if len(out.Suggestions) != 1 {
+		t.Fatalf("want 1 suggestion, got %d", len(out.Suggestions))
+	}
+	if out.Suggestions[0].Type != SuggestionCarryOverWO {
+		t.Errorf("want CARRY_OVER_WO, got %s", out.Suggestions[0].Type)
+	}
+	if out.Suggestions[0].SKUID != skuID {
+		t.Errorf("want sku_id=%v, got %v", skuID, out.Suggestions[0].SKUID)
+	}
+}
+
+func TestReportDefect_AvailableFG_NoContainerLine_NoSuggestions(t *testing.T) {
+	h := newHarness()
+	skuID := uuid.New()
+
+	// AVAILABLE FG not on any container — no shortfall
+	fg := h.seedFG(uuid.New(), skuID, nil, FGStatusAvailable)
+
+	// Seed another AVAILABLE of same SKU (should NOT appear in suggestions)
+	h.seedFG(uuid.New(), skuID, nil, FGStatusAvailable)
+
+	out, err := h.svc.ReportDefect(context.Background(), ReportDefectInput{
+		BarcodeID:  fg.BarcodeID,
+		Reason:     DefectReasonScratched,
+		DetectedBy: uuid.New(),
+	})
+	if err != nil {
+		t.Fatalf("unexpected: %v", err)
+	}
+	if len(out.Suggestions) != 0 {
+		t.Errorf("want 0 suggestions (no container shortfall), got %d", len(out.Suggestions))
+	}
+}
+
+func TestReportDefect_ReservedFG_PoolHasDifferentSKU_SuggestsCarryOver(t *testing.T) {
+	h := newHarness()
+	skuA := uuid.New()
+	skuB := uuid.New()
+	soLineID := uuid.New()
+
+	// Defected FG is SKU-A
+	fg := h.seedFG(uuid.New(), skuA, &soLineID, FGStatusReserved)
+	clID := uuid.New()
+	fg.ContainerLineID = &clID
+	h.store.fgsByID[fg.ID] = fg
+
+	// Pool only has SKU-B — not a match
+	h.seedFG(uuid.New(), skuB, nil, FGStatusAvailable)
+
+	out, err := h.svc.ReportDefect(context.Background(), ReportDefectInput{
+		BarcodeID:  fg.BarcodeID,
+		Reason:     DefectReasonBroken,
+		DetectedBy: uuid.New(),
+	})
+	if err != nil {
+		t.Fatalf("unexpected: %v", err)
+	}
+	if len(out.Suggestions) != 1 {
+		t.Fatalf("want 1 suggestion, got %d", len(out.Suggestions))
+	}
+	if out.Suggestions[0].Type != SuggestionCarryOverWO {
+		t.Errorf("want CARRY_OVER_WO (no same-SKU match), got %s", out.Suggestions[0].Type)
+	}
+}
+
+func TestReportDefect_Suggestions_SortedByCutoffASC(t *testing.T) {
+	h := newHarness()
+	skuID := uuid.New()
+	soLineID := uuid.New()
+
+	// Defected FG — RESERVED on a container line.
+	fg := h.seedFG(uuid.New(), skuID, &soLineID, FGStatusReserved)
+	clID := uuid.New()
+	fg.ContainerLineID = &clID
+	h.store.fgsByID[fg.ID] = fg
+
+	soonCutoff := time.Now().UTC().Add(3 * 24 * time.Hour)   // 3 days away
+	laterCutoff := time.Now().UTC().Add(10 * 24 * time.Hour) // 10 days away
+
+	fg1 := FGPool{ID: uuid.New(), SKUID: skuID, Status: FGStatusAvailable, BarcodeID: uuid.New()}
+	fg2 := FGPool{ID: uuid.New(), SKUID: skuID, Status: FGStatusAvailable, BarcodeID: uuid.New()}
+
+	// Store returns candidates pre-sorted by cutoff ASC (as the real DB does).
+	// The service must preserve that order in the suggestion list.
+	h.store.candidatesOverride = []fgSuggestionCandidate{
+		{FG: fg2, CutoffDate: &soonCutoff},
+		{FG: fg1, CutoffDate: &laterCutoff},
+	}
+
+	out, err := h.svc.ReportDefect(context.Background(), ReportDefectInput{
+		BarcodeID:  fg.BarcodeID,
+		Reason:     DefectReasonBroken,
+		DetectedBy: uuid.New(),
+	})
+	if err != nil {
+		t.Fatalf("unexpected: %v", err)
+	}
+	if len(out.Suggestions) != 2 {
+		t.Fatalf("want 2 suggestions, got %d", len(out.Suggestions))
+	}
+	// Both suggestions must carry ContainerCutoffDate + DaysToCutoff.
+	for i, s := range out.Suggestions {
+		if s.ContainerCutoffDate == nil {
+			t.Errorf("suggestion[%d]: ContainerCutoffDate must not be nil", i)
+		}
+		if s.DaysToCutoff == nil {
+			t.Errorf("suggestion[%d]: DaysToCutoff must not be nil", i)
+		}
+	}
+	// The candidate with the sooner cutoff must appear first (store already
+	// sorted; service preserves the order).
+	if out.Suggestions[0].FGID == nil || *out.Suggestions[0].FGID != fg2.ID {
+		t.Errorf("first suggestion should be fg2 (soonest cutoff), got %v", out.Suggestions[0].FGID)
+	}
+	if out.Suggestions[1].FGID == nil || *out.Suggestions[1].FGID != fg1.ID {
+		t.Errorf("second suggestion should be fg1 (later cutoff), got %v", out.Suggestions[1].FGID)
+	}
+}
+
+func TestReportDefect_Suggestions_NilCutoff_FieldsOmitted(t *testing.T) {
+	h := newHarness()
+	skuID := uuid.New()
+	soLineID := uuid.New()
+
+	fg := h.seedFG(uuid.New(), skuID, &soLineID, FGStatusReserved)
+	clID := uuid.New()
+	fg.ContainerLineID = &clID
+	h.store.fgsByID[fg.ID] = fg
+
+	candidate := FGPool{ID: uuid.New(), SKUID: skuID, Status: FGStatusAvailable, BarcodeID: uuid.New()}
+	h.store.candidatesOverride = []fgSuggestionCandidate{
+		{FG: candidate, CutoffDate: nil},
+	}
+
+	out, err := h.svc.ReportDefect(context.Background(), ReportDefectInput{
+		BarcodeID:  fg.BarcodeID,
+		Reason:     DefectReasonBroken,
+		DetectedBy: uuid.New(),
+	})
+	if err != nil {
+		t.Fatalf("unexpected: %v", err)
+	}
+	if len(out.Suggestions) != 1 {
+		t.Fatalf("want 1 suggestion, got %d", len(out.Suggestions))
+	}
+	if out.Suggestions[0].ContainerCutoffDate != nil {
+		t.Error("ContainerCutoffDate should be nil when no booked container")
+	}
+	if out.Suggestions[0].DaysToCutoff != nil {
+		t.Error("DaysToCutoff should be nil when no booked container")
+	}
+}
+
+type mockSKUComponentResolver struct {
+	comps map[uuid.UUID][]SKUComponentInfo
+}
+
+func (m *mockSKUComponentResolver) GetSKUComponents(_ context.Context, skuID uuid.UUID) ([]SKUComponentInfo, error) {
+	return m.comps[skuID], nil
+}
+
+func newHarnessWithComponents(comps map[uuid.UUID][]SKUComponentInfo) *harness {
+	h := newHarness()
+	h.svc.(*service).skuCompRes = &mockSKUComponentResolver{comps: comps}
+	return h
+}
+
+func ptr[T any](v T) *T { return &v }
+
+func TestCreateFromCompletedWO_MultiComponent_CreatesOneRowPerComponentPerUnit(t *testing.T) {
+	skuID := uuid.New()
+	comps := map[uuid.UUID][]SKUComponentInfo{
+		skuID: {
+			{ComponentType: "TOP", CbmPerUnit: 0.1, SortOrder: 0},
+			{ComponentType: "BASE", CbmPerUnit: 0.15, SortOrder: 1},
+		},
+	}
+	h := newHarnessWithComponents(comps)
+
+	rows, err := h.svc.CreateFromCompletedWO(context.Background(), CreateFromCompletedWOInput{
+		WorkOrderID: uuid.New(),
+		SKUID:       skuID,
+		SKUCode:     "SKU-MULTI",
+		Quantity:    2,
+		QCPassedBy:  uuid.New(),
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// 2 units × 2 components = 4 rows
+	if len(rows) != 4 {
+		t.Fatalf("want 4 rows, got %d", len(rows))
+	}
+	if h.issuer.calls != 4 {
+		t.Fatalf("want 4 barcode calls, got %d", h.issuer.calls)
+	}
+	// Verify each row has ComponentType and UnitIndex set
+	byUnit := map[int]map[string]bool{}
+	for _, r := range rows {
+		if r.ComponentType == nil || r.UnitIndex == nil {
+			t.Errorf("multi-component FG must have ComponentType and UnitIndex set; got %+v", r)
+			continue
+		}
+		if byUnit[*r.UnitIndex] == nil {
+			byUnit[*r.UnitIndex] = map[string]bool{}
+		}
+		byUnit[*r.UnitIndex][*r.ComponentType] = true
+	}
+	for unitIdx := 0; unitIdx < 2; unitIdx++ {
+		if !byUnit[unitIdx]["TOP"] || !byUnit[unitIdx]["BASE"] {
+			t.Errorf("unit %d missing expected components: %v", unitIdx, byUnit[unitIdx])
+		}
+	}
+}
+
+func TestCreateFromCompletedWO_NoComponents_SingleRowPerUnit(t *testing.T) {
+	skuID := uuid.New()
+	// SKU exists but has no components — single-box path
+	comps := map[uuid.UUID][]SKUComponentInfo{skuID: nil}
+	h := newHarnessWithComponents(comps)
+
+	rows, err := h.svc.CreateFromCompletedWO(context.Background(), CreateFromCompletedWOInput{
+		WorkOrderID: uuid.New(),
+		SKUID:       skuID,
+		Quantity:    3,
+		QCPassedBy:  uuid.New(),
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(rows) != 3 {
+		t.Fatalf("want 3 rows (one per unit), got %d", len(rows))
+	}
+	for _, r := range rows {
+		if r.ComponentType != nil || r.UnitIndex != nil {
+			t.Errorf("single-box row must have nil ComponentType/UnitIndex; got %+v", r)
+		}
+	}
+}
+
+func TestCheckComponentsForSeal_AllPresent_ReturnsNil(t *testing.T) {
+	skuID := uuid.New()
+	clID := uuid.New()
+	comps := map[uuid.UUID][]SKUComponentInfo{
+		skuID: {
+			{ComponentType: "TOP"},
+			{ComponentType: "BASE"},
+		},
+	}
+	h := newHarnessWithComponents(comps)
+
+	// Seed 2 RESERVED FGs for unit_index=0 (TOP + BASE)
+	for _, ct := range []string{"TOP", "BASE"} {
+		ct := ct
+		fg := FGPool{
+			ID:              uuid.New(),
+			SKUID:           skuID,
+			BarcodeID:       uuid.New(),
+			Status:          FGStatusReserved,
+			ContainerLineID: &clID,
+			ComponentType:   &ct,
+			UnitIndex:       ptr(0),
+			CreatedAt:       time.Now(),
+		}
+		h.store.fgsByID[fg.ID] = fg
+	}
+
+	err := h.svc.CheckComponentsForSeal(context.Background(), uuid.New())
+	if err != nil {
+		t.Fatalf("want nil for complete units, got %v", err)
+	}
+}
+
+func TestCheckComponentsForSeal_MissingComponent_ReturnsPreconditionFailed(t *testing.T) {
+	skuID := uuid.New()
+	clID := uuid.New()
+	comps := map[uuid.UUID][]SKUComponentInfo{
+		skuID: {
+			{ComponentType: "TOP"},
+			{ComponentType: "BASE"},
+		},
+	}
+	h := newHarnessWithComponents(comps)
+
+	// Only TOP present for unit_index=0 — BASE is missing
+	ct := "TOP"
+	fg := FGPool{
+		ID:              uuid.New(),
+		SKUID:           skuID,
+		BarcodeID:       uuid.New(),
+		Status:          FGStatusReserved,
+		ContainerLineID: &clID,
+		ComponentType:   &ct,
+		UnitIndex:       ptr(0),
+		CreatedAt:       time.Now(),
+	}
+	h.store.fgsByID[fg.ID] = fg
+
+	err := h.svc.CheckComponentsForSeal(context.Background(), uuid.New())
+	if !errors.Is(err, domain.ErrPreconditionFailed) {
+		t.Fatalf("want ErrPreconditionFailed for incomplete unit, got %v", err)
+	}
+}
+
+func TestCheckComponentsForSeal_NoComponentSKU_ReturnsNil(t *testing.T) {
+	skuID := uuid.New()
+	clID := uuid.New()
+	// SKU has no components — simple / single-box SKU
+	comps := map[uuid.UUID][]SKUComponentInfo{skuID: nil}
+	h := newHarnessWithComponents(comps)
+
+	// Seed a RESERVED FG with no ComponentType/UnitIndex
+	fg := FGPool{
+		ID:              uuid.New(),
+		SKUID:           skuID,
+		BarcodeID:       uuid.New(),
+		Status:          FGStatusReserved,
+		ContainerLineID: &clID,
+		CreatedAt:       time.Now(),
+	}
+	h.store.fgsByID[fg.ID] = fg
+
+	err := h.svc.CheckComponentsForSeal(context.Background(), uuid.New())
+	if err != nil {
+		t.Fatalf("want nil for single-box SKU, got %v", err)
+	}
+}
+
+func TestCheckComponentsForSeal_NilResolver_ReturnsNil(t *testing.T) {
+	h := newHarness() // no component resolver wired
+	err := h.svc.CheckComponentsForSeal(context.Background(), uuid.New())
+	if err != nil {
+		t.Fatalf("want nil when resolver is nil (bypass), got %v", err)
+	}
+}
+
+// ── Allocation tests ─────────────────────────────────────────────────────────
+
+func (h *harness) seedAllocation(fgID, soLineID uuid.UUID, allocType string) Allocation {
+	a := Allocation{
+		ID:               uuid.New(),
+		FGPoolID:         fgID,
+		SalesOrderLineID: soLineID,
+		AllocationType:   allocType,
+		CreatedAt:        time.Now(),
+	}
+	h.store.allocsByID[a.ID] = a
+	h.store.allocsByFG[fgID] = a.ID
+	return a
+}
+
+func TestReleaseAllocation_HardToSoft(t *testing.T) {
+	h := newHarness()
+	soLineID := uuid.New()
+	fg := h.seedFG(uuid.New(), uuid.New(), &soLineID, FGStatusAvailable)
+	alloc := h.seedAllocation(fg.ID, soLineID, AllocationTypeHard)
+	actorID := uuid.New()
+
+	out, err := h.svc.ReleaseAllocation(context.Background(), ReleaseAllocationInput{
+		AllocationID: alloc.ID,
+		ActorID:      actorID,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out.AllocationType != AllocationTypeSoft {
+		t.Errorf("want soft, got %q", out.AllocationType)
+	}
+	if out.ReleasedBy == nil || *out.ReleasedBy != actorID {
+		t.Errorf("ReleasedBy not set correctly")
+	}
+}
+
+func TestReleaseAllocation_AlreadySoft_ReturnsError(t *testing.T) {
+	h := newHarness()
+	soLineID := uuid.New()
+	fg := h.seedFG(uuid.New(), uuid.New(), &soLineID, FGStatusAvailable)
+	alloc := h.seedAllocation(fg.ID, soLineID, AllocationTypeSoft)
+
+	_, err := h.svc.ReleaseAllocation(context.Background(), ReleaseAllocationInput{
+		AllocationID: alloc.ID,
+		ActorID:      uuid.New(),
+	})
+	if err == nil {
+		t.Fatal("want error releasing already-soft allocation, got nil")
+	}
+}
+
+func TestReleaseAllocation_FGReserved_Blocked(t *testing.T) {
+	h := newHarness()
+	soLineID := uuid.New()
+	clID := uuid.New()
+	fg := h.seedFG(uuid.New(), uuid.New(), &soLineID, FGStatusReserved)
+	fg.ContainerLineID = &clID
+	h.store.fgsByID[fg.ID] = fg
+	alloc := h.seedAllocation(fg.ID, soLineID, AllocationTypeHard)
+
+	_, err := h.svc.ReleaseAllocation(context.Background(), ReleaseAllocationInput{
+		AllocationID: alloc.ID,
+		ActorID:      uuid.New(),
+	})
+	if err == nil {
+		t.Fatal("want error releasing allocation for reserved FG, got nil")
+	}
+}
+
+func TestReassignAllocation_HappyPath(t *testing.T) {
+	h := newHarness()
+	oldSOL := uuid.New()
+	newSOL := uuid.New()
+	fg := h.seedFG(uuid.New(), uuid.New(), &oldSOL, FGStatusAvailable)
+	alloc := h.seedAllocation(fg.ID, oldSOL, AllocationTypeSoft)
+
+	out, err := h.svc.ReassignAllocation(context.Background(), ReassignAllocationInput{
+		AllocationID: alloc.ID,
+		NewSOLineID:  newSOL,
+		ActorID:      uuid.New(),
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out.SalesOrderLineID != newSOL {
+		t.Errorf("want new SOL %v, got %v", newSOL, out.SalesOrderLineID)
+	}
+	// fg_pool.sales_order_line_id must also be updated
+	updatedFG := h.store.fgsByID[fg.ID]
+	if updatedFG.SalesOrderLineID == nil || *updatedFG.SalesOrderLineID != newSOL {
+		t.Errorf("fg_pool.sales_order_line_id not updated")
+	}
+}
+
+func TestReassignAllocation_FGReserved_Blocked(t *testing.T) {
+	h := newHarness()
+	oldSOL := uuid.New()
+	fg := h.seedFG(uuid.New(), uuid.New(), &oldSOL, FGStatusReserved)
+	alloc := h.seedAllocation(fg.ID, oldSOL, AllocationTypeHard)
+
+	_, err := h.svc.ReassignAllocation(context.Background(), ReassignAllocationInput{
+		AllocationID: alloc.ID,
+		NewSOLineID:  uuid.New(),
+		ActorID:      uuid.New(),
+	})
+	if err == nil {
+		t.Fatal("want error reassigning allocation for reserved FG, got nil")
+	}
+}
+
+func TestListAllocations_ReturnsBySOLine(t *testing.T) {
+	h := newHarness()
+	soLineID := uuid.New()
+	otherSOL := uuid.New()
+
+	fg1 := h.seedFG(uuid.New(), uuid.New(), &soLineID, FGStatusAvailable)
+	fg2 := h.seedFG(uuid.New(), uuid.New(), &soLineID, FGStatusAvailable)
+	fg3 := h.seedFG(uuid.New(), uuid.New(), &otherSOL, FGStatusAvailable)
+	h.seedAllocation(fg1.ID, soLineID, AllocationTypeHard)
+	h.seedAllocation(fg2.ID, soLineID, AllocationTypeSoft)
+	h.seedAllocation(fg3.ID, otherSOL, AllocationTypeHard)
+
+	out, err := h.svc.ListAllocations(context.Background(), soLineID)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(out) != 2 {
+		t.Errorf("want 2 allocations for soLineID, got %d", len(out))
+	}
+}
+
+func TestCreateFromCompletedWO_CreatesHardAllocation(t *testing.T) {
+	h := newHarness()
+	woID, skuID := uuid.New(), uuid.New()
+	soLineID := uuid.New()
+
+	rows, err := h.svc.CreateFromCompletedWO(context.Background(), CreateFromCompletedWOInput{
+		WorkOrderID:      woID,
+		SKUID:            skuID,
+		SKUCode:          "SKU-1",
+		Quantity:         2,
+		SalesOrderLineID: &soLineID,
+		QCPassedBy:       uuid.New(),
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("want 2 FG rows, got %d", len(rows))
+	}
+	// Each FG must have a HARD allocation.
+	for _, fg := range rows {
+		allocID, ok := h.store.allocsByFG[fg.ID]
+		if !ok {
+			t.Errorf("no allocation created for FG %v", fg.ID)
+			continue
+		}
+		alloc := h.store.allocsByID[allocID]
+		if alloc.AllocationType != AllocationTypeHard {
+			t.Errorf("want hard allocation, got %q", alloc.AllocationType)
+		}
+		if alloc.SalesOrderLineID != soLineID {
+			t.Errorf("allocation SOL mismatch")
+		}
+	}
+}
+
+func TestCreateFromCompletedWO_NoSOLine_NoAllocation(t *testing.T) {
+	h := newHarness()
+	woID, skuID := uuid.New(), uuid.New()
+
+	rows, err := h.svc.CreateFromCompletedWO(context.Background(), CreateFromCompletedWOInput{
+		WorkOrderID:      woID,
+		SKUID:            skuID,
+		SKUCode:          "SKU-1",
+		Quantity:         1,
+		SalesOrderLineID: nil,
+		QCPassedBy:       uuid.New(),
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("want 1 FG row, got %d", len(rows))
+	}
+	if _, ok := h.store.allocsByFG[rows[0].ID]; ok {
+		t.Error("want no allocation when SOL is nil, but one was created")
 	}
 }

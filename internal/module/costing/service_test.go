@@ -1694,3 +1694,153 @@ func TestComputeCost_GuardRejects_NotifierNotCalled(t *testing.T) {
 		t.Errorf("notifier must not fire when guard rejects, got %v", notifier.calls)
 	}
 }
+
+// ── mockFXRateResolver ────────────────────────────────────────────────────────
+
+type mockFXRateResolver struct {
+	rate float64
+	err  error
+}
+
+func (m *mockFXRateResolver) GetRateOnDate(_ context.Context, _ string, _ time.Time) (float64, error) {
+	return m.rate, m.err
+}
+
+// ── mockSOCurrencyReader ──────────────────────────────────────────────────────
+
+type mockSOCurrencyReader struct {
+	currency string
+	err      error
+}
+
+func (m *mockSOCurrencyReader) GetSOLineCurrency(_ context.Context, _ uuid.UUID) (string, error) {
+	return m.currency, m.err
+}
+
+// ── Multi-currency ComputeCost tests ─────────────────────────────────────────
+
+func TestComputeCost_WithUSDSOLine_StoresCurrencyAndRate(t *testing.T) {
+	woID := uuid.New()
+	skuID := uuid.New()
+	soLineID := uuid.New()
+	wo := WOInfo{
+		ID:               woID,
+		SKUID:            skuID,
+		Status:           domain.WOCompleted,
+		SalesOrderLineID: &soLineID,
+	}
+	st := notFoundStore()
+	cdr := &mockCDR{result: []CuttingData{{SheetCost: domain.Money{Amount: 100000, Currency: "VND"}, SheetAreaMM2: 1000, UsedAreaMM2: 500}}}
+	svc := NewService(st, &mockWOR{result: wo}, cdr, zeroCONR(), nil).(*service)
+	svc.socr = &mockSOCurrencyReader{currency: "USD"}
+	svc.fxr = &mockFXRateResolver{rate: 25000.0}
+
+	rec, err := svc.ComputeCost(context.Background(), woID)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if rec.SOCurrency == nil || *rec.SOCurrency != "USD" {
+		t.Errorf("so_currency = %v, want USD", rec.SOCurrency)
+	}
+	if rec.FXRateToVND == nil || *rec.FXRateToVND != 25000.0 {
+		t.Errorf("fx_rate_to_vnd = %v, want 25000.0", rec.FXRateToVND)
+	}
+}
+
+func TestComputeCost_WithVNDSOLine_NoCurrencyFields(t *testing.T) {
+	woID := uuid.New()
+	skuID := uuid.New()
+	soLineID := uuid.New()
+	wo := WOInfo{
+		ID:               woID,
+		SKUID:            skuID,
+		Status:           domain.WOCompleted,
+		SalesOrderLineID: &soLineID,
+	}
+	st := notFoundStore()
+	cdr := &mockCDR{result: []CuttingData{{SheetCost: domain.Money{Amount: 100000, Currency: "VND"}, SheetAreaMM2: 1000, UsedAreaMM2: 500}}}
+	svc := NewService(st, &mockWOR{result: wo}, cdr, zeroCONR(), nil).(*service)
+	svc.socr = &mockSOCurrencyReader{currency: "VND"}
+	svc.fxr = &mockFXRateResolver{rate: 1.0}
+
+	rec, err := svc.ComputeCost(context.Background(), woID)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if rec.SOCurrency != nil {
+		t.Errorf("so_currency = %v, want nil for VND order", rec.SOCurrency)
+	}
+	if rec.FXRateToVND != nil {
+		t.Errorf("fx_rate_to_vnd = %v, want nil for VND order", rec.FXRateToVND)
+	}
+}
+
+func TestComputeCost_NoSOLine_NoCurrencyFields(t *testing.T) {
+	woID := uuid.New()
+	skuID := uuid.New()
+	wo := WOInfo{ID: woID, SKUID: skuID, Status: domain.WOCompleted}
+	st := notFoundStore()
+	cdr := &mockCDR{result: []CuttingData{{SheetCost: domain.Money{Amount: 100000, Currency: "VND"}, SheetAreaMM2: 1000, UsedAreaMM2: 500}}}
+	svc := NewService(st, &mockWOR{result: wo}, cdr, zeroCONR(), nil).(*service)
+	svc.socr = &mockSOCurrencyReader{currency: "USD"}
+	svc.fxr = &mockFXRateResolver{rate: 25000.0}
+
+	rec, err := svc.ComputeCost(context.Background(), woID)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if rec.SOCurrency != nil || rec.FXRateToVND != nil {
+		t.Errorf("expected nil currency fields for WO without SO link, got so_currency=%v fx_rate=%v", rec.SOCurrency, rec.FXRateToVND)
+	}
+}
+
+func TestComputeCost_FXRateNotFound_SOCurrencySetButRateNil(t *testing.T) {
+	woID := uuid.New()
+	skuID := uuid.New()
+	soLineID := uuid.New()
+	wo := WOInfo{
+		ID:               woID,
+		SKUID:            skuID,
+		Status:           domain.WOCompleted,
+		SalesOrderLineID: &soLineID,
+	}
+	st := notFoundStore()
+	cdr := &mockCDR{result: []CuttingData{{SheetCost: domain.Money{Amount: 100000, Currency: "VND"}, SheetAreaMM2: 1000, UsedAreaMM2: 500}}}
+	svc := NewService(st, &mockWOR{result: wo}, cdr, zeroCONR(), nil).(*service)
+	svc.socr = &mockSOCurrencyReader{currency: "EUR"}
+	svc.fxr = &mockFXRateResolver{err: domain.ErrNotFound}
+
+	rec, err := svc.ComputeCost(context.Background(), woID)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if rec.SOCurrency == nil || *rec.SOCurrency != "EUR" {
+		t.Errorf("so_currency = %v, want EUR", rec.SOCurrency)
+	}
+	if rec.FXRateToVND != nil {
+		t.Errorf("fx_rate_to_vnd = %v, want nil when rate not found", rec.FXRateToVND)
+	}
+}
+
+func TestComputeCost_NoSOCurrencyReader_NoCurrencyFields(t *testing.T) {
+	woID := uuid.New()
+	skuID := uuid.New()
+	soLineID := uuid.New()
+	wo := WOInfo{
+		ID:               woID,
+		SKUID:            skuID,
+		Status:           domain.WOCompleted,
+		SalesOrderLineID: &soLineID,
+	}
+	st := notFoundStore()
+	cdr := &mockCDR{result: []CuttingData{{SheetCost: domain.Money{Amount: 100000, Currency: "VND"}, SheetAreaMM2: 1000, UsedAreaMM2: 500}}}
+	svc := NewService(st, &mockWOR{result: wo}, cdr, zeroCONR(), nil)
+
+	rec, err := svc.ComputeCost(context.Background(), woID)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if rec.SOCurrency != nil || rec.FXRateToVND != nil {
+		t.Errorf("expected nil currency fields when no SOCurrencyReader wired")
+	}
+}

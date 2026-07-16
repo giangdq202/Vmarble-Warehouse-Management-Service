@@ -14,6 +14,7 @@ type store interface {
 	nextPlanCode(ctx context.Context, year int) (string, error)
 	insertPlan(ctx context.Context, p Plan) error
 	selectPlansPaged(ctx context.Context, p httpkit.PageParams, status string, createdFrom, createdTo *time.Time) ([]Plan, int, error) // search uses p.Search against plan code and PO code; createdFrom/createdTo are inclusive bounds on pp.created_at (caller passes whole-day boundaries when filtering by date)
+	selectPlansKeyset(ctx context.Context, status, search string, from, to *time.Time, cur httpkit.Cursor, limit int) ([]Plan, error)
 	selectPlansLookup(ctx context.Context, search, status string, deadlineFrom, deadlineTo *time.Time, limit, offset int) ([]PlanLookupItem, int, error)
 	selectPlanByID(ctx context.Context, id uuid.UUID) (Plan, error)
 	updatePlanStatus(ctx context.Context, id uuid.UUID, status string) error

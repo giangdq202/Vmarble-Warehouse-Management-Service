@@ -26,6 +26,12 @@ func (h *Handler) Register(rg *gin.RouterGroup) {
 	rg.GET("/plans/:id", h.get)
 	rg.POST("/plans/:id/approve", auth.RequireRole(auth.RolePlanner, auth.RoleAdmin), h.approve)
 	rg.POST("/plans/:id/cancel", auth.RequireRole(auth.RolePlanner, auth.RoleAdmin), h.cancel)
+
+	// Smart re-allocation (BE #2)
+	rg.POST("/work-orders/:id/check-feasibility", auth.RequirePlannerUp(), h.checkFeasibility)
+	rg.POST("/work-orders/:id/boost-priority", auth.RequirePlannerUp(), h.boostPriority)
+	rg.GET("/work-orders/:id/preempt-candidates", auth.RequirePlannerUp(), h.listPreemptCandidates)
+	rg.POST("/work-orders/:id/preempt", auth.RequirePlannerUp(), h.preempt)
 }
 
 // createPlan godoc
@@ -73,8 +79,9 @@ func (h *Handler) create(c *gin.Context) {
 // @Failure      401  {object}  map[string]string
 // @Router       /api/v1/plans [get]
 func (h *Handler) list(c *gin.Context) {
-	p := httpkit.BindPageParams(c)
+	p := httpkit.BindCursorParams(c)
 	status := c.Query("status")
+	search := c.Query("search")
 
 	// Optional date window on pp.created_at. Parsed as YYYY-MM-DD in UTC; the
 	// upper bound is widened to the end of the day so the inclusive contract
@@ -99,7 +106,7 @@ func (h *Handler) list(c *gin.Context) {
 		to = &eod
 	}
 
-	result, err := h.svc.ListPlans(c.Request.Context(), p, status, from, to)
+	result, err := h.svc.ListPlans(c.Request.Context(), p, status, search, from, to)
 	if err != nil {
 		httpkit.Error(c, err)
 		return
@@ -259,4 +266,134 @@ func (h *Handler) cancel(c *gin.Context) {
 // Reason is required when the plan is APPROVED; ignored for DRAFT cancels.
 type cancelPlanRequest struct {
 	Reason string `json:"reason"`
+}
+
+// checkFeasibility godoc
+//
+// @Summary      Check work order material feasibility
+// @Tags         planning
+// @Produce      json
+// @Param        id   path      string  true  "work order id (uuid)"
+// @Success      200  {object}  FeasibilityResult
+// @Failure      404  {object}  map[string]string
+// @Security     BearerAuth
+// @Router       /api/v1/planning/work-orders/{id}/check-feasibility [post]
+func (h *Handler) checkFeasibility(c *gin.Context) {
+	woID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+	result, err := h.svc.CheckFeasibility(c.Request.Context(), woID)
+	if err != nil {
+		httpkit.Error(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, result)
+}
+
+// boostPriority godoc
+//
+// @Summary      Boost work order priority
+// @Tags         planning
+// @Accept       json
+// @Produce      json
+// @Param        id    path      string              true  "work order id (uuid)"
+// @Param        body  body      boostPriorityRequest true  "reason"
+// @Success      200   {object}  BoostPriorityResult
+// @Failure      400   {object}  map[string]string
+// @Security     BearerAuth
+// @Router       /api/v1/planning/work-orders/{id}/boost-priority [post]
+func (h *Handler) boostPriority(c *gin.Context) {
+	woID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+	var body boostPriorityRequest
+	if !httpkit.Bind(c, &body) {
+		return
+	}
+	in := BoostPriorityInput{WOID: woID, Reason: body.Reason}
+	if ident, ok := auth.FromContext(c); ok {
+		if uid, parseErr := uuid.Parse(ident.UserID); parseErr == nil {
+			in.ActorID = uid
+		}
+	}
+	result, err := h.svc.BoostWorkOrderPriority(c.Request.Context(), in)
+	if err != nil {
+		httpkit.Error(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, result)
+}
+
+// listPreemptCandidates godoc
+//
+// @Summary      List preemption candidates for a work order
+// @Tags         planning
+// @Produce      json
+// @Param        id   path      string  true  "work order id (uuid)"
+// @Success      200  {array}   PreemptCandidate
+// @Failure      404  {object}  map[string]string
+// @Security     BearerAuth
+// @Router       /api/v1/planning/work-orders/{id}/preempt-candidates [get]
+func (h *Handler) listPreemptCandidates(c *gin.Context) {
+	woID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+	candidates, err := h.svc.ListPreemptCandidates(c.Request.Context(), woID)
+	if err != nil {
+		httpkit.Error(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, candidates)
+}
+
+// preempt godoc
+//
+// @Summary      Preempt a work order to free materials for another
+// @Tags         planning
+// @Accept       json
+// @Produce      json
+// @Param        id    path      string         true  "target work order id (uuid)"
+// @Param        body  body      preemptRequest true  "from_wo_id + reason"
+// @Success      200   {object}  PreemptResult
+// @Failure      400   {object}  map[string]string
+// @Failure      412   {object}  map[string]string
+// @Security     BearerAuth
+// @Router       /api/v1/planning/work-orders/{id}/preempt [post]
+func (h *Handler) preempt(c *gin.Context) {
+	toWOID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+	var body preemptRequest
+	if !httpkit.Bind(c, &body) {
+		return
+	}
+	in := PreemptInput{ToWOID: toWOID, FromWOID: body.FromWOID, Reason: body.Reason}
+	if ident, ok := auth.FromContext(c); ok {
+		if uid, parseErr := uuid.Parse(ident.UserID); parseErr == nil {
+			in.ActorID = uid
+		}
+	}
+	result, err := h.svc.PreemptWorkOrder(c.Request.Context(), in)
+	if err != nil {
+		httpkit.Error(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, result)
+}
+
+type boostPriorityRequest struct {
+	Reason string `json:"reason"`
+}
+
+type preemptRequest struct {
+	FromWOID uuid.UUID `json:"from_wo_id"`
+	Reason   string    `json:"reason"`
 }

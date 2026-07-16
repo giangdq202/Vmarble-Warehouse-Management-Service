@@ -33,17 +33,23 @@ const (
 )
 
 type Container struct {
-	ID            uuid.UUID  `json:"id"`
-	Code          string     `json:"code"`
-	ContainerType string     `json:"container_type"`
-	MaxCBM        float64    `json:"max_cbm"`
-	MaxPayloadKG  float64    `json:"max_payload_kg"`
-	Status        string     `json:"status"`
-	SealedAt      *time.Time `json:"sealed_at,omitempty"`
-	SealedBy      *uuid.UUID `json:"sealed_by,omitempty"`
-	Note          string     `json:"note,omitempty"`
-	CreatedBy     uuid.UUID  `json:"created_by"`
-	CreatedAt     time.Time  `json:"created_at"`
+	ID              uuid.UUID  `json:"id"`
+	Code            string     `json:"code"`
+	ContainerType   string     `json:"container_type"`
+	MaxCBM          float64    `json:"max_cbm"`
+	MaxPayloadKG    float64    `json:"max_payload_kg"`
+	Status          string     `json:"status"`
+	SealedAt        *time.Time `json:"sealed_at,omitempty"`
+	SealedBy        *uuid.UUID `json:"sealed_by,omitempty"`
+	Note            string     `json:"note,omitempty"`
+	VesselID        *uuid.UUID `json:"vessel_id,omitempty"`
+	CutoffDate      *time.Time `json:"cutoff_date,omitempty"`
+	DestinationCode string     `json:"destination_code,omitempty"`
+	DestinationName string     `json:"destination_name,omitempty"`
+	LoaderID        *uuid.UUID `json:"loader_id,omitempty"`
+	CreatedBy       uuid.UUID  `json:"created_by"`
+	CreatedAt       time.Time  `json:"created_at"`
+
 
 	// Computed projections — populated by GetContainer; List does not hydrate
 	// these to keep the page query a single round-trip.
@@ -96,6 +102,11 @@ type CreateContainerInput struct {
 // these values from its own SKU registry. Once #294 lands, FE will compute
 // `sku.cbm * qty` and `sku.weight_kg * qty` and pass them through unchanged
 // — no service-side change required.
+//
+// AllowOverload lets an admin force-add a line even when the projected totals
+// exceed max_cbm / max_payload_kg (BR-D18 / BR-D20). The override is audit-
+// logged atomically. Non-admin callers that set AllowOverload=true receive
+// ErrPreconditionFailed. ActorRole is set by the handler from the auth claim.
 type AddLineInput struct {
 	ContainerID      uuid.UUID `json:"-"`
 	SKUID            uuid.UUID `json:"sku_id"`
@@ -104,6 +115,31 @@ type AddLineInput struct {
 	CBMTotal         float64   `json:"cbm_total"`
 	WeightKGTotal    float64   `json:"weight_kg_total"`
 	AddedBy          uuid.UUID `json:"-"`
+	AllowOverload    bool      `json:"allow_overload,omitempty"`
+	ActorRole        string    `json:"-"` // set by handler from auth.Identity.Role
+}
+
+// AddLineResult wraps the inserted line and a near-capacity warning flag.
+// NearCapacity is true when projected CBM or weight exceeds 90% of the
+// container max (BR-D19). The line is inserted regardless — NearCapacity is
+// advisory only.
+type AddLineResult struct {
+	Line         ContainerLine `json:"line"`
+	NearCapacity bool          `json:"near_capacity,omitempty"`
+}
+
+// ContainerOverloadLog is the audit record written when an admin force-adds a
+// line that would otherwise be rejected by the capacity guard (BR-D18/D20).
+type ContainerOverloadLog struct {
+	ID            uuid.UUID `json:"id"`
+	ContainerID   uuid.UUID `json:"container_id"`
+	LineID        uuid.UUID `json:"line_id"`
+	ProjectedCBM  float64   `json:"projected_cbm"`
+	MaxCBM        float64   `json:"max_cbm"`
+	ProjectedKG   float64   `json:"projected_kg"`
+	MaxKG         float64   `json:"max_kg"`
+	ActorID       uuid.UUID `json:"actor_id"`
+	Reason        string    `json:"reason"`
 }
 
 // TransferLineInput moves part or all of a line from the source container
@@ -115,6 +151,9 @@ type AddLineInput struct {
 // the service cannot derive them: the original snapshot was for `line.qty`,
 // not the new `Qty` slice. For a full transfer (Qty == 0) they are ignored
 // and the source line's snapshot is reused unchanged.
+//
+// Reason is mandatory (BR-D07). ActorRole drives the BR-D17 cross-plan gate —
+// the handler sets it from the auth identity role string.
 type TransferLineInput struct {
 	ContainerID       uuid.UUID `json:"-"`
 	LineID            uuid.UUID `json:"line_id"`
@@ -122,12 +161,30 @@ type TransferLineInput struct {
 	Qty               int       `json:"qty,omitempty"`
 	CBMTotal          float64   `json:"cbm_total,omitempty"`
 	WeightKGTotal     float64   `json:"weight_kg_total,omitempty"`
+	Reason            string    `json:"reason"`
 	ActorID           uuid.UUID `json:"-"`
+	ActorRole         string    `json:"-"` // set by handler from auth.Identity.Role
+}
+
+// ContainerTransferAudit is the BR-D07 audit row written for every transfer.
+type ContainerTransferAudit struct {
+	ID                uuid.UUID `json:"id"`
+	SourceContainerID uuid.UUID `json:"source_container_id"`
+	TargetContainerID uuid.UUID `json:"target_container_id"`
+	LineID            uuid.UUID `json:"line_id"`
+	SKUID             uuid.UUID `json:"sku_id"`
+	QtyTransferred    int       `json:"qty_transferred"`
+	Reason            string    `json:"reason"`
+	IsCrossPlan       bool      `json:"is_cross_plan"`
+	ActorID           uuid.UUID `json:"actor_id"`
+	ActorRole         string    `json:"actor_role"`
+	CreatedAt         time.Time `json:"created_at"`
 }
 
 type TransferLineResult struct {
-	SourceLine *ContainerLine `json:"source_line,omitempty"` // nil when the source line was fully consumed
-	TargetLine ContainerLine  `json:"target_line"`
+	SourceLine *ContainerLine         `json:"source_line,omitempty"` // nil when the source line was fully consumed
+	TargetLine ContainerLine          `json:"target_line"`
+	Audit      ContainerTransferAudit `json:"audit"`
 }
 
 // SealInput carries the actor for the audit row. BR-D05: sealing flips the
@@ -162,6 +219,55 @@ type CancelInput struct {
 type ContainerListFilter struct {
 	Status        string
 	ContainerType string
+	LoaderID      *uuid.UUID
+	VesselID      *uuid.UUID
+}
+
+// AssignLoaderInput drives POST /containers/:id/assign-loader.
+// Reason is optional for first assignment (BR-D21) and mandatory for
+// reassignment (BR-D22). The service enforces this distinction.
+type AssignLoaderInput struct {
+	ContainerID uuid.UUID  `json:"-"`
+	LoaderID    *uuid.UUID `json:"loader_id"` // nil = unassign
+	Reason      string     `json:"reason,omitempty"`
+	AssignedBy  uuid.UUID  `json:"-"`
+}
+
+// ContainerLoaderLog is one audit row from container_loader_log (BR-D22).
+type ContainerLoaderLog struct {
+	ID           uuid.UUID  `json:"id"`
+	ContainerID  uuid.UUID  `json:"container_id"`
+	FromLoaderID *uuid.UUID `json:"from_loader_id,omitempty"`
+	ToLoaderID   *uuid.UUID `json:"to_loader_id,omitempty"`
+	Reason       string     `json:"reason,omitempty"`
+	AssignedBy   uuid.UUID  `json:"assigned_by"`
+	AssignedAt   time.Time  `json:"assigned_at"`
+}
+
+// ChangeDestinationInput drives POST /containers/:id/change-destination.
+// Reason is optional for first assignment and mandatory for reassignment
+// (when the container already has a destination_code). BR-D26: if the new
+// destination differs, the vessel booking (vessel_id + cutoff_date) is
+// cleared atomically so planners must rebook.
+type ChangeDestinationInput struct {
+	ContainerID     uuid.UUID `json:"-"`
+	DestinationCode string    `json:"destination_code"`
+	DestinationName string    `json:"destination_name,omitempty"`
+	Reason          string    `json:"reason,omitempty"`
+	ActorID         uuid.UUID `json:"-"`
+}
+
+// ContainerRouteChangeLog is one audit row from container_route_change_log (BR-D24).
+type ContainerRouteChangeLog struct {
+	ID          uuid.UUID `json:"id"`
+	ContainerID uuid.UUID `json:"container_id"`
+	FromDC      string    `json:"from_dc,omitempty"`
+	ToDC        string    `json:"to_dc"`
+	FromDest    string    `json:"from_dest,omitempty"`
+	ToDest      string    `json:"to_dest,omitempty"`
+	Reason      string    `json:"reason,omitempty"`
+	ActorID     uuid.UUID `json:"actor_id"`
+	ChangedAt   time.Time `json:"changed_at"`
 }
 
 // ── Loading plans (#301) ────────────────────────────────────────────────────
@@ -286,12 +392,36 @@ type LoadingPlanLineDiff struct {
 	NewQty          int       `json:"new_qty"`
 }
 
+// AtRiskRow is one row returned by GET /containers/at-risk. The endpoint
+// lists OPEN/LOADING containers with a cutoff within the requested window,
+// sorted by urgency (soonest cutoff first). DaysToCutoff is negative when
+// the cutoff has already passed (overdue) — those containers are included
+// because they are the most urgent.
+type AtRiskRow struct {
+	ContainerID   uuid.UUID  `json:"id"`
+	ContainerCode string     `json:"code"`
+	VesselName    *string    `json:"vessel_name,omitempty"`
+	CutoffDate    time.Time  `json:"cutoff_date"`
+	DaysToCutoff  int        `json:"days_to_cutoff"`
+	UsedCBM       float64    `json:"used_cbm"`
+	MaxCBM        float64    `json:"max_cbm"`
+	FillPctCBM    float64    `json:"fill_pct_cbm"` // 0–100, 0 when max_cbm=0
+	LineCount     int        `json:"line_count"`
+	RiskLevel     string     `json:"risk_level"` // RED | ORANGE
+}
+
+// Risk level labels for the at-risk dashboard.
+const (
+	RiskLevelRed    = "RED"    // days_to_cutoff < 3
+	RiskLevelOrange = "ORANGE" // 3 <= days_to_cutoff <= window
+)
+
 type Service interface {
 	CreateContainer(ctx context.Context, in CreateContainerInput) (Container, error)
 	GetContainer(ctx context.Context, id uuid.UUID) (Container, error)
 	ListContainers(ctx context.Context, p httpkit.PageParams, f ContainerListFilter) (httpkit.PagedResult[Container], error)
 
-	AddLine(ctx context.Context, in AddLineInput) (ContainerLine, error)
+	AddLine(ctx context.Context, in AddLineInput) (AddLineResult, error)
 	DeleteLine(ctx context.Context, containerID, lineID uuid.UUID, actorID uuid.UUID) error
 	TransferLine(ctx context.Context, in TransferLineInput) (TransferLineResult, error)
 
@@ -346,6 +476,45 @@ type Service interface {
 	// optionally filtered by the plan that triggered the supersede. Newest
 	// supersede event first.
 	ListContainerLinesHistory(ctx context.Context, containerID uuid.UUID, planID *uuid.UUID) ([]ContainerLineHistoryEntry, error)
+
+	// ListAtRisk returns OPEN/LOADING containers whose cutoff_date falls within
+	// the next `days` calendar days (inclusive of overdue — days_to_cutoff < 0).
+	// Sorted by cutoff_date ASC so the most urgent row is first. When days <= 0
+	// the service defaults to 7.
+	ListAtRisk(ctx context.Context, days int) ([]AtRiskRow, error)
+
+	// AssignLoader sets or clears the loader on a container (BR-D21). When
+	// the container already has a different loader, the call is treated as a
+	// reassignment and writes a container_loader_log row (BR-D22). Caller
+	// must hold PlannerUp role (BR-D23) — enforced by the handler middleware,
+	// not re-checked here.
+	AssignLoader(ctx context.Context, in AssignLoaderInput) (Container, error)
+
+	// ListLoaderLog returns the full assignment audit trail for one container,
+	// newest entry first.
+	ListLoaderLog(ctx context.Context, containerID uuid.UUID) ([]ContainerLoaderLog, error)
+
+	// ExportPackingList writes the packing list for a SEALED container as an
+	// Excel (.xlsx) workbook to w. Returns ErrPreconditionFailed when the
+	// container is not yet SEALED, ErrNotFound when it does not exist.
+	ExportPackingList(ctx context.Context, id uuid.UUID, w io.Writer) error
+
+	// ChangeDestination updates destination_code/name on a container (BR-D24).
+	// Returns ErrInvalidTransition when the container is SEALED or SHIPPED
+	// (BR-D25). When the destination_code changes from a prior value, the
+	// vessel booking (vessel_id + cutoff_date) is cleared atomically and an
+	// audit row is written (BR-D26). Reason is required when reassigning to a
+	// different destination.
+	ChangeDestination(ctx context.Context, in ChangeDestinationInput) (Container, error)
+
+	// ListRouteLog returns the destination change audit trail for one container,
+	// newest entry first.
+	ListRouteLog(ctx context.Context, containerID uuid.UUID) ([]ContainerRouteChangeLog, error)
+
+	// SetFGComponentChecker wires the BR-PK-MULTI03 SEAL pre-check after
+	// construction (packing ↔ delivery cycle-break pattern). nil disables the
+	// guard.
+	SetFGComponentChecker(c FGComponentChecker)
 }
 
 // DefaultCapacityForType returns the ISO defaults for a container type. When

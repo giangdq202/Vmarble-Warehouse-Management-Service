@@ -69,8 +69,14 @@ func (s *concurrentMockStore) insertLot(_ context.Context, _ InventoryLot) error
 func (s *concurrentMockStore) selectLots(_ context.Context) ([]InventoryLot, error) {
 	return nil, nil
 }
+func (s *concurrentMockStore) selectLotByID(_ context.Context, _ uuid.UUID) (InventoryLot, error) {
+	return InventoryLot{}, nil
+}
 func (s *concurrentMockStore) selectLotsPaged(_ context.Context, _ httpkit.PageParams) ([]InventoryLot, int, error) {
 	return nil, 0, nil
+}
+func (s *concurrentMockStore) selectLotsKeyset(_ context.Context, _ string, _ httpkit.Cursor, _ int) ([]InventoryLot, error) {
+	return nil, nil
 }
 func (s *concurrentMockStore) deactivateLot(_ context.Context, _ uuid.UUID) error   { return nil }
 func (s *concurrentMockStore) insertSheets(_ context.Context, _ []BoardSheet) error { return nil }
@@ -115,8 +121,11 @@ func (s *concurrentMockStore) insertRemnant(_ context.Context, _ Remnant) error 
 func (s *concurrentMockStore) selectAvailableRemnantsByMinDimension(_ context.Context, _ domain.Dimension) ([]Remnant, error) {
 	return nil, nil
 }
-func (s *concurrentMockStore) selectTopRemnantSuggestions(_ context.Context, _ domain.Dimension, _ int) ([]RemnantSuggestion, error) {
+func (s *concurrentMockStore) selectTopRemnantSuggestions(_ context.Context, _ domain.Dimension, _ int, _ RemnantStrategy, _ *uuid.UUID) ([]RemnantSuggestion, error) {
 	return nil, nil
+}
+func (s *concurrentMockStore) selectMaterialStrategy(_ context.Context, _ uuid.UUID) (RemnantStrategy, error) {
+	return RemnantStrategyBestFit, nil
 }
 func (s *concurrentMockStore) selectRemnantsByFilter(_ context.Context, _ RemnantFilter, _ httpkit.PageParams) ([]Remnant, int, error) {
 	return nil, 0, nil
@@ -211,6 +220,12 @@ func (s *concurrentMockStore) markRemnantWasteAtomically(_ context.Context, remn
 }
 
 func (s *concurrentMockStore) releaseExpiredAllocations(_ context.Context, _ time.Time) (int64, error) {
+	return 0, nil
+}
+func (s *concurrentMockStore) selectRemnantAging(_ context.Context) ([]remnantAgingRow, error) {
+	return nil, nil
+}
+func (s *concurrentMockStore) expireStaleRemnants(_ context.Context, _ int) (int64, error) {
 	return 0, nil
 }
 

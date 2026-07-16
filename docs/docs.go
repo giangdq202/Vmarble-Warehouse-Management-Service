@@ -872,6 +872,18 @@ const docTemplate = `{
                         "description": "20GP / 40GP / 40HC",
                         "name": "container_type",
                         "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "filter by assigned loader (uuid)",
+                        "name": "loader_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "filter by vessel (uuid)",
+                        "name": "vessel_id",
+                        "in": "query"
                     }
                 ],
                 "responses": {
@@ -938,6 +950,42 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/containers/at-risk": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns containers whose cutoff_date is within the next ` + "`" + `days` + "`" + `\ncalendar days (default 7). Overdue containers (cutoff in the past)\nare included. Sorted by cutoff_date ASC (most urgent first).",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "delivery"
+                ],
+                "summary": "List at-risk containers — OPEN/LOADING with cutoff within N days",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "look-ahead window in days (default 7)",
+                        "name": "days",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/internal_module_delivery.AtRiskRow"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/containers/{id}": {
             "get": {
                 "security": [
@@ -966,6 +1014,70 @@ const docTemplate = `{
                         "description": "OK",
                         "schema": {
                             "$ref": "#/definitions/internal_module_delivery.Container"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/containers/{id}/assign-loader": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Sets loader_id on the container and writes an audit row. When the\ncontainer already has a different loader (reassignment), reason is\nmandatory (BR-D22). Send loader_id=null to unassign.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "delivery"
+                ],
+                "summary": "Assign or reassign a loader to a container (BR-D21/D22/D23)",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "container id (uuid)",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "payload",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_module_delivery.AssignLoaderInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_module_delivery.Container"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
                         }
                     },
                     "404": {
@@ -1023,6 +1135,78 @@ const docTemplate = `{
                     },
                     "409": {
                         "description": "Conflict",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/containers/{id}/change-destination": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "delivery"
+                ],
+                "summary": "Change container destination — clears vessel booking if DC changes (BR-D24/D25/D26)",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "container id (uuid)",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "payload",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_module_delivery.ChangeDestinationInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_module_delivery.Container"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "container is SEALED/SHIPPED",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -1322,6 +1506,51 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/containers/{id}/loader-log": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "delivery"
+                ],
+                "summary": "Loader assignment audit trail for a container",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "container id (uuid)",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/internal_module_delivery.ContainerLoaderLog"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/containers/{id}/loading-plan": {
             "get": {
                 "security": [
@@ -1439,6 +1668,55 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/containers/{id}/packing-list": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns a .xlsx file with container metadata and all loaded lines.\nReturns 412 when the container is not yet SEALED.",
+                "produces": [
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                ],
+                "tags": [
+                    "delivery"
+                ],
+                "summary": "Download packing list as Excel for a SEALED container",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "container id (uuid)",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK"
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "412": {
+                        "description": "Precondition Failed",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/containers/{id}/reopen": {
             "post": {
                 "security": [
@@ -1501,6 +1779,51 @@ const docTemplate = `{
                     },
                     "409": {
                         "description": "Conflict",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/containers/{id}/route-log": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "delivery"
+                ],
+                "summary": "Destination change audit trail for a container",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "container id (uuid)",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/internal_module_delivery.ContainerRouteChangeLog"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -3054,6 +3377,18 @@ const docTemplate = `{
                         "description": "filter by work order id (uuid)",
                         "name": "wo_id",
                         "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "filter created_at from (RFC3339 or YYYY-MM-DD)",
+                        "name": "from",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "filter created_at to (RFC3339 or YYYY-MM-DD, inclusive day-end)",
+                        "name": "to",
+                        "in": "query"
                     }
                 ],
                 "responses": {
@@ -4039,6 +4374,18 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
+                        "description": "filter reported_at from (RFC3339 or YYYY-MM-DD)",
+                        "name": "from",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "filter reported_at to (RFC3339 or YYYY-MM-DD, inclusive day-end)",
+                        "name": "to",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
                         "description": "opaque cursor token; omit for first page",
                         "name": "cursor",
                         "in": "query"
@@ -4277,6 +4624,97 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/inventory/remnants/aging": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns all AVAILABLE remnants with age in days, classified as OK / AT_RISK / EXPIRED.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "inventory"
+                ],
+                "summary": "Get remnant aging report",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "days before AT_RISK (default 60)",
+                        "name": "warn_days",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "days before EXPIRED candidate (default 90)",
+                        "name": "expire_days",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_module_inventory.RemnantAgingSummary"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/inventory/remnants/expire": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Flips AVAILABLE remnants older than age_days to EXPIRED. Default 90 days.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "inventory"
+                ],
+                "summary": "Expire stale AVAILABLE remnants (admin)",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "age threshold in days (default 90)",
+                        "name": "age_days",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/inventory/remnants/suggestions": {
             "get": {
                 "security": [
@@ -4284,14 +4722,14 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Returns up to ` + "`" + `limit` + "`" + ` AVAILABLE remnants ranked by Best Fit (smallest area) + FIFO (oldest first). Each suggestion includes the remnant's storage location when available.",
+                "description": "Returns up to ` + "`" + `limit` + "`" + ` AVAILABLE remnants ranked by the chosen strategy (best_fit or fifo). Each suggestion includes age_days, score, reason, and storage location when available.",
                 "produces": [
                     "application/json"
                 ],
                 "tags": [
                     "inventory"
                 ],
-                "summary": "Suggest best-fit remnants for a required dimension",
+                "summary": "Suggest remnants for a required dimension",
                 "parameters": [
                     {
                         "type": "integer",
@@ -4311,6 +4749,22 @@ const docTemplate = `{
                         "type": "integer",
                         "description": "max results (default 3, max 10)",
                         "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "enum": [
+                            "best_fit",
+                            "fifo"
+                        ],
+                        "type": "string",
+                        "description": "best_fit or fifo (default: material config → best_fit)",
+                        "name": "strategy",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "restrict to remnants from this material",
+                        "name": "material_id",
                         "in": "query"
                     }
                 ],
@@ -6363,6 +6817,210 @@ const docTemplate = `{
                     },
                     "412": {
                         "description": "Precondition Failed",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/planning/work-orders/{id}/boost-priority": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "planning"
+                ],
+                "summary": "Boost work order priority",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "work order id (uuid)",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "reason",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_module_planning.boostPriorityRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_module_planning.BoostPriorityResult"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/planning/work-orders/{id}/check-feasibility": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "planning"
+                ],
+                "summary": "Check work order material feasibility",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "work order id (uuid)",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_module_planning.FeasibilityResult"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/planning/work-orders/{id}/preempt": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "planning"
+                ],
+                "summary": "Preempt a work order to free materials for another",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "target work order id (uuid)",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "from_wo_id + reason",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_module_planning.preemptRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_module_planning.PreemptResult"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "412": {
+                        "description": "Precondition Failed",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/planning/work-orders/{id}/preempt-candidates": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "planning"
+                ],
+                "summary": "List preemption candidates for a work order",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "work order id (uuid)",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/internal_module_planning.PreemptCandidate"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -8679,6 +9337,76 @@ const docTemplate = `{
                         }
                     }
                 }
+            },
+            "patch": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "catalog"
+                ],
+                "summary": "Update SKU export/shipping fields (BR-SKU02)",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "sku id (uuid)",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "payload",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_module_catalog.UpdateSKUInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_module_catalog.SKU"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
             }
         },
         "/api/v1/skus/{id}/bom": {
@@ -8786,6 +9514,210 @@ const docTemplate = `{
                         "schema": {
                             "$ref": "#/definitions/internal_module_catalog.BOM"
                         }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/skus/{id}/packing-units": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "catalog"
+                ],
+                "summary": "List packing units for a SKU",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "sku id (uuid)",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/internal_module_catalog.PackingUnit"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/skus/{id}/packing-units/{unit}": {
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "catalog"
+                ],
+                "summary": "Create or replace a packing unit for a SKU (BR-SKU04/05)",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "sku id (uuid)",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "unit: piece|set|carton",
+                        "name": "unit",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "payload",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_module_catalog.UpsertPackingUnitInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_module_catalog.PackingUnit"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "catalog"
+                ],
+                "summary": "Delete a packing unit for a SKU",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "sku id (uuid)",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "unit: piece|set|carton",
+                        "name": "unit",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
                     },
                     "400": {
                         "description": "Bad Request",
@@ -9066,6 +9998,63 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/uploads/presign": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns a short-lived PUT URL (5 min) and a permanent public URL.\nThe client PUTs the file bytes directly to upload_url, then stores\npublic_url in the relevant entity (loading exception, defect, rejection).",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "uploads"
+                ],
+                "summary": "Generate a presigned upload URL for R2 object storage",
+                "parameters": [
+                    {
+                        "description": "content_type: image/jpeg | image/png | image/webp",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_platform_storage.presignRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_platform_storage.PresignResult"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/users/me": {
             "get": {
                 "security": [
@@ -9126,6 +10115,78 @@ const docTemplate = `{
                             "type": "array",
                             "items": {
                                 "$ref": "#/definitions/internal_module_authn.WorkerSummary"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/vessels": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "shipping"
+                ],
+                "summary": "List vessels",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "page (default 1)",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "limit (default 10, max 100)",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "ILIKE on vessel name or voyage number",
+                        "name": "search",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "cutoff_date \u003e= (YYYY-MM-DD or RFC3339)",
+                        "name": "cutoff_from",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "cutoff_date \u003c (YYYY-MM-DD or RFC3339, exclusive)",
+                        "name": "cutoff_to",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "etd \u003e= (YYYY-MM-DD or RFC3339)",
+                        "name": "etd_from",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "etd \u003c (YYYY-MM-DD or RFC3339, exclusive)",
+                        "name": "etd_to",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_shipping_Vessel"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
                             }
                         }
                     }
@@ -9649,6 +10710,75 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/work-orders/{id}/claim": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "production"
+                ],
+                "summary": "CNC operator self-claims a PLANNED unassigned work order",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "work order id (uuid)",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_module_production.WorkOrder"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "412": {
+                        "description": "Precondition Failed",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/work-orders/{id}/consumptions": {
             "get": {
                 "security": [
@@ -10070,6 +11200,150 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/work-orders/{id}/qc-history": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "barcode"
+                ],
+                "summary": "Get QC scan history for a work order",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "work order id (uuid)",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/internal_module_barcode.QCEvent"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/work-orders/{id}/reassign": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "production"
+                ],
+                "summary": "Admin force-reassign a work order to a different CNC operator",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "work order id (uuid)",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "payload",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_module_production.ReassignWorkOrderInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_module_production.WorkOrder"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "412": {
+                        "description": "Precondition Failed",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/work-orders/{id}/suggest-assignment": {
             "post": {
                 "security": [
@@ -10293,13 +11567,15 @@ const docTemplate = `{
                 "AVAILABLE",
                 "ALLOCATED",
                 "CONSUMED",
-                "WASTE"
+                "WASTE",
+                "EXPIRED"
             ],
             "x-enum-varnames": [
                 "RemnantAvailable",
                 "RemnantAllocated",
                 "RemnantConsumed",
-                "RemnantWaste"
+                "RemnantWaste",
+                "RemnantExpired"
             ]
         },
         "github_com_vmarble_warehouse-management-service_internal_domain.WorkOrderStatus": {
@@ -10337,6 +11613,12 @@ const docTemplate = `{
                 },
                 "next_cursor": {
                     "type": "string"
+                },
+                "total": {
+                    "type": "integer"
+                },
+                "total_is_estimate": {
+                    "type": "boolean"
                 }
             }
         },
@@ -10354,6 +11636,12 @@ const docTemplate = `{
                 },
                 "next_cursor": {
                     "type": "string"
+                },
+                "total": {
+                    "type": "integer"
+                },
+                "total_is_estimate": {
+                    "type": "boolean"
                 }
             }
         },
@@ -10371,6 +11659,12 @@ const docTemplate = `{
                 },
                 "next_cursor": {
                     "type": "string"
+                },
+                "total": {
+                    "type": "integer"
+                },
+                "total_is_estimate": {
+                    "type": "boolean"
                 }
             }
         },
@@ -10388,6 +11682,12 @@ const docTemplate = `{
                 },
                 "next_cursor": {
                     "type": "string"
+                },
+                "total": {
+                    "type": "integer"
+                },
+                "total_is_estimate": {
+                    "type": "boolean"
                 }
             }
         },
@@ -10405,6 +11705,12 @@ const docTemplate = `{
                 },
                 "next_cursor": {
                     "type": "string"
+                },
+                "total": {
+                    "type": "integer"
+                },
+                "total_is_estimate": {
+                    "type": "boolean"
                 }
             }
         },
@@ -10422,6 +11728,12 @@ const docTemplate = `{
                 },
                 "next_cursor": {
                     "type": "string"
+                },
+                "total": {
+                    "type": "integer"
+                },
+                "total_is_estimate": {
+                    "type": "boolean"
                 }
             }
         },
@@ -10439,6 +11751,12 @@ const docTemplate = `{
                 },
                 "next_cursor": {
                     "type": "string"
+                },
+                "total": {
+                    "type": "integer"
+                },
+                "total_is_estimate": {
+                    "type": "boolean"
                 }
             }
         },
@@ -10858,6 +12176,32 @@ const docTemplate = `{
                 }
             }
         },
+        "github_com_vmarble_warehouse-management-service_internal_platform_httpkit.PagedResult-internal_module_shipping_Vessel": {
+            "type": "object",
+            "properties": {
+                "current_page": {
+                    "type": "integer"
+                },
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_module_shipping.Vessel"
+                    }
+                },
+                "limit": {
+                    "type": "integer"
+                },
+                "total_is_estimate": {
+                    "type": "boolean"
+                },
+                "total_items": {
+                    "type": "integer"
+                },
+                "total_pages": {
+                    "type": "integer"
+                }
+            }
+        },
         "internal_module_authn.CreateUserInput": {
             "type": "object",
             "required": [
@@ -11081,6 +12425,35 @@ const docTemplate = `{
                 "LabelSize100x70"
             ]
         },
+        "internal_module_barcode.QCEvent": {
+            "type": "object",
+            "properties": {
+                "barcode_id": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "note": {
+                    "type": "string"
+                },
+                "result": {
+                    "$ref": "#/definitions/internal_module_barcode.ScanCheckpoint"
+                },
+                "scan_event_id": {
+                    "type": "string"
+                },
+                "scanned_by": {
+                    "type": "string"
+                },
+                "work_order_id": {
+                    "type": "string"
+                }
+            }
+        },
         "internal_module_barcode.RecordScanInput": {
             "type": "object",
             "properties": {
@@ -11108,11 +12481,15 @@ const docTemplate = `{
             "type": "string",
             "enum": [
                 "CNC_COMPLETE",
+                "QC_PASSED",
+                "QC_FAILED",
                 "FINISHED_GOODS",
                 "SHIPPED"
             ],
             "x-enum-varnames": [
                 "CheckpointCNCComplete",
+                "CheckpointQCPassed",
+                "CheckpointQCFailed",
                 "CheckpointFinishedGoods",
                 "CheckpointShipped"
             ]
@@ -11356,9 +12733,29 @@ const docTemplate = `{
                 "MaterialTypeOther"
             ]
         },
+        "internal_module_catalog.PackingUnit": {
+            "type": "object",
+            "properties": {
+                "is_default": {
+                    "type": "boolean"
+                },
+                "pieces_per_unit": {
+                    "type": "integer"
+                },
+                "sku_id": {
+                    "type": "string"
+                },
+                "unit": {
+                    "type": "string"
+                }
+            }
+        },
         "internal_module_catalog.SKU": {
             "type": "object",
             "properties": {
+                "cbm_per_unit": {
+                    "type": "number"
+                },
                 "code": {
                     "type": "string"
                 },
@@ -11367,6 +12764,12 @@ const docTemplate = `{
                 },
                 "dimensions": {
                     "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.Dimension"
+                },
+                "height_mm": {
+                    "type": "integer"
+                },
+                "hs_code": {
+                    "type": "string"
                 },
                 "id": {
                     "type": "string"
@@ -11379,6 +12782,9 @@ const docTemplate = `{
                 },
                 "requires_metal": {
                     "type": "boolean"
+                },
+                "weight_kg": {
+                    "type": "number"
                 }
             }
         },
@@ -11404,6 +12810,40 @@ const docTemplate = `{
                 },
                 "min_remnant_width_mm": {
                     "type": "integer"
+                }
+            }
+        },
+        "internal_module_catalog.UpdateSKUInput": {
+            "type": "object",
+            "properties": {
+                "heightMM": {
+                    "type": "integer"
+                },
+                "hscode": {
+                    "type": "string"
+                },
+                "skuid": {
+                    "type": "string"
+                },
+                "weightKg": {
+                    "type": "number"
+                }
+            }
+        },
+        "internal_module_catalog.UpsertPackingUnitInput": {
+            "type": "object",
+            "properties": {
+                "is_default": {
+                    "type": "boolean"
+                },
+                "pieces_per_unit": {
+                    "type": "integer"
+                },
+                "sku_id": {
+                    "type": "string"
+                },
+                "unit": {
+                    "type": "string"
                 }
             }
         },
@@ -11460,6 +12900,10 @@ const docTemplate = `{
                 "finalized_by": {
                     "type": "string"
                 },
+                "fx_rate_to_vnd": {
+                    "description": "FXRateToVND is the closest-on-or-before-WO-completion rate for SOCurrency.\nNil when SOCurrency is nil or \"VND\".",
+                    "type": "number"
+                },
                 "id": {
                     "type": "string"
                 },
@@ -11470,6 +12914,10 @@ const docTemplate = `{
                     "$ref": "#/definitions/github_com_vmarble_warehouse-management-service_internal_domain.Money"
                 },
                 "sku_id": {
+                    "type": "string"
+                },
+                "so_currency": {
+                    "description": "SOCurrency is the ISO-4217 currency of the linked sales order line.\nNil for VND orders or when the WO has no SO link.",
                     "type": "string"
                 },
                 "total_cost": {
@@ -11810,6 +13258,9 @@ const docTemplate = `{
         "internal_module_delivery.AddLineInput": {
             "type": "object",
             "properties": {
+                "allow_overload": {
+                    "type": "boolean"
+                },
                 "cbm_total": {
                     "type": "number"
                 },
@@ -11824,6 +13275,69 @@ const docTemplate = `{
                 },
                 "weight_kg_total": {
                     "type": "number"
+                }
+            }
+        },
+        "internal_module_delivery.AssignLoaderInput": {
+            "type": "object",
+            "properties": {
+                "loader_id": {
+                    "description": "nil = unassign",
+                    "type": "string"
+                },
+                "reason": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_module_delivery.AtRiskRow": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "type": "string"
+                },
+                "cutoff_date": {
+                    "type": "string"
+                },
+                "days_to_cutoff": {
+                    "type": "integer"
+                },
+                "fill_pct_cbm": {
+                    "description": "0–100, 0 when max_cbm=0",
+                    "type": "number"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "line_count": {
+                    "type": "integer"
+                },
+                "max_cbm": {
+                    "type": "number"
+                },
+                "risk_level": {
+                    "description": "RED | ORANGE",
+                    "type": "string"
+                },
+                "used_cbm": {
+                    "type": "number"
+                },
+                "vessel_name": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_module_delivery.ChangeDestinationInput": {
+            "type": "object",
+            "properties": {
+                "destination_code": {
+                    "type": "string"
+                },
+                "destination_name": {
+                    "type": "string"
+                },
+                "reason": {
+                    "type": "string"
                 }
             }
         },
@@ -11842,6 +13356,15 @@ const docTemplate = `{
                 "created_by": {
                     "type": "string"
                 },
+                "cutoff_date": {
+                    "type": "string"
+                },
+                "destination_code": {
+                    "type": "string"
+                },
+                "destination_name": {
+                    "type": "string"
+                },
                 "fill_pct_cbm": {
                     "type": "number"
                 },
@@ -11857,6 +13380,9 @@ const docTemplate = `{
                     "items": {
                         "$ref": "#/definitions/internal_module_delivery.ContainerLine"
                     }
+                },
+                "loader_id": {
+                    "type": "string"
                 },
                 "max_cbm": {
                     "type": "number"
@@ -11881,6 +13407,9 @@ const docTemplate = `{
                 },
                 "used_weight_kg": {
                     "type": "number"
+                },
+                "vessel_id": {
+                    "type": "string"
                 }
             }
         },
@@ -11960,6 +13489,64 @@ const docTemplate = `{
                 }
             }
         },
+        "internal_module_delivery.ContainerLoaderLog": {
+            "type": "object",
+            "properties": {
+                "assigned_at": {
+                    "type": "string"
+                },
+                "assigned_by": {
+                    "type": "string"
+                },
+                "container_id": {
+                    "type": "string"
+                },
+                "from_loader_id": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "reason": {
+                    "type": "string"
+                },
+                "to_loader_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_module_delivery.ContainerRouteChangeLog": {
+            "type": "object",
+            "properties": {
+                "actor_id": {
+                    "type": "string"
+                },
+                "changed_at": {
+                    "type": "string"
+                },
+                "container_id": {
+                    "type": "string"
+                },
+                "from_dc": {
+                    "type": "string"
+                },
+                "from_dest": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "reason": {
+                    "type": "string"
+                },
+                "to_dc": {
+                    "type": "string"
+                },
+                "to_dest": {
+                    "type": "string"
+                }
+            }
+        },
         "internal_module_delivery.ContainerStatusLogEntry": {
             "type": "object",
             "properties": {
@@ -11982,6 +13569,44 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "to_status": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_module_delivery.ContainerTransferAudit": {
+            "type": "object",
+            "properties": {
+                "actor_id": {
+                    "type": "string"
+                },
+                "actor_role": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "is_cross_plan": {
+                    "type": "boolean"
+                },
+                "line_id": {
+                    "type": "string"
+                },
+                "qty_transferred": {
+                    "type": "integer"
+                },
+                "reason": {
+                    "type": "string"
+                },
+                "sku_id": {
+                    "type": "string"
+                },
+                "source_container_id": {
+                    "type": "string"
+                },
+                "target_container_id": {
                     "type": "string"
                 }
             }
@@ -12195,6 +13820,9 @@ const docTemplate = `{
                 "qty": {
                     "type": "integer"
                 },
+                "reason": {
+                    "type": "string"
+                },
                 "target_container_id": {
                     "type": "string"
                 },
@@ -12206,6 +13834,9 @@ const docTemplate = `{
         "internal_module_delivery.TransferLineResult": {
             "type": "object",
             "properties": {
+                "audit": {
+                    "$ref": "#/definitions/internal_module_delivery.ContainerTransferAudit"
+                },
                 "source_line": {
                     "description": "nil when the source line was fully consumed",
                     "allOf": [
@@ -12768,17 +14399,83 @@ const docTemplate = `{
                 }
             }
         },
+        "internal_module_inventory.RemnantAgingLevel": {
+            "type": "string",
+            "enum": [
+                "OK",
+                "AT_RISK",
+                "EXPIRED"
+            ],
+            "x-enum-comments": {
+                "RemnantAgingAtRisk": "age \u003e= warn_days",
+                "RemnantAgingExpired": "age \u003e= expire_days (candidate for auto-expire)"
+            },
+            "x-enum-varnames": [
+                "RemnantAgingOK",
+                "RemnantAgingAtRisk",
+                "RemnantAgingExpired"
+            ]
+        },
+        "internal_module_inventory.RemnantAgingRow": {
+            "type": "object",
+            "properties": {
+                "age_days": {
+                    "type": "integer"
+                },
+                "level": {
+                    "$ref": "#/definitions/internal_module_inventory.RemnantAgingLevel"
+                },
+                "remnant": {
+                    "$ref": "#/definitions/internal_module_inventory.Remnant"
+                }
+            }
+        },
+        "internal_module_inventory.RemnantAgingSummary": {
+            "type": "object",
+            "properties": {
+                "expire_days": {
+                    "type": "integer"
+                },
+                "rows": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_module_inventory.RemnantAgingRow"
+                    }
+                },
+                "total_at_risk": {
+                    "type": "integer"
+                },
+                "total_expired": {
+                    "type": "integer"
+                },
+                "total_ok": {
+                    "type": "integer"
+                },
+                "warn_days": {
+                    "type": "integer"
+                }
+            }
+        },
         "internal_module_inventory.RemnantSuggestion": {
             "type": "object",
             "properties": {
+                "age_days": {
+                    "type": "integer"
+                },
                 "location": {
                     "$ref": "#/definitions/internal_module_inventory.StorageLocation"
                 },
                 "rank": {
                     "type": "integer"
                 },
+                "reason": {
+                    "type": "string"
+                },
                 "remnant": {
                     "$ref": "#/definitions/internal_module_inventory.Remnant"
+                },
+                "score": {
+                    "type": "number"
                 }
             }
         },
@@ -13198,7 +14895,13 @@ const docTemplate = `{
         "internal_module_packing.FGPool": {
             "type": "object",
             "properties": {
+                "barcode_code": {
+                    "type": "string"
+                },
                 "barcode_id": {
+                    "type": "string"
+                },
+                "component_type": {
                     "type": "string"
                 },
                 "container_line_id": {
@@ -13229,6 +14932,12 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "status": {
+                    "type": "string"
+                },
+                "unit_index": {
+                    "type": "integer"
+                },
+                "work_order_code": {
                     "type": "string"
                 },
                 "work_order_id": {
@@ -13298,6 +15007,17 @@ const docTemplate = `{
                 }
             }
         },
+        "internal_module_planning.BoostPriorityResult": {
+            "type": "object",
+            "properties": {
+                "audit_id": {
+                    "type": "string"
+                },
+                "boosted_at": {
+                    "type": "string"
+                }
+            }
+        },
         "internal_module_planning.CreatePlanInput": {
             "type": "object",
             "properties": {
@@ -13314,6 +15034,43 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "sales_order_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_module_planning.FeasibilityResult": {
+            "type": "object",
+            "properties": {
+                "feasible": {
+                    "type": "boolean"
+                },
+                "reason": {
+                    "type": "string"
+                },
+                "suggestions": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_module_planning.FeasibilitySuggestion"
+                    }
+                }
+            }
+        },
+        "internal_module_planning.FeasibilitySuggestion": {
+            "type": "object",
+            "properties": {
+                "days_to_due": {
+                    "type": "integer"
+                },
+                "freed_qty": {
+                    "type": "integer"
+                },
+                "score": {
+                    "type": "number"
+                },
+                "sku_code": {
+                    "type": "string"
+                },
+                "wo_id": {
                     "type": "string"
                 }
             }
@@ -13416,9 +15173,62 @@ const docTemplate = `{
                 }
             }
         },
+        "internal_module_planning.PreemptCandidate": {
+            "type": "object",
+            "properties": {
+                "current_so_code": {
+                    "type": "string"
+                },
+                "freed_qty": {
+                    "type": "integer"
+                },
+                "slack_days": {
+                    "type": "integer"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "wo_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_module_planning.PreemptResult": {
+            "type": "object",
+            "properties": {
+                "audit_id": {
+                    "type": "string"
+                },
+                "freed_qty": {
+                    "type": "integer"
+                },
+                "preempted_at": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_module_planning.boostPriorityRequest": {
+            "type": "object",
+            "properties": {
+                "reason": {
+                    "type": "string"
+                }
+            }
+        },
         "internal_module_planning.cancelPlanRequest": {
             "type": "object",
             "properties": {
+                "reason": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_module_planning.preemptRequest": {
+            "type": "object",
+            "properties": {
+                "from_wo_id": {
+                    "type": "string"
+                },
                 "reason": {
                     "type": "string"
                 }
@@ -13636,6 +15446,17 @@ const docTemplate = `{
                 }
             }
         },
+        "internal_module_production.ReassignWorkOrderInput": {
+            "type": "object",
+            "properties": {
+                "new_user_id": {
+                    "type": "string"
+                },
+                "reason": {
+                    "type": "string"
+                }
+            }
+        },
         "internal_module_production.RecordConsumptionInput": {
             "type": "object",
             "properties": {
@@ -13736,6 +15557,14 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "plan_id": {
+                    "type": "string"
+                },
+                "priority_boost": {
+                    "description": "PriorityBoost marks that a planner has manually elevated this WO's\nscheduling priority (BR-PL05). Set by BoostPriority; never cleared.",
+                    "type": "boolean"
+                },
+                "qc_status": {
+                    "description": "QCStatus is the denormalized last QC result for this work order.\nNil means no QC scan has been recorded yet.",
                     "type": "string"
                 },
                 "quantity": {
@@ -13875,6 +15704,9 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "received_at": {
+                    "type": "string"
+                },
+                "source_rejection_id": {
                     "type": "string"
                 },
                 "status": {
@@ -14339,6 +16171,68 @@ const docTemplate = `{
                 },
                 "unit_price": {
                     "type": "integer"
+                }
+            }
+        },
+        "internal_module_shipping.Vessel": {
+            "type": "object",
+            "properties": {
+                "carrier": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "created_by": {
+                    "type": "string"
+                },
+                "cutoff_date": {
+                    "type": "string"
+                },
+                "eta": {
+                    "type": "string"
+                },
+                "etd": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "port_of_discharge": {
+                    "type": "string"
+                },
+                "port_of_loading": {
+                    "type": "string"
+                },
+                "voyage_number": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_platform_storage.PresignResult": {
+            "type": "object",
+            "properties": {
+                "public_url": {
+                    "description": "PublicURL is the permanent URL to store in the database.",
+                    "type": "string"
+                },
+                "upload_url": {
+                    "description": "UploadURL is the short-lived PUT URL the client sends bytes to.",
+                    "type": "string"
+                }
+            }
+        },
+        "internal_platform_storage.presignRequest": {
+            "type": "object",
+            "required": [
+                "content_type"
+            ],
+            "properties": {
+                "content_type": {
+                    "type": "string"
                 }
             }
         }

@@ -49,3 +49,24 @@ type AdvanceWOInput struct {
 type CutNotifier interface {
 	NotifyCuttingRecorded(ctx context.Context, woID, cuttingRecordID string) error
 }
+
+// PurchaseRequestCreator auto-creates a replenishment PO in the purchasing
+// module when a lot is rejected. Implementation wired in main.go.
+// Calls in RejectLot and UpdateRejectionClaim are best-effort — errors are
+// logged but do not abort the business write.
+type PurchaseRequestCreator interface {
+	// CreateFromRejection creates a DRAFT PO linked to the rejection record.
+	CreateFromRejection(ctx context.Context, in PRFromRejectionInput) error
+	// CancelFromRejection cancels the auto-created PO when the claim is APPROVED.
+	CancelFromRejection(ctx context.Context, rejectionID uuid.UUID) error
+}
+
+// PRFromRejectionInput is the inventory module's view of the PO creation call.
+type PRFromRejectionInput struct {
+	RejectionID uuid.UUID
+	LotID       uuid.UUID
+	MaterialID  uuid.UUID
+	Supplier    string
+	QtySheets   int
+	ActorID     uuid.UUID
+}

@@ -13,6 +13,8 @@ type store interface {
 	insertLot(ctx context.Context, lot InventoryLot) error
 	selectLots(ctx context.Context) ([]InventoryLot, error)
 	selectLotsPaged(ctx context.Context, p httpkit.PageParams) ([]InventoryLot, int, error)
+	selectLotsKeyset(ctx context.Context, search string, cur httpkit.Cursor, limit int) ([]InventoryLot, error)
+	selectLotByID(ctx context.Context, id uuid.UUID) (InventoryLot, error)
 	deactivateLot(ctx context.Context, id uuid.UUID) error
 
 	insertSheets(ctx context.Context, sheets []BoardSheet) error
@@ -46,9 +48,13 @@ type store interface {
 	insertRemnant(ctx context.Context, r Remnant) error
 	selectAvailableRemnantsByMinDimension(ctx context.Context, minDim domain.Dimension) ([]Remnant, error)
 	// selectTopRemnantSuggestions returns up to `limit` AVAILABLE remnants whose
-	// bounding box fits minDim, ranked by Best Fit (smallest area) + FIFO
-	// (oldest created_at). Each result is LEFT JOINed with storage_locations.
-	selectTopRemnantSuggestions(ctx context.Context, minDim domain.Dimension, limit int) ([]RemnantSuggestion, error)
+	// bounding box fits minDim. strategy controls ranking order; materialID
+	// optionally restricts to a single material. Each result is LEFT JOINed
+	// with storage_locations.
+	selectTopRemnantSuggestions(ctx context.Context, minDim domain.Dimension, limit int, strategy RemnantStrategy, materialID *uuid.UUID) ([]RemnantSuggestion, error)
+	// selectMaterialStrategy returns the remnant_selection_strategy for a
+	// material, or ErrNotFound if the material doesn't exist.
+	selectMaterialStrategy(ctx context.Context, materialID uuid.UUID) (RemnantStrategy, error)
 	// selectRemnantsByFilter returns a paginated slice of remnants matching the
 	// filter, plus the total count of matching rows.
 	selectRemnantsByFilter(ctx context.Context, f RemnantFilter, p httpkit.PageParams) ([]Remnant, int, error)
@@ -122,6 +128,13 @@ type store interface {
 	// are cleared). Returns the number of rows updated.
 	releaseExpiredAllocations(ctx context.Context, before time.Time) (int64, error)
 
+	// selectRemnantAging returns all AVAILABLE remnants with their age in days,
+	// ordered oldest first.
+	selectRemnantAging(ctx context.Context) ([]remnantAgingRow, error)
+	// expireStaleRemnants sets status=EXPIRED on all AVAILABLE remnants older
+	// than ageDays. Returns the number of rows updated.
+	expireStaleRemnants(ctx context.Context, ageDays int) (int64, error)
+
 	// ── BR-INV01..06: QC + supplier claim ────────────────────────────────
 
 	// qcPassLotAtomically transitions every PENDING_QC sheet of the lot to
@@ -146,6 +159,13 @@ type rejectLotOp struct {
 	LotID     uuid.UUID
 	Qty       int
 	Rejection MaterialRejection
+}
+
+// remnantAgingRow is the raw result from selectRemnantAging — a Remnant plus
+// its computed age so the service can classify it without a second query.
+type remnantAgingRow struct {
+	Remnant Remnant
+	AgeDays int
 }
 
 // updateClaimRow is the post-validation payload handed to the store.

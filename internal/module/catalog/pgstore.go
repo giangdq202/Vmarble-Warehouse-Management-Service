@@ -166,7 +166,8 @@ func (s *pgStore) insertSKU(ctx context.Context, sku SKU) error {
 
 func (s *pgStore) selectSKUs(ctx context.Context) ([]SKU, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT id, code, name, length_mm, width_mm, requires_metal, is_active, created_at
+		`SELECT id, code, name, length_mm, width_mm, requires_metal, is_active,
+		        height_mm, weight_kg, hs_code, cbm_per_unit, created_at
 		 FROM skus WHERE is_active = true ORDER BY created_at`,
 	)
 	if err != nil {
@@ -178,7 +179,8 @@ func (s *pgStore) selectSKUs(ctx context.Context) ([]SKU, error) {
 	for rows.Next() {
 		var sk SKU
 		if err := rows.Scan(&sk.ID, &sk.Code, &sk.Name, &sk.Dimensions.LengthMM, &sk.Dimensions.WidthMM,
-			&sk.RequiresMetal, &sk.IsActive, &sk.CreatedAt); err != nil {
+			&sk.RequiresMetal, &sk.IsActive,
+			&sk.HeightMM, &sk.WeightKg, &sk.HSCode, &sk.CbmPerUnit, &sk.CreatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, sk)
@@ -213,7 +215,8 @@ func (s *pgStore) selectSKUsPaged(ctx context.Context, p httpkit.PageParams) ([]
 	}
 
 	query := fmt.Sprintf(
-		`SELECT id, code, name, length_mm, width_mm, requires_metal, is_active, created_at
+		`SELECT id, code, name, length_mm, width_mm, requires_metal, is_active,
+		        height_mm, weight_kg, hs_code, cbm_per_unit, created_at
 		 FROM skus
 		 WHERE is_active = true AND (name ILIKE $1 OR code ILIKE $1)
 		 ORDER BY %s %s
@@ -231,7 +234,8 @@ func (s *pgStore) selectSKUsPaged(ctx context.Context, p httpkit.PageParams) ([]
 		var sku SKU
 		if err := rows.Scan(&sku.ID, &sku.Code, &sku.Name,
 			&sku.Dimensions.LengthMM, &sku.Dimensions.WidthMM,
-			&sku.RequiresMetal, &sku.IsActive, &sku.CreatedAt); err != nil {
+			&sku.RequiresMetal, &sku.IsActive,
+			&sku.HeightMM, &sku.WeightKg, &sku.HSCode, &sku.CbmPerUnit, &sku.CreatedAt); err != nil {
 			return nil, 0, err
 		}
 		out = append(out, sku)
@@ -242,11 +246,13 @@ func (s *pgStore) selectSKUsPaged(ctx context.Context, p httpkit.PageParams) ([]
 func (s *pgStore) selectSKUByID(ctx context.Context, id uuid.UUID) (SKU, error) {
 	var sku SKU
 	err := s.pool.QueryRow(ctx,
-		`SELECT id, code, name, length_mm, width_mm, requires_metal, is_active, created_at
+		`SELECT id, code, name, length_mm, width_mm, requires_metal, is_active,
+		        height_mm, weight_kg, hs_code, cbm_per_unit, created_at
 		 FROM skus WHERE id = $1`,
 		id,
 	).Scan(&sku.ID, &sku.Code, &sku.Name, &sku.Dimensions.LengthMM, &sku.Dimensions.WidthMM,
-		&sku.RequiresMetal, &sku.IsActive, &sku.CreatedAt)
+		&sku.RequiresMetal, &sku.IsActive,
+		&sku.HeightMM, &sku.WeightKg, &sku.HSCode, &sku.CbmPerUnit, &sku.CreatedAt)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return SKU{}, domain.ErrNotFound
@@ -254,6 +260,155 @@ func (s *pgStore) selectSKUByID(ctx context.Context, id uuid.UUID) (SKU, error) 
 		return SKU{}, err
 	}
 	return sku, nil
+}
+
+func (s *pgStore) updateSKUExportFields(ctx context.Context, in UpdateSKUInput) (SKU, error) {
+	var sku SKU
+	err := s.pool.QueryRow(ctx,
+		`UPDATE skus SET
+		    height_mm = COALESCE($2, height_mm),
+		    weight_kg = COALESCE($3, weight_kg),
+		    hs_code   = COALESCE($4, hs_code)
+		 WHERE id = $1 AND is_active = true
+		 RETURNING id, code, name, length_mm, width_mm, requires_metal, is_active,
+		           height_mm, weight_kg, hs_code, cbm_per_unit, created_at`,
+		in.SKUID, in.HeightMM, in.WeightKg, in.HSCode,
+	).Scan(&sku.ID, &sku.Code, &sku.Name, &sku.Dimensions.LengthMM, &sku.Dimensions.WidthMM,
+		&sku.RequiresMetal, &sku.IsActive,
+		&sku.HeightMM, &sku.WeightKg, &sku.HSCode, &sku.CbmPerUnit, &sku.CreatedAt)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return SKU{}, domain.ErrNotFound
+		}
+		return SKU{}, err
+	}
+	return sku, nil
+}
+
+func (s *pgStore) upsertPackingUnit(ctx context.Context, in UpsertPackingUnitInput) (PackingUnit, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return PackingUnit{}, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	if in.IsDefault {
+		_, err = tx.Exec(ctx,
+			`UPDATE sku_packing_units SET is_default = false WHERE sku_id = $1 AND is_default = true`,
+			in.SKUID,
+		)
+		if err != nil {
+			return PackingUnit{}, err
+		}
+	}
+
+	var pu PackingUnit
+	err = tx.QueryRow(ctx,
+		`INSERT INTO sku_packing_units (sku_id, unit, pieces_per_unit, is_default)
+		 VALUES ($1, $2, $3, $4)
+		 ON CONFLICT (sku_id, unit) DO UPDATE
+		     SET pieces_per_unit = EXCLUDED.pieces_per_unit,
+		         is_default      = EXCLUDED.is_default
+		 RETURNING sku_id, unit, pieces_per_unit, is_default`,
+		in.SKUID, in.Unit, in.PiecesPerUnit, in.IsDefault,
+	).Scan(&pu.SKUID, &pu.Unit, &pu.PiecesPerUnit, &pu.IsDefault)
+	if err != nil {
+		return PackingUnit{}, err
+	}
+	return pu, tx.Commit(ctx)
+}
+
+func (s *pgStore) selectPackingUnitsBySkuID(ctx context.Context, skuID uuid.UUID) ([]PackingUnit, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT sku_id, unit, pieces_per_unit, is_default
+		 FROM sku_packing_units WHERE sku_id = $1
+		 ORDER BY is_default DESC, unit ASC`,
+		skuID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []PackingUnit
+	for rows.Next() {
+		var pu PackingUnit
+		if err := rows.Scan(&pu.SKUID, &pu.Unit, &pu.PiecesPerUnit, &pu.IsDefault); err != nil {
+			return nil, err
+		}
+		out = append(out, pu)
+	}
+	return out, rows.Err()
+}
+
+func (s *pgStore) deletePackingUnit(ctx context.Context, skuID uuid.UUID, unit string) error {
+	tag, err := s.pool.Exec(ctx,
+		`DELETE FROM sku_packing_units WHERE sku_id = $1 AND unit = $2`,
+		skuID, unit,
+	)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return domain.ErrNotFound
+	}
+	return nil
+}
+
+// ── SKU components (BR-PK-MULTI01) ──────────────────────────────────────────
+
+func (s *pgStore) upsertSKUComponent(ctx context.Context, in UpsertSKUComponentInput) (SKUComponent, error) {
+	var c SKUComponent
+	err := s.pool.QueryRow(ctx,
+		`INSERT INTO sku_components (sku_id, component_type, cbm_per_unit, sort_order)
+		 VALUES ($1, $2, $3, $4)
+		 ON CONFLICT (sku_id, component_type) DO UPDATE
+		     SET cbm_per_unit = EXCLUDED.cbm_per_unit,
+		         sort_order   = EXCLUDED.sort_order
+		 RETURNING id, sku_id, component_type, cbm_per_unit, sort_order, created_at`,
+		in.SKUID, in.ComponentType, in.CbmPerUnit, in.SortOrder,
+	).Scan(&c.ID, &c.SKUID, &c.ComponentType, &c.CbmPerUnit, &c.SortOrder, &c.CreatedAt)
+	if err != nil {
+		return SKUComponent{}, err
+	}
+	return c, nil
+}
+
+func (s *pgStore) selectSKUComponentsBySkuID(ctx context.Context, skuID uuid.UUID) ([]SKUComponent, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT id, sku_id, component_type, cbm_per_unit, sort_order, created_at
+		 FROM sku_components WHERE sku_id = $1
+		 ORDER BY sort_order ASC, created_at ASC`,
+		skuID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []SKUComponent
+	for rows.Next() {
+		var c SKUComponent
+		if err := rows.Scan(&c.ID, &c.SKUID, &c.ComponentType, &c.CbmPerUnit, &c.SortOrder, &c.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
+func (s *pgStore) deleteSKUComponent(ctx context.Context, skuID uuid.UUID, componentType string) error {
+	tag, err := s.pool.Exec(ctx,
+		`DELETE FROM sku_components WHERE sku_id = $1 AND component_type = $2`,
+		skuID, componentType,
+	)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return domain.ErrNotFound
+	}
+	return nil
 }
 
 func (s *pgStore) deactivateSKU(ctx context.Context, id uuid.UUID) error {

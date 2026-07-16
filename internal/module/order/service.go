@@ -71,15 +71,21 @@ func (svc *service) GetPO(ctx context.Context, poID uuid.UUID) (PO, error) {
 	return po, nil
 }
 
-func (svc *service) ListPOs(ctx context.Context, p httpkit.PageParams, f POListFilter) (httpkit.PagedResult[PO], error) {
+func (svc *service) ListPOs(ctx context.Context, p httpkit.CursorParams, f POListFilter) (httpkit.CursorResult[PO], error) {
 	if f.From != nil && f.To != nil && !f.From.Before(*f.To) {
-		return httpkit.PagedResult[PO]{}, domain.NewBizError(domain.ErrInvalidInput, "from must be before to")
+		return httpkit.CursorResult[PO]{}, domain.NewBizError(domain.ErrInvalidInput, "from must be before to")
 	}
-	pos, total, err := svc.s.selectPOsPaged(ctx, p, f)
+	cur, err := p.Decoded()
 	if err != nil {
-		return httpkit.PagedResult[PO]{}, err
+		return httpkit.CursorResult[PO]{}, domain.NewBizError(domain.ErrInvalidInput, "invalid cursor")
 	}
-	return httpkit.NewPagedResult(pos, total, p), nil
+	rows, err := svc.s.selectPOsKeyset(ctx, f, cur, p.Limit+1)
+	if err != nil {
+		return httpkit.CursorResult[PO]{}, err
+	}
+	return httpkit.NewCursorResult(rows, p.Limit, func(po PO) httpkit.Cursor {
+		return httpkit.Cursor{Ts: po.CreatedAt, ID: po.ID}
+	}), nil
 }
 
 func (svc *service) DeactivatePO(ctx context.Context, poID uuid.UUID) error {

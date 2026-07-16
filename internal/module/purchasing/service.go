@@ -2,6 +2,8 @@ package purchasing
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -180,4 +182,49 @@ func (s *service) CancelPO(ctx context.Context, id uuid.UUID) (PurchaseOrder, er
 	}
 	po.Status = StatusCancelled
 	return po, nil
+}
+
+func (s *service) CreateFromRejection(ctx context.Context, in CreateFromRejectionInput) (PurchaseOrder, error) {
+	if in.RejectionID == uuid.Nil {
+		return PurchaseOrder{}, domain.NewBizError(domain.ErrInvalidInput, "rejection_id is required")
+	}
+	if in.MaterialID == uuid.Nil {
+		return PurchaseOrder{}, domain.NewBizError(domain.ErrInvalidInput, "material_id is required")
+	}
+	if in.QtySheets <= 0 {
+		return PurchaseOrder{}, domain.NewBizError(domain.ErrInvalidInput, "qty_sheets must be positive")
+	}
+
+	rejID := in.RejectionID
+	note := fmt.Sprintf("Auto-created from rejection %s — %d sheet(s) to replenish", in.RejectionID, in.QtySheets)
+	po := PurchaseOrder{
+		ID:                uuid.New(),
+		Code:              "AUTO-REJ-" + in.RejectionID.String()[:8],
+		MaterialID:        in.MaterialID,
+		Supplier:          in.Supplier,
+		Status:            StatusDraft,
+		Note:              note,
+		SourceRejectionID: &rejID,
+		CreatedBy:         in.CreatedBy,
+		CreatedAt:         time.Now().UTC(),
+	}
+	if err := s.st.insertPO(ctx, po); err != nil {
+		return PurchaseOrder{}, err
+	}
+	po.Items = []POItem{}
+	return po, nil
+}
+
+func (s *service) CancelFromRejection(ctx context.Context, rejectionID uuid.UUID) error {
+	po, err := s.st.selectPOByRejectionID(ctx, rejectionID)
+	if errors.Is(err, domain.ErrNotFound) {
+		return nil // no auto-PO exists — nothing to cancel
+	}
+	if err != nil {
+		return err
+	}
+	if po.Status == StatusReceived || po.Status == StatusCancelled {
+		return nil // already terminal, skip
+	}
+	return s.st.updatePOStatus(ctx, po.ID, StatusCancelled, nil)
 }

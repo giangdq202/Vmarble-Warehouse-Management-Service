@@ -11,11 +11,22 @@ import (
 type store interface {
 	insertWorkOrder(ctx context.Context, wo WorkOrder) error
 	selectWorkOrdersPaged(ctx context.Context, p httpkit.PageParams, f WorkOrderListFilter) ([]WorkOrder, int, error)
+	selectWorkOrdersKeyset(ctx context.Context, f WorkOrderListFilter, cur httpkit.Cursor, limit int) ([]WorkOrder, error)
 	selectWorkOrderByID(ctx context.Context, id uuid.UUID) (WorkOrder, error)
 	selectWorkOrdersByPlan(ctx context.Context, planID uuid.UUID) ([]WorkOrder, error)
 	selectWorkOrdersByAssignee(ctx context.Context, userID uuid.UUID) ([]WorkOrder, error)
 	updateWorkOrderStatus(ctx context.Context, id uuid.UUID, status string) error
 	updateWorkOrderAssignment(ctx context.Context, woID uuid.UUID, userID uuid.UUID, assignedAt time.Time) error
+	// reassignWorkOrderAtomically acquires a row-level lock on the WO, verifies
+	// status is IN_CUTTING or IN_PROCESSING, updates assigned_to, and inserts a
+	// wo_reassign_log row — all inside one transaction.
+	reassignWorkOrderAtomically(ctx context.Context, op reassignOp) (WorkOrder, error)
+	// claimWorkOrderAtomically acquires a row-level lock on the WO, verifies
+	// status is PLANNED and assigned_to IS NULL, then sets assigned_to. Returns
+	// 409 (ErrPreconditionFailed) if the WO is already claimed.
+	claimWorkOrderAtomically(ctx context.Context, op claimOp) (WorkOrder, error)
+	// updateWorkOrderQCStatus writes the denormalized qc_status column.
+	updateWorkOrderQCStatus(ctx context.Context, woID uuid.UUID, status string) error
 	// partialCompleteAtomically performs the entire #292 PartialComplete write
 	// inside a single SELECT FOR UPDATE transaction so two concurrent callers
 	// cannot both win. The store re-reads the WO under the lock, validates
@@ -70,6 +81,44 @@ type store interface {
 	// the AdvanceStatus state machine deliberately — the cascade is only
 	// invoked from planning.CancelPlan after upstream validation.
 	cancelPlannedByPlan(ctx context.Context, planID uuid.UUID) (int64, error)
+
+	// Smart re-allocation (BE #2)
+	// selectWOWithPlanDeadline returns the WO quantity, status, plan deadline,
+	// and primary sheet material for feasibility scoring.
+	selectWOWithPlanDeadline(ctx context.Context, woID uuid.UUID) (woFeasibilityData, error)
+	// selectFeasibilitySuggestions returns up to limit PLANNED WOs that share
+	// the given sheet material, ordered by score desc (1/days_to_due).
+	selectFeasibilitySuggestions(ctx context.Context, materialID uuid.UUID, excludeWOID uuid.UUID, limit int) ([]woSuggestionRow, error)
+	// setPriorityBoostAtomically sets priority_boost=true and inserts a
+	// wo_boost_log row inside one transaction.
+	setPriorityBoostAtomically(ctx context.Context, op setPriorityBoostOp) (uuid.UUID, time.Time, error)
+	// selectPreemptCandidates returns PLANNED work orders sharing a sheet
+	// material with woID, ordered by ascending plan deadline (most urgent last
+	// → most slack first so preemption impact is minimised).
+	selectPreemptCandidates(ctx context.Context, woID uuid.UUID) ([]preemptCandidateRow, error)
+	// preemptAtomically acquires row locks on both WOs, verifies from_wo is
+	// PLANNED or IN_CUTTING (rejects IN_PROCESSING+), reverts from_wo to
+	// PLANNED, and inserts a wo_preemption_log row.
+	preemptAtomically(ctx context.Context, op preemptOp) (uuid.UUID, time.Time, int, error)
+
+	blockerStore
+}
+
+// reassignOp carries the payload for reassignWorkOrderAtomically.
+type reassignOp struct {
+	WorkOrderID uuid.UUID
+	NewUserID   uuid.UUID
+	Reason      string
+	ActorID     uuid.UUID
+	LogID       uuid.UUID
+	AssignedAt  time.Time
+}
+
+// claimOp carries the payload for claimWorkOrderAtomically.
+type claimOp struct {
+	WorkOrderID uuid.UUID
+	UserID      uuid.UUID
+	AssignedAt  time.Time
 }
 
 // assignSlotOp carries the pre-validated data for a single slot assignment.
@@ -92,4 +141,58 @@ type partialCompleteOp struct {
 	// sales_order_line_id, parent_wo_id, status=PLANNED, created_at). The store
 	// just inserts it when CarryOver=true.
 	CarryOverWO WorkOrder
+}
+
+// woFeasibilityData is the slim WO projection for feasibility check.
+type woFeasibilityData struct {
+	WOID       uuid.UUID
+	Quantity   int
+	Status     string
+	Deadline   *time.Time
+	MaterialID uuid.UUID // primary sheet material from BOM
+	SOCode     string
+}
+
+// woSuggestionRow is one candidate returned by selectFeasibilitySuggestions.
+type woSuggestionRow struct {
+	WOID      uuid.UUID
+	SKUCode   string
+	Quantity  int
+	Deadline  *time.Time
+	FreedQty  int
+}
+
+// setPriorityBoostOp carries the payload for setPriorityBoostAtomically.
+type setPriorityBoostOp struct {
+	WOID    uuid.UUID
+	Reason  string
+	ActorID uuid.UUID
+}
+
+// preemptCandidateRow is one row from selectPreemptCandidates.
+type preemptCandidateRow struct {
+	WOID      uuid.UUID
+	Status    string
+	SOCode    string
+	Deadline  *time.Time
+	Quantity  int
+}
+
+// preemptOp carries the payload for preemptAtomically.
+type preemptOp struct {
+	FromWOID   uuid.UUID
+	ToWOID     uuid.UUID
+	MaterialID uuid.UUID
+	Reason     string
+	ActorID    uuid.UUID
+}
+
+// ── WO Blockers ──────────────────────────────────────────────────────────────
+
+type blockerStore interface {
+	insertBlocker(ctx context.Context, b WOBlocker) error
+	resolveBlocker(ctx context.Context, blockerID, resolvedBy uuid.UUID, resolvedAt time.Time) (WOBlocker, error)
+	listBlockers(ctx context.Context, woID uuid.UUID) ([]WOBlocker, error)
+	countOpenBlockers(ctx context.Context, woID uuid.UUID) (int, error)
+	getBlocker(ctx context.Context, blockerID uuid.UUID) (WOBlocker, error)
 }

@@ -123,10 +123,17 @@ func (h *Handler) Register(rg *gin.RouterGroup) {
 	rg.GET("/work-orders/:id/labor-entries", h.listLaborEntries)
 	rg.POST("/work-orders/:id/assign", auth.RequireRole(auth.RoleCNCManager, auth.RoleAdmin), h.assign)
 	rg.POST("/work-orders/:id/suggest-assignment", auth.RequireRole(auth.RoleCNCManager, auth.RoleAdmin), h.suggestAssignment)
+	rg.POST("/work-orders/:id/reassign", auth.RequireAdminOnly(), h.reassign)
+	rg.POST("/work-orders/:id/claim", auth.RequireRole(auth.RoleCNC), h.claim)
 	rg.POST("/work-orders/:id/estimated-hours", auth.RequireRole(auth.RoleCNCManager, auth.RolePlanner, auth.RoleAdmin), h.setEstimatedHours)
 	rg.POST("/work-orders/:id/assign-slot", auth.RequireRole(auth.RoleCNCManager, auth.RolePlanner, auth.RoleAdmin), h.assignSlot)
 	rg.POST("/work-orders/:id/unassign-slot", auth.RequireRole(auth.RoleCNCManager, auth.RolePlanner, auth.RoleAdmin), h.unassignSlot)
 	rg.GET("/work-orders/:id/suggest-schedule", auth.RequireRole(auth.RoleCNCManager, auth.RolePlanner, auth.RoleAdmin), h.suggestSchedule)
+
+	// WO Blockers (#35)
+	rg.POST("/work-orders/:id/blockers", auth.RequirePlannerUp(), h.createBlocker)
+	rg.GET("/work-orders/:id/blockers", auth.RequireWorkerUp(), h.listBlockers)
+	rg.PATCH("/work-orders/:id/blockers/:blocker_id/resolve", auth.RequirePlannerUp(), h.resolveBlocker)
 
 	rg.POST("/machines", auth.RequireRole(auth.RoleAdmin, auth.RoleCNCManager), h.createMachine)
 	rg.GET("/machines", h.listMachines)
@@ -136,6 +143,8 @@ func (h *Handler) Register(rg *gin.RouterGroup) {
 	rg.GET("/machines/:id/slots", h.listSlots)
 	rg.GET("/slots/:slotID", h.getSlot)
 	rg.DELETE("/slots/:slotID", auth.RequireRole(auth.RoleCNCManager, auth.RolePlanner, auth.RoleAdmin), h.deleteSlot)
+
+	rg.GET("/work-orders/export.xlsx", h.exportWorkOrders)
 }
 
 // createWorkOrder godoc
@@ -245,8 +254,8 @@ func (h *Handler) list(c *gin.Context) {
 		return
 	}
 
-	p := httpkit.BindPageParams(c)
-	result, err := h.svc.ListWorkOrders(c.Request.Context(), p, WorkOrderListFilter{
+	p := httpkit.BindCursorParams(c)
+	result, err := h.svc.ListWorkOrdersKeyset(c.Request.Context(), p, WorkOrderListFilter{
 		Status:       c.Query("status"),
 		PlanID:       planID,
 		CreatedFrom:  createdFrom,
@@ -909,4 +918,187 @@ func (h *Handler) listLaborEntries(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, entries)
+}
+
+func (h *Handler) exportWorkOrders(c *gin.Context) {
+	createdFrom, createdTo, ok := parseWorkOrderCreatedAtFilter(c)
+	if !ok {
+		return
+	}
+	p := httpkit.BindPageParams(c)
+	f := WorkOrderListFilter{
+		Status:      c.Query("status"),
+		CreatedFrom: createdFrom,
+		CreatedTo:   createdTo,
+	}
+	c.Header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+	c.Header("Content-Disposition", "attachment; filename=work-orders.xlsx")
+	if err := h.svc.ExportWorkOrders(c.Request.Context(), p, f, c.Writer); err != nil {
+		c.Header("Content-Disposition", "")
+		httpkit.Error(c, err)
+	}
+}
+
+// reassign godoc
+//
+// @Summary      Admin force-reassign a work order to a different CNC operator
+// @Tags         production
+// @Security     BearerAuth
+// @Accept       json
+// @Produce      json
+// @Param        id    path      string  true  "work order id (uuid)"
+// @Param        body  body      ReassignWorkOrderInput  true  "payload"
+// @Success      200   {object}  WorkOrder
+// @Failure      400   {object}  map[string]string
+// @Failure      403   {object}  map[string]string
+// @Failure      404   {object}  map[string]string
+// @Failure      412   {object}  map[string]string
+// @Router       /api/v1/work-orders/{id}/reassign [post]
+func (h *Handler) reassign(c *gin.Context) {
+	woID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+	var in ReassignWorkOrderInput
+	if !httpkit.Bind(c, &in) {
+		return
+	}
+	identity, ok := auth.FromContext(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "missing auth identity"})
+		return
+	}
+	actorID, err := uuid.Parse(identity.UserID)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid auth identity"})
+		return
+	}
+	in.WorkOrderID = woID
+	in.ActorID = actorID
+	wo, err := h.svc.ReassignWorkOrder(c.Request.Context(), in)
+	if err != nil {
+		httpkit.Error(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, wo)
+}
+
+// claim godoc
+//
+// @Summary      CNC operator self-claims a PLANNED unassigned work order
+// @Tags         production
+// @Security     BearerAuth
+// @Produce      json
+// @Param        id  path      string  true  "work order id (uuid)"
+// @Success      200  {object}  WorkOrder
+// @Failure      400  {object}  map[string]string
+// @Failure      403  {object}  map[string]string
+// @Failure      404  {object}  map[string]string
+// @Failure      412  {object}  map[string]string
+// @Router       /api/v1/work-orders/{id}/claim [post]
+func (h *Handler) claim(c *gin.Context) {
+	woID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+	identity, ok := auth.FromContext(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "missing auth identity"})
+		return
+	}
+	userID, err := uuid.Parse(identity.UserID)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid auth identity"})
+		return
+	}
+	wo, err := h.svc.ClaimWorkOrder(c.Request.Context(), ClaimWorkOrderInput{
+		WorkOrderID: woID,
+		UserID:      userID,
+	})
+	if err != nil {
+		httpkit.Error(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, wo)
+}
+
+// ── WO Blockers (#35) ────────────────────────────────────────────────────────
+
+func (h *Handler) createBlocker(c *gin.Context) {
+	woID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid work order id"})
+		return
+	}
+	identity, ok := auth.FromContext(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "missing auth identity"})
+		return
+	}
+	callerID, err := uuid.Parse(identity.UserID)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid auth identity"})
+		return
+	}
+	var in CreateBlockerInput
+	if !httpkit.Bind(c, &in) {
+		return
+	}
+	in.WorkOrderID = woID
+	in.CreatedBy = callerID
+	b, err := h.svc.CreateBlocker(c.Request.Context(), in)
+	if err != nil {
+		httpkit.Error(c, err)
+		return
+	}
+	c.JSON(http.StatusCreated, b)
+}
+
+func (h *Handler) listBlockers(c *gin.Context) {
+	woID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid work order id"})
+		return
+	}
+	blockers, err := h.svc.ListBlockers(c.Request.Context(), woID)
+	if err != nil {
+		httpkit.Error(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, blockers)
+}
+
+func (h *Handler) resolveBlocker(c *gin.Context) {
+	woID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid work order id"})
+		return
+	}
+	_ = woID // validated for route consistency; service uses blockerID directly
+	blockerID, err := uuid.Parse(c.Param("blocker_id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid blocker id"})
+		return
+	}
+	identity, ok := auth.FromContext(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "missing auth identity"})
+		return
+	}
+	resolvedBy, err := uuid.Parse(identity.UserID)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid auth identity"})
+		return
+	}
+	b, err := h.svc.ResolveBlocker(c.Request.Context(), ResolveBlockerInput{
+		BlockerID:  blockerID,
+		ResolvedBy: resolvedBy,
+	})
+	if err != nil {
+		httpkit.Error(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, b)
 }

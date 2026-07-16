@@ -26,6 +26,9 @@ type mockStore struct {
 	selectLotsResult []InventoryLot
 	selectLotsErr    error
 
+	// selectLotByID (dedicated — independent from selectLotsErr)
+	selectLotByIDErr error
+
 	// selectLotsPaged
 	selectLotsPagedResult []InventoryLot
 	selectLotsPagedTotal  int
@@ -111,6 +114,14 @@ type mockStore struct {
 	releaseExpiredAllocationsResult int64
 	releaseExpiredAllocationsErr    error
 
+	// selectRemnantAging
+	selectRemnantAgingResult []remnantAgingRow
+	selectRemnantAgingErr    error
+
+	// expireStaleRemnants
+	expireStaleRemnantsResult int64
+	expireStaleRemnantsErr    error
+
 	// BR-INV01..06: QC + supplier claim
 	qcPassLotResult       int
 	qcPassLotErr          error
@@ -130,8 +141,13 @@ type mockStore struct {
 	rejectionReportErr    error
 
 	// selectTopRemnantSuggestions
-	selectTopRemnantSuggestionsResult []RemnantSuggestion
-	selectTopRemnantSuggestionsErr    error
+	selectTopRemnantSuggestionsResult   []RemnantSuggestion
+	selectTopRemnantSuggestionsErr      error
+	selectTopRemnantSuggestionsStrategy RemnantStrategy
+
+	// selectMaterialStrategy
+	selectMaterialStrategyResult RemnantStrategy
+	selectMaterialStrategyErr    error
 
 	// selectOverflowAreas
 	selectOverflowRemnantArea int64
@@ -211,8 +227,20 @@ func (m *mockStore) insertLot(_ context.Context, _ InventoryLot) error {
 func (m *mockStore) selectLots(_ context.Context) ([]InventoryLot, error) {
 	return m.selectLotsResult, m.selectLotsErr
 }
+func (m *mockStore) selectLotByID(_ context.Context, _ uuid.UUID) (InventoryLot, error) {
+	if m.selectLotByIDErr != nil {
+		return InventoryLot{}, m.selectLotByIDErr
+	}
+	if len(m.selectLotsResult) > 0 {
+		return m.selectLotsResult[0], nil
+	}
+	return InventoryLot{}, nil
+}
 func (m *mockStore) selectLotsPaged(_ context.Context, _ httpkit.PageParams) ([]InventoryLot, int, error) {
 	return m.selectLotsPagedResult, m.selectLotsPagedTotal, m.selectLotsPagedErr
+}
+func (m *mockStore) selectLotsKeyset(_ context.Context, _ string, _ httpkit.Cursor, _ int) ([]InventoryLot, error) {
+	return m.selectLotsPagedResult, m.selectLotsPagedErr
 }
 func (m *mockStore) deactivateLot(_ context.Context, _ uuid.UUID) error {
 	return m.deactivateLotErr
@@ -245,6 +273,12 @@ func (m *mockStore) preAssignSheet(_ context.Context, _ uuid.UUID, _ uuid.UUID) 
 }
 func (m *mockStore) releaseExpiredAllocations(_ context.Context, _ time.Time) (int64, error) {
 	return m.releaseExpiredAllocationsResult, m.releaseExpiredAllocationsErr
+}
+func (m *mockStore) selectRemnantAging(_ context.Context) ([]remnantAgingRow, error) {
+	return m.selectRemnantAgingResult, m.selectRemnantAgingErr
+}
+func (m *mockStore) expireStaleRemnants(_ context.Context, _ int) (int64, error) {
+	return m.expireStaleRemnantsResult, m.expireStaleRemnantsErr
 }
 
 // ── BR-INV01..06 stubs (overridden per-test as needed) ──────────────────────
@@ -283,8 +317,12 @@ func (m *mockStore) insertRemnant(_ context.Context, _ Remnant) error {
 func (m *mockStore) selectAvailableRemnantsByMinDimension(_ context.Context, _ domain.Dimension) ([]Remnant, error) {
 	return m.selectAvailableRemnantsResult, m.selectAvailableRemnantsErr
 }
-func (m *mockStore) selectTopRemnantSuggestions(_ context.Context, _ domain.Dimension, _ int) ([]RemnantSuggestion, error) {
+func (m *mockStore) selectTopRemnantSuggestions(_ context.Context, _ domain.Dimension, _ int, strategy RemnantStrategy, _ *uuid.UUID) ([]RemnantSuggestion, error) {
+	m.selectTopRemnantSuggestionsStrategy = strategy
 	return m.selectTopRemnantSuggestionsResult, m.selectTopRemnantSuggestionsErr
+}
+func (m *mockStore) selectMaterialStrategy(_ context.Context, _ uuid.UUID) (RemnantStrategy, error) {
+	return m.selectMaterialStrategyResult, m.selectMaterialStrategyErr
 }
 func (m *mockStore) selectRemnantsByBoardSheet(_ context.Context, _ uuid.UUID) ([]Remnant, error) {
 	return m.selectRemnantsByBoardSheetResult, m.selectRemnantsByBoardSheetErr
@@ -1451,7 +1489,7 @@ func TestListLots_ReturnsPersisted(t *testing.T) {
 	}
 	svc := NewService(st, nil)
 
-	result, err := svc.ListLots(context.Background(), httpkit.PageParams{Page: 1, Limit: 10})
+	result, err := svc.ListLots(context.Background(), httpkit.CursorParams{Limit: 10}, "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1467,7 +1505,7 @@ func TestListLots_Empty_ReturnsNil(t *testing.T) {
 	}
 	svc := NewService(st, nil)
 
-	result, err := svc.ListLots(context.Background(), httpkit.PageParams{Page: 1, Limit: 10})
+	result, err := svc.ListLots(context.Background(), httpkit.CursorParams{Limit: 10}, "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1481,7 +1519,7 @@ func TestListLots_StoreError_Propagates(t *testing.T) {
 	st := &mockStore{selectLotsPagedErr: dbErr}
 	svc := NewService(st, nil)
 
-	_, err := svc.ListLots(context.Background(), httpkit.PageParams{Page: 1, Limit: 10})
+	_, err := svc.ListLots(context.Background(), httpkit.CursorParams{Limit: 10}, "")
 	if !errors.Is(err, dbErr) {
 		t.Errorf("expected store error to propagate, got %v", err)
 	}
@@ -1883,22 +1921,16 @@ func TestListLots_ReturnsPagedResult(t *testing.T) {
 	}
 	svc := NewService(st, nil)
 
-	p := httpkit.PageParams{Page: 1, Limit: 10}
-	result, err := svc.ListLots(context.Background(), p)
+	p := httpkit.CursorParams{Limit: 10}
+	result, err := svc.ListLots(context.Background(), p, "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if len(result.Items) != 2 {
 		t.Errorf("items = %d, want 2", len(result.Items))
 	}
-	if result.TotalItems != 2 {
-		t.Errorf("total_items = %d, want 2", result.TotalItems)
-	}
-	if result.TotalPages != 1 {
-		t.Errorf("total_pages = %d, want 1", result.TotalPages)
-	}
-	if result.CurrentPage != 1 {
-		t.Errorf("current_page = %d, want 1", result.CurrentPage)
+	if result.HasMore {
+		t.Errorf("has_more should be false for 2 items with limit 10")
 	}
 }
 
@@ -1909,24 +1941,21 @@ func TestListLots_SearchNoResults_ReturnsEmptyItems(t *testing.T) {
 	}
 	svc := NewService(st, nil)
 
-	p := httpkit.PageParams{Page: 1, Limit: 10, Search: "SUP-DOES-NOT-EXIST"}
-	result, err := svc.ListLots(context.Background(), p)
+	p := httpkit.CursorParams{Limit: 10}
+	result, err := svc.ListLots(context.Background(), p, "SUP-DOES-NOT-EXIST")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if len(result.Items) != 0 {
 		t.Errorf("items = %d, want 0 for no-match search", len(result.Items))
 	}
-	if result.TotalItems != 0 {
-		t.Errorf("total_items = %d, want 0", result.TotalItems)
-	}
-	if result.TotalPages != 1 {
-		t.Errorf("total_pages = %d, want at least 1", result.TotalPages)
+	if result.HasMore {
+		t.Errorf("has_more should be false for empty result")
 	}
 }
 
 func TestListLots_LastPage_CorrectMetadata(t *testing.T) {
-	// 12 total, limit 5 → 3 pages; last page has 2 items
+	// 2 items returned with limit 5 → no next page
 	lastPageLots := []InventoryLot{
 		{ID: uuid.New(), SupplierRef: "SUP-011"},
 		{ID: uuid.New(), SupplierRef: "SUP-012"},
@@ -1937,19 +1966,13 @@ func TestListLots_LastPage_CorrectMetadata(t *testing.T) {
 	}
 	svc := NewService(st, nil)
 
-	p := httpkit.PageParams{Page: 3, Limit: 5}
-	result, err := svc.ListLots(context.Background(), p)
+	p := httpkit.CursorParams{Limit: 5}
+	result, err := svc.ListLots(context.Background(), p, "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if result.TotalItems != 12 {
-		t.Errorf("total_items = %d, want 12", result.TotalItems)
-	}
-	if result.TotalPages != 3 {
-		t.Errorf("total_pages = %d, want 3", result.TotalPages)
-	}
-	if result.CurrentPage != 3 {
-		t.Errorf("current_page = %d, want 3", result.CurrentPage)
+	if result.HasMore {
+		t.Errorf("has_more should be false when fewer items than limit")
 	}
 	if len(result.Items) != 2 {
 		t.Errorf("items on last page = %d, want 2", len(result.Items))
@@ -1961,7 +1984,7 @@ func TestListLots_StoreError_Propagated(t *testing.T) {
 	st := &mockStore{selectLotsPagedErr: storeErr}
 	svc := NewService(st, nil)
 
-	_, err := svc.ListLots(context.Background(), httpkit.PageParams{Page: 1, Limit: 10})
+	_, err := svc.ListLots(context.Background(), httpkit.CursorParams{Limit: 10}, "")
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -5337,5 +5360,356 @@ func TestRecordCut_BRK06_ExactlyAtThreshold_KeepsRemnant(t *testing.T) {
 	}
 	if st.recordCutAtomicallyOp.NewRemnant == nil {
 		t.Fatal("op.NewRemnant must be non-nil when remnant matches threshold exactly")
+	}
+}
+
+// ── SuggestRemnants ───────────────────────────────────────────────────────────
+
+func TestSuggestRemnants_BestFit_PicksSmallestFitting(t *testing.T) {
+	small := RemnantSuggestion{
+		Remnant: Remnant{Dimensions: domain.Dimension{LengthMM: 300, WidthMM: 200}, Status: domain.RemnantAvailable},
+		Rank:    1,
+	}
+	large := RemnantSuggestion{
+		Remnant: Remnant{Dimensions: domain.Dimension{LengthMM: 600, WidthMM: 400}, Status: domain.RemnantAvailable},
+		Rank:    2,
+	}
+	st := &mockStore{
+		selectTopRemnantSuggestionsResult: []RemnantSuggestion{small, large},
+	}
+	svc := NewService(st, nil)
+	got, err := svc.SuggestRemnants(context.Background(), SuggestRemnantsInput{
+		RequiredDimension: domain.Dimension{LengthMM: 200, WidthMM: 150},
+		Strategy:          RemnantStrategyBestFit,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("len = %d, want 2", len(got))
+	}
+	if st.selectTopRemnantSuggestionsStrategy != RemnantStrategyBestFit {
+		t.Errorf("strategy passed to store = %q, want best_fit", st.selectTopRemnantSuggestionsStrategy)
+	}
+	if got[0].Score <= got[1].Score {
+		t.Errorf("rank-1 score (%f) should be higher than rank-2 (%f) for best fit", got[0].Score, got[1].Score)
+	}
+	if got[0].Reason == "" {
+		t.Error("Reason must not be empty")
+	}
+}
+
+func TestSuggestRemnants_FIFO_PassesStrategyToStore(t *testing.T) {
+	st := &mockStore{
+		selectTopRemnantSuggestionsResult: []RemnantSuggestion{
+			{Remnant: Remnant{Dimensions: domain.Dimension{LengthMM: 400, WidthMM: 300}}, AgeDays: 10, Rank: 1},
+		},
+	}
+	svc := NewService(st, nil)
+	got, err := svc.SuggestRemnants(context.Background(), SuggestRemnantsInput{
+		RequiredDimension: domain.Dimension{LengthMM: 200, WidthMM: 150},
+		Strategy:          RemnantStrategyFIFO,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if st.selectTopRemnantSuggestionsStrategy != RemnantStrategyFIFO {
+		t.Errorf("strategy passed to store = %q, want fifo", st.selectTopRemnantSuggestionsStrategy)
+	}
+	if len(got) != 1 {
+		t.Fatalf("len = %d, want 1", len(got))
+	}
+	if got[0].Reason == "" {
+		t.Error("Reason must not be empty for FIFO")
+	}
+}
+
+func TestSuggestRemnants_NoStrategy_ResolvesFromMaterial(t *testing.T) {
+	matID := uuid.New()
+	st := &mockStore{
+		selectMaterialStrategyResult:      RemnantStrategyFIFO,
+		selectTopRemnantSuggestionsResult: []RemnantSuggestion{},
+	}
+	svc := NewService(st, nil)
+	_, err := svc.SuggestRemnants(context.Background(), SuggestRemnantsInput{
+		RequiredDimension: domain.Dimension{LengthMM: 100, WidthMM: 100},
+		MaterialID:        &matID,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if st.selectTopRemnantSuggestionsStrategy != RemnantStrategyFIFO {
+		t.Errorf("strategy = %q, want fifo (from material config)", st.selectTopRemnantSuggestionsStrategy)
+	}
+}
+
+func TestSuggestRemnants_InvalidStrategy_Returns400(t *testing.T) {
+	st := &mockStore{}
+	svc := NewService(st, nil)
+	_, err := svc.SuggestRemnants(context.Background(), SuggestRemnantsInput{
+		RequiredDimension: domain.Dimension{LengthMM: 100, WidthMM: 100},
+		Strategy:          "random",
+	})
+	if err == nil {
+		t.Fatal("expected error for invalid strategy")
+	}
+	var biz *domain.BizError
+	if !errors.As(err, &biz) || !errors.Is(biz.Sentinel, domain.ErrInvalidInput) {
+		t.Errorf("expected ErrInvalidInput, got %v", err)
+	}
+}
+
+// ── GetRemnantAging / ExpireStaleRemnants ─────────────────────────────────────
+
+func makeAgingRemnant(id string, ageDays int) remnantAgingRow {
+	return remnantAgingRow{
+		Remnant: Remnant{
+			ID:         uuid.MustParse(id),
+			Dimensions: domain.Dimension{LengthMM: 400, WidthMM: 300},
+			Status:     domain.RemnantAvailable,
+		},
+		AgeDays: ageDays,
+	}
+}
+
+func TestGetRemnantAging_91Days_LevelExpired(t *testing.T) {
+	st := &mockStore{
+		selectRemnantAgingResult: []remnantAgingRow{
+			makeAgingRemnant("00000000-0000-0000-0000-000000000001", 91),
+		},
+	}
+	svc := NewService(st, nil)
+	summary, err := svc.GetRemnantAging(context.Background(), 0, 0)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(summary.Rows) != 1 {
+		t.Fatalf("len(rows) = %d, want 1", len(summary.Rows))
+	}
+	if summary.Rows[0].Level != RemnantAgingExpired {
+		t.Errorf("level = %q, want EXPIRED for 91-day remnant", summary.Rows[0].Level)
+	}
+	if summary.TotalExpired != 1 {
+		t.Errorf("TotalExpired = %d, want 1", summary.TotalExpired)
+	}
+	if summary.TotalOK != 0 || summary.TotalAtRisk != 0 {
+		t.Errorf("unexpected non-zero OK/AtRisk counts")
+	}
+}
+
+func TestGetRemnantAging_30Days_LevelOK(t *testing.T) {
+	st := &mockStore{
+		selectRemnantAgingResult: []remnantAgingRow{
+			makeAgingRemnant("00000000-0000-0000-0000-000000000002", 30),
+		},
+	}
+	svc := NewService(st, nil)
+	summary, err := svc.GetRemnantAging(context.Background(), 0, 0)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if summary.Rows[0].Level != RemnantAgingOK {
+		t.Errorf("level = %q, want OK for 30-day remnant", summary.Rows[0].Level)
+	}
+	if summary.TotalOK != 1 {
+		t.Errorf("TotalOK = %d, want 1", summary.TotalOK)
+	}
+}
+
+func TestGetRemnantAging_AtRiskBoundary(t *testing.T) {
+	st := &mockStore{
+		selectRemnantAgingResult: []remnantAgingRow{
+			makeAgingRemnant("00000000-0000-0000-0000-000000000003", 60),
+		},
+	}
+	svc := NewService(st, nil)
+	summary, err := svc.GetRemnantAging(context.Background(), 60, 90)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if summary.Rows[0].Level != RemnantAgingAtRisk {
+		t.Errorf("level = %q, want AT_RISK for 60-day remnant with warn_days=60", summary.Rows[0].Level)
+	}
+	if summary.TotalAtRisk != 1 {
+		t.Errorf("TotalAtRisk = %d, want 1", summary.TotalAtRisk)
+	}
+}
+
+func TestGetRemnantAging_WarnDaysGteExpireDays_ReturnsError(t *testing.T) {
+	st := &mockStore{}
+	svc := NewService(st, nil)
+	_, err := svc.GetRemnantAging(context.Background(), 90, 60)
+	if err == nil {
+		t.Fatal("expected error when warn_days >= expire_days")
+	}
+	var biz *domain.BizError
+	if !errors.As(err, &biz) || !errors.Is(biz.Sentinel, domain.ErrInvalidInput) {
+		t.Errorf("expected ErrInvalidInput, got %v", err)
+	}
+}
+
+func TestExpireStaleRemnants_ReturnsCount(t *testing.T) {
+	st := &mockStore{expireStaleRemnantsResult: 5}
+	svc := NewService(st, nil)
+	n, err := svc.ExpireStaleRemnants(context.Background(), 90)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if n != 5 {
+		t.Errorf("n = %d, want 5", n)
+	}
+}
+
+// ── PurchaseRequestCreator (BE #37) ──────────────────────────────────────────
+
+type mockPRCreator struct {
+	createCalled bool
+	createInput  PRFromRejectionInput
+	createErr    error
+	cancelCalled bool
+	cancelID     uuid.UUID
+	cancelErr    error
+}
+
+func (m *mockPRCreator) CreateFromRejection(_ context.Context, in PRFromRejectionInput) error {
+	m.createCalled = true
+	m.createInput = in
+	return m.createErr
+}
+func (m *mockPRCreator) CancelFromRejection(_ context.Context, id uuid.UUID) error {
+	m.cancelCalled = true
+	m.cancelID = id
+	return m.cancelErr
+}
+
+func TestRejectLot_WithPRCreator_SpawnsDraftPO(t *testing.T) {
+	lotID := uuid.New()
+	matID := uuid.New()
+	rejectedIDs := []uuid.UUID{uuid.New()}
+	st := &mockStore{
+		rejectLotResult: rejectedIDs,
+		selectLotsResult: []InventoryLot{
+			{ID: lotID, MaterialID: matID, SupplierRef: "ACME-SUP"},
+		},
+	}
+	pr := &mockPRCreator{}
+	svc := NewServiceWithAllDeps(st, nil, nil, nil, pr, 0).(*service)
+
+	_, err := svc.RejectLot(context.Background(), RejectLotInput{
+		LotID:             lotID,
+		ReasonCode:        RejectionReasonCrack,
+		RejectedQtySheets: 1,
+		ActorID:           uuid.New(),
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !pr.createCalled {
+		t.Fatal("want PurchaseRequestCreator.CreateFromRejection called")
+	}
+	if pr.createInput.MaterialID != matID {
+		t.Errorf("CreateFromRejection material_id = %v, want %v", pr.createInput.MaterialID, matID)
+	}
+	if pr.createInput.Supplier != "ACME-SUP" {
+		t.Errorf("CreateFromRejection supplier = %q, want ACME-SUP", pr.createInput.Supplier)
+	}
+	if pr.createInput.QtySheets != 1 {
+		t.Errorf("CreateFromRejection qty_sheets = %d, want 1", pr.createInput.QtySheets)
+	}
+}
+
+func TestRejectLot_PRCreatorFails_StillSucceeds(t *testing.T) {
+	lotID := uuid.New()
+	st := &mockStore{
+		rejectLotResult:  []uuid.UUID{uuid.New()},
+		selectLotsResult: []InventoryLot{{ID: lotID}},
+	}
+	pr := &mockPRCreator{createErr: errors.New("purchasing unavailable")}
+	svc := NewServiceWithAllDeps(st, nil, nil, nil, pr, 0).(*service)
+
+	_, err := svc.RejectLot(context.Background(), RejectLotInput{
+		LotID:             lotID,
+		ReasonCode:        RejectionReasonDamage,
+		RejectedQtySheets: 1,
+		ActorID:           uuid.New(),
+	})
+	if err != nil {
+		t.Errorf("RejectLot must succeed even when PR creation fails, got %v", err)
+	}
+}
+
+func TestRejectLot_LotFetchFails_PRSkipped(t *testing.T) {
+	st := &mockStore{
+		rejectLotResult:  []uuid.UUID{uuid.New()},
+		selectLotByIDErr: errors.New("db error"),
+	}
+	pr := &mockPRCreator{}
+	svc := NewServiceWithAllDeps(st, nil, nil, nil, pr, 0).(*service)
+
+	_, err := svc.RejectLot(context.Background(), RejectLotInput{
+		LotID:             uuid.New(),
+		ReasonCode:        RejectionReasonCrack,
+		RejectedQtySheets: 1,
+		ActorID:           uuid.New(),
+	})
+	if err != nil {
+		t.Fatalf("RejectLot must succeed even when lot fetch fails, got %v", err)
+	}
+	if pr.createCalled {
+		t.Error("CreateFromRejection must NOT be called when lot fetch fails")
+	}
+}
+
+func TestUpdateRejectionClaim_ApprovedTriggersCancelPR(t *testing.T) {
+	rejectionID := uuid.New()
+	st := &mockStore{
+		selectRejectionResult: MaterialRejection{
+			ID: rejectionID, ClaimStatus: ClaimStatusOpen,
+		},
+		updateClaimResult: MaterialRejection{ID: rejectionID, ClaimStatus: ClaimStatusApproved},
+	}
+	pr := &mockPRCreator{}
+	svc := NewServiceWithAllDeps(st, nil, nil, nil, pr, 0).(*service)
+
+	amount := int64(1_000_000)
+	_, err := svc.UpdateRejectionClaim(context.Background(), UpdateClaimInput{
+		RejectionID:   rejectionID,
+		ClaimStatus:   ClaimStatusApproved,
+		ClaimAmount:   &amount,
+		ClaimCurrency: "VND",
+		ActorID:       uuid.New(),
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !pr.cancelCalled {
+		t.Fatal("want PurchaseRequestCreator.CancelFromRejection called on APPROVED")
+	}
+	if pr.cancelID != rejectionID {
+		t.Errorf("CancelFromRejection id = %v, want %v", pr.cancelID, rejectionID)
+	}
+}
+
+func TestUpdateRejectionClaim_NotApproved_DoesNotCancelPR(t *testing.T) {
+	rejectionID := uuid.New()
+	st := &mockStore{
+		selectRejectionResult: MaterialRejection{
+			ID: rejectionID, ClaimStatus: ClaimStatusOpen,
+		},
+		updateClaimResult: MaterialRejection{ID: rejectionID, ClaimStatus: ClaimStatusRejected},
+	}
+	pr := &mockPRCreator{}
+	svc := NewServiceWithAllDeps(st, nil, nil, nil, pr, 0).(*service)
+
+	_, err := svc.UpdateRejectionClaim(context.Background(), UpdateClaimInput{
+		RejectionID: rejectionID,
+		ClaimStatus: ClaimStatusRejected,
+		ActorID:     uuid.New(),
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if pr.cancelCalled {
+		t.Error("CancelFromRejection must NOT be called for non-APPROVED transitions")
 	}
 }

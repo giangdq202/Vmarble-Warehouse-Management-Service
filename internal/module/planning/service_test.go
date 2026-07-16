@@ -121,6 +121,14 @@ func (m *mockStore) selectPlanItemsByPlanID(_ context.Context, _ uuid.UUID) ([]P
 	return m.selectPlanItemsByPlanIDResult, m.selectPlanItemsByPlanIDErr
 }
 
+func (m *mockStore) selectPlansKeyset(_ context.Context, status, search string, from, to *time.Time, _ httpkit.Cursor, _ int) ([]Plan, error) {
+	m.selectPlansSearch = search
+	m.selectPlansStatus = status
+	m.selectPlansFrom = from
+	m.selectPlansTo = to
+	return m.selectPlansResult, m.selectPlansErr
+}
+
 func (m *mockStore) cancelPlanWithMetadata(_ context.Context, id uuid.UUID, reason string, actorID uuid.UUID, at time.Time) error {
 	m.cancelPlanWithMetadataCalled = true
 	m.cancelPlanWithMetadataID = id
@@ -177,6 +185,32 @@ func draftPlan(id uuid.UUID) Plan {
 // must be non-nil per chk_plan_root. Inlining `id := uuid.New(); &id` would
 // drown the table-driven tests in noise.
 func newPOID() *uuid.UUID { id := uuid.New(); return &id }
+
+// ── mockWOAdvisor ─────────────────────────────────────────────────────────────
+
+type mockWOAdvisor struct {
+	feasibilityResult FeasibilityResult
+	feasibilityErr    error
+	boostResult       BoostPriorityResult
+	boostErr          error
+	candidatesResult  []PreemptCandidate
+	candidatesErr     error
+	preemptResult     PreemptResult
+	preemptErr        error
+}
+
+func (m *mockWOAdvisor) CheckFeasibility(_ context.Context, _ uuid.UUID) (FeasibilityResult, error) {
+	return m.feasibilityResult, m.feasibilityErr
+}
+func (m *mockWOAdvisor) BoostPriority(_ context.Context, _ BoostPriorityInput) (BoostPriorityResult, error) {
+	return m.boostResult, m.boostErr
+}
+func (m *mockWOAdvisor) ListPreemptCandidates(_ context.Context, _ uuid.UUID) ([]PreemptCandidate, error) {
+	return m.candidatesResult, m.candidatesErr
+}
+func (m *mockWOAdvisor) PreemptWorkOrder(_ context.Context, _ PreemptInput) (PreemptResult, error) {
+	return m.preemptResult, m.preemptErr
+}
 
 // ── TestCreatePlan ────────────────────────────────────────────────────────────
 
@@ -442,7 +476,7 @@ func TestListPlans_PopulatesItems(t *testing.T) {
 	}
 
 	svc := NewService(st)
-	plans, err := svc.ListPlans(context.Background(), httpkit.PageParams{Page: 1, Limit: 10}, "", nil, nil)
+	plans, err := svc.ListPlans(context.Background(), httpkit.CursorParams{Limit: 10}, "", "", nil, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -461,7 +495,7 @@ func TestListPlans_Empty_ReturnsNil(t *testing.T) {
 	st := &mockStore{selectPlansResult: nil}
 
 	svc := NewService(st)
-	plans, err := svc.ListPlans(context.Background(), httpkit.PageParams{Page: 1, Limit: 10}, "", nil, nil)
+	plans, err := svc.ListPlans(context.Background(), httpkit.CursorParams{Limit: 10}, "", "", nil, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -475,7 +509,7 @@ func TestListPlans_SelectPlansError_Propagates(t *testing.T) {
 	st := &mockStore{selectPlansErr: dbErr}
 
 	svc := NewService(st)
-	_, err := svc.ListPlans(context.Background(), httpkit.PageParams{Page: 1, Limit: 10}, "", nil, nil)
+	_, err := svc.ListPlans(context.Background(), httpkit.CursorParams{Limit: 10}, "", "", nil, nil)
 
 	if !errors.Is(err, dbErr) {
 		t.Errorf("expected selectPlans error to propagate, got %v", err)
@@ -491,7 +525,7 @@ func TestListPlans_SelectItemsError_Propagates(t *testing.T) {
 	}
 
 	svc := NewService(st)
-	_, err := svc.ListPlans(context.Background(), httpkit.PageParams{Page: 1, Limit: 10}, "", nil, nil)
+	_, err := svc.ListPlans(context.Background(), httpkit.CursorParams{Limit: 10}, "", "", nil, nil)
 
 	if !errors.Is(err, dbErr) {
 		t.Errorf("expected selectPlanItemsByPlanID error to propagate in ListPlans, got %v", err)
@@ -905,7 +939,7 @@ func TestListPlans_SearchAndPOCodeContract(t *testing.T) {
 	}
 
 	svc := NewService(st)
-	plans, err := svc.ListPlans(context.Background(), httpkit.PageParams{Page: 1, Limit: 20, Search: "PO-001"}, "APPROVED", nil, nil)
+	plans, err := svc.ListPlans(context.Background(), httpkit.CursorParams{Limit: 20}, "APPROVED", "PO-001", nil, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -935,7 +969,8 @@ func TestListPlans_DateRange_ForwardedToStore(t *testing.T) {
 
 	if _, err := svc.ListPlans(
 		context.Background(),
-		httpkit.PageParams{Page: 1, Limit: 10},
+		httpkit.CursorParams{Limit: 10},
+		"",
 		"",
 		&from,
 		&to,
@@ -960,7 +995,8 @@ func TestListPlans_FromAfterTo_Returns400(t *testing.T) {
 
 	_, err := svc.ListPlans(
 		context.Background(),
-		httpkit.PageParams{Page: 1, Limit: 10},
+		httpkit.CursorParams{Limit: 10},
+		"",
 		"",
 		&from,
 		&to,
@@ -1120,5 +1156,165 @@ func TestLookupPlans_EmptyResult_ReturnsEmptySlice(t *testing.T) {
 	}
 	if len(result.Items) != 0 {
 		t.Errorf("expected empty result, got %d items", len(result.Items))
+	}
+}
+
+// ── Smart re-allocation tests (BE #2) ─────────────────────────────────────────
+
+func svcWithAdvisor(adv WorkOrderAdvisor) Service {
+	return NewServiceFull(&mockStore{nextPlanCodeSeq: 0}, nil, adv)
+}
+
+func TestCheckFeasibility_NoAdvisor_ReturnsPreconditionFailed(t *testing.T) {
+	svc := NewService(&mockStore{})
+	_, err := svc.CheckFeasibility(context.Background(), uuid.New())
+	if !errors.Is(err, domain.ErrPreconditionFailed) {
+		t.Errorf("want ErrPreconditionFailed, got %v", err)
+	}
+}
+
+func TestCheckFeasibility_Feasible(t *testing.T) {
+	adv := &mockWOAdvisor{feasibilityResult: FeasibilityResult{Feasible: true}}
+	svc := svcWithAdvisor(adv)
+	r, err := svc.CheckFeasibility(context.Background(), uuid.New())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !r.Feasible {
+		t.Errorf("expected feasible=true")
+	}
+}
+
+func TestCheckFeasibility_Infeasible_ReturnsSuggestions(t *testing.T) {
+	woID := uuid.New()
+	expected := FeasibilityResult{
+		Feasible: false,
+		Reason:   "INSUFFICIENT_MATERIAL",
+		Suggestions: []FeasibilitySuggestion{
+			{WOID: uuid.New(), SKUCode: "SKU-001", Score: 0.5, DaysToDue: 2, FreedQty: 10},
+		},
+	}
+	adv := &mockWOAdvisor{feasibilityResult: expected}
+	svc := svcWithAdvisor(adv)
+	r, err := svc.CheckFeasibility(context.Background(), woID)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if r.Feasible {
+		t.Errorf("expected feasible=false")
+	}
+	if len(r.Suggestions) != 1 {
+		t.Errorf("expected 1 suggestion, got %d", len(r.Suggestions))
+	}
+}
+
+func TestCheckFeasibility_AdvisorError_Propagates(t *testing.T) {
+	dbErr := errors.New("db error")
+	adv := &mockWOAdvisor{feasibilityErr: dbErr}
+	svc := svcWithAdvisor(adv)
+	_, err := svc.CheckFeasibility(context.Background(), uuid.New())
+	if !errors.Is(err, dbErr) {
+		t.Errorf("expected db error to propagate, got %v", err)
+	}
+}
+
+func TestBoostWorkOrderPriority_EmptyReason_ReturnsInvalidInput(t *testing.T) {
+	adv := &mockWOAdvisor{}
+	svc := svcWithAdvisor(adv)
+	_, err := svc.BoostWorkOrderPriority(context.Background(), BoostPriorityInput{
+		WOID:   uuid.New(),
+		Reason: "",
+	})
+	if !errors.Is(err, domain.ErrInvalidInput) {
+		t.Errorf("want ErrInvalidInput for empty reason, got %v", err)
+	}
+}
+
+func TestBoostWorkOrderPriority_NoAdvisor_ReturnsPreconditionFailed(t *testing.T) {
+	svc := NewService(&mockStore{})
+	_, err := svc.BoostWorkOrderPriority(context.Background(), BoostPriorityInput{
+		WOID: uuid.New(), Reason: "urgent",
+	})
+	if !errors.Is(err, domain.ErrPreconditionFailed) {
+		t.Errorf("want ErrPreconditionFailed, got %v", err)
+	}
+}
+
+func TestBoostWorkOrderPriority_Success(t *testing.T) {
+	now := time.Now()
+	auditID := uuid.New()
+	adv := &mockWOAdvisor{boostResult: BoostPriorityResult{BoostedAt: now, AuditID: auditID}}
+	svc := svcWithAdvisor(adv)
+	r, err := svc.BoostWorkOrderPriority(context.Background(), BoostPriorityInput{
+		WOID: uuid.New(), Reason: "ship deadline moved up", ActorID: uuid.New(),
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if r.AuditID != auditID {
+		t.Errorf("audit_id mismatch")
+	}
+}
+
+func TestPreemptWorkOrder_EmptyReason_ReturnsInvalidInput(t *testing.T) {
+	adv := &mockWOAdvisor{}
+	svc := svcWithAdvisor(adv)
+	_, err := svc.PreemptWorkOrder(context.Background(), PreemptInput{
+		ToWOID: uuid.New(), FromWOID: uuid.New(), Reason: "",
+	})
+	if !errors.Is(err, domain.ErrInvalidInput) {
+		t.Errorf("want ErrInvalidInput for empty reason, got %v", err)
+	}
+}
+
+func TestPreemptWorkOrder_SameWO_ReturnsInvalidInput(t *testing.T) {
+	woID := uuid.New()
+	adv := &mockWOAdvisor{}
+	svc := svcWithAdvisor(adv)
+	_, err := svc.PreemptWorkOrder(context.Background(), PreemptInput{
+		ToWOID: woID, FromWOID: woID, Reason: "some reason",
+	})
+	if !errors.Is(err, domain.ErrInvalidInput) {
+		t.Errorf("want ErrInvalidInput for same wo_id, got %v", err)
+	}
+}
+
+func TestPreemptWorkOrder_Success(t *testing.T) {
+	now := time.Now()
+	auditID := uuid.New()
+	adv := &mockWOAdvisor{preemptResult: PreemptResult{PreemptedAt: now, AuditID: auditID, FreedQty: 20}}
+	svc := svcWithAdvisor(adv)
+	r, err := svc.PreemptWorkOrder(context.Background(), PreemptInput{
+		ToWOID: uuid.New(), FromWOID: uuid.New(), Reason: "material needed for urgent order", ActorID: uuid.New(),
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if r.FreedQty != 20 {
+		t.Errorf("freed_qty = %d, want 20", r.FreedQty)
+	}
+}
+
+func TestListPreemptCandidates_NoAdvisor_ReturnsPreconditionFailed(t *testing.T) {
+	svc := NewService(&mockStore{})
+	_, err := svc.ListPreemptCandidates(context.Background(), uuid.New())
+	if !errors.Is(err, domain.ErrPreconditionFailed) {
+		t.Errorf("want ErrPreconditionFailed, got %v", err)
+	}
+}
+
+func TestListPreemptCandidates_ReturnsCandidates(t *testing.T) {
+	candidates := []PreemptCandidate{
+		{WOID: uuid.New(), Status: "PLANNED", SlackDays: 5, FreedQty: 15},
+		{WOID: uuid.New(), Status: "IN_CUTTING", SlackDays: 2, FreedQty: 8},
+	}
+	adv := &mockWOAdvisor{candidatesResult: candidates}
+	svc := svcWithAdvisor(adv)
+	got, err := svc.ListPreemptCandidates(context.Background(), uuid.New())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(got) != 2 {
+		t.Errorf("expected 2 candidates, got %d", len(got))
 	}
 }

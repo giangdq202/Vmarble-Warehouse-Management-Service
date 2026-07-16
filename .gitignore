@@ -7,6 +7,16 @@
 !deploy/staging/.env.staging.example
 .claude/settings.json
 
+# Playwright MCP browser session artifacts
+.playwright-mcp/
+
+# Local screenshots and scratch files from dev sessions
+login-page.png
+to
+
+# Demo guide — local-only narrative doc, not project documentation
+docs/demo-guide-container-flow.md
+
 bin/
 tmp/
 *.exe
@@ -44,6 +54,9 @@ docs/demo-prototype-script.md
 docs/*demo-script*.md
 docs/customer-*.md
 docs/*-customer-*.md
-
+docs/*.xlsx
+docs/*.xls
+scripts/seed_demo.sql
 # Working memory cho Claude Code agents — local session state, không share team.
 docs/PROJECT_STATE.md
+

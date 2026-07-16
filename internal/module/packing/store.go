@@ -2,6 +2,7 @@ package packing
 
 import (
 	"context"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -9,17 +10,40 @@ import (
 	"github.com/vmarble/warehouse-management-service/internal/platform/httpkit"
 )
 
+// fgSuggestionCandidate wraps an AVAILABLE FGPool row with the earliest
+// cutoff_date of any open container that holds the same SO line. Nil cutoff
+// means no booked container yet — such candidates sort last.
+type fgSuggestionCandidate struct {
+	FG          FGPool
+	CutoffDate  *time.Time
+}
+
 // store is the packing module's repository contract. Unexported — only
 // service.go binds to it; pgstore.go provides the production implementation.
 type store interface {
 	insertFGBatch(ctx context.Context, rows []FGPool) error
+	// insertFGBatchWithAllocations atomically inserts FG rows and their HARD
+	// allocation records in a single transaction. allocs may be empty/nil when
+	// no SOL is known (uncommitted-WO FGs).
+	insertFGBatchWithAllocations(ctx context.Context, rows []FGPool, allocs []Allocation) error
 	selectFGByID(ctx context.Context, id uuid.UUID) (FGPool, error)
 	selectFGByBarcodeID(ctx context.Context, barcodeID uuid.UUID) (FGPool, error)
 	selectFGByWorkOrderID(ctx context.Context, woID uuid.UUID) ([]FGPool, error)
 	selectFGPaged(ctx context.Context, p httpkit.PageParams, f FGListFilter) ([]FGPool, int, error)
+	// selectReservedFGsByContainer returns all RESERVED fg_pool rows whose
+	// container_line_id belongs to containerID. Used by CheckComponentsForSeal.
+	selectReservedFGsByContainer(ctx context.Context, containerID uuid.UUID) ([]FGPool, error)
 
 	selectDefectByID(ctx context.Context, id uuid.UUID) (FGDefect, error)
 	selectDefectByFGID(ctx context.Context, fgID uuid.UUID) (FGDefect, error)
+
+	selectAvailableFGsBySKU(ctx context.Context, skuID, excludeID uuid.UUID, limit int) ([]fgSuggestionCandidate, error)
+
+	// allocation reads
+	selectAllocationByID(ctx context.Context, id uuid.UUID) (Allocation, error)
+	selectAllocationByFGID(ctx context.Context, fgID uuid.UUID) (Allocation, error)
+	selectAllocationsBySOLine(ctx context.Context, soLineID uuid.UUID) ([]Allocation, error)
+	insertAllocation(ctx context.Context, a Allocation) error
 
 	withTx(ctx context.Context, fn func(tx txStore) error) error
 }
@@ -40,6 +64,14 @@ type txStore interface {
 	updateDefectResolution(ctx context.Context, in updateResolutionInput) error
 
 	rawTx() pgx.Tx
+	updateFGSOLine(ctx context.Context, fgID uuid.UUID, newSOLID *uuid.UUID) error
+	insertReassignLog(ctx context.Context, log FGReassignmentLog) error
+
+	// allocation writes
+	lockAllocationForUpdate(ctx context.Context, id uuid.UUID) (Allocation, error)
+	lockAllocationByFGForUpdate(ctx context.Context, fgID uuid.UUID) (Allocation, error)
+	updateAllocationType(ctx context.Context, id uuid.UUID, allocType string, releasedBy *uuid.UUID) error
+	updateAllocationSOLine(ctx context.Context, id uuid.UUID, newSOLID uuid.UUID) error
 }
 
 type flipStatusInput struct {

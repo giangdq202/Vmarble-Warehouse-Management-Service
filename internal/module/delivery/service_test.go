@@ -82,6 +82,24 @@ type mockStore struct {
 	linesHistoryResult []ContainerLineHistoryEntry
 	linesHistoryErr    error
 	linesHistoryFilter *uuid.UUID
+
+	// at-risk (#296)
+	atRiskResult []AtRiskRow
+	atRiskErr    error
+	atRiskBefore time.Time
+
+	// loader assignment (#16)
+	updateLoaderErr    error
+	updateLoaderCallID *uuid.UUID
+	selectLoaderResult []ContainerLoaderLog
+	selectLoaderErr    error
+
+	// destination reassignment (#17)
+	changeDestErr         error
+	changeDestCalled      bool
+	changeDestClearVessel bool
+	selectRouteResult     []ContainerRouteChangeLog
+	selectRouteErr        error
 }
 
 type mockTxStore struct {
@@ -105,6 +123,12 @@ type mockTxStore struct {
 	updateStatusErr       error
 	listLinesForSealErr   error
 	sumLinesAggregatesErr error
+
+	// transfer audit (#308)
+	hasApprovedLoadingPlanResult bool
+	hasApprovedLoadingPlanErr    error
+	insertedTransferAudit        *ContainerTransferAudit
+	insertTransferAuditErr       error
 
 	// call captures
 	insertedLines  []ContainerLine
@@ -210,6 +234,31 @@ func (m *mockStore) selectShortagesForContainer(_ context.Context, _ uuid.UUID) 
 	return ShortageReport{}, nil
 }
 
+func (m *mockStore) selectAtRiskContainers(_ context.Context, before time.Time) ([]AtRiskRow, error) {
+	m.atRiskBefore = before
+	return m.atRiskResult, m.atRiskErr
+}
+
+func (m *mockStore) updateContainerLoader(_ context.Context, containerID uuid.UUID, loaderID *uuid.UUID, _ ContainerLoaderLog) error {
+	m.updateLoaderCallID = &containerID
+	_ = loaderID
+	return m.updateLoaderErr
+}
+
+func (m *mockStore) selectLoaderLog(_ context.Context, _ uuid.UUID) ([]ContainerLoaderLog, error) {
+	return m.selectLoaderResult, m.selectLoaderErr
+}
+
+func (m *mockStore) changeDestinationTx(_ context.Context, _ uuid.UUID, _, _ string, clearVessel bool, _ ContainerRouteChangeLog) error {
+	m.changeDestCalled = true
+	m.changeDestClearVessel = clearVessel
+	return m.changeDestErr
+}
+
+func (m *mockStore) selectRouteLog(_ context.Context, _ uuid.UUID) ([]ContainerRouteChangeLog, error) {
+	return m.selectRouteResult, m.selectRouteErr
+}
+
 func newMockTx() *mockTxStore {
 	return &mockTxStore{
 		containersByID: map[uuid.UUID]Container{},
@@ -309,6 +358,23 @@ func (t *mockTxStore) updateContainerStatus(_ context.Context, in updateStatusIn
 	}
 	t.containersByID[in.ContainerID] = c
 	return c, nil
+}
+
+func (t *mockTxStore) insertTransferAudit(_ context.Context, a ContainerTransferAudit) error {
+	if t.insertTransferAuditErr != nil {
+		return t.insertTransferAuditErr
+	}
+	cp := a
+	t.insertedTransferAudit = &cp
+	return nil
+}
+
+func (t *mockTxStore) insertOverloadLog(_ context.Context, _ ContainerOverloadLog) error {
+	return nil
+}
+
+func (t *mockTxStore) hasApprovedLoadingPlan(_ context.Context, _ uuid.UUID) (bool, error) {
+	return t.hasApprovedLoadingPlanResult, t.hasApprovedLoadingPlanErr
 }
 
 // ── mock cross-module deps ──────────────────────────────────────────────────
@@ -453,8 +519,8 @@ func TestAddLine_HappyPath_FlipsOpenToLoading(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if line.Qty != 5 {
-		t.Errorf("Qty = %d, want 5", line.Qty)
+	if line.Line.Qty != 5 {
+		t.Errorf("Qty = %d, want 5", line.Line.Qty)
 	}
 	if len(tx.statusUpdates) != 1 || tx.statusUpdates[0].ToStatus != ContainerStatusLoading {
 		t.Errorf("expected OPEN→LOADING flip, got %+v", tx.statusUpdates)
@@ -523,8 +589,8 @@ func TestAddLine_CBMOverflow_Rejected(t *testing.T) {
 		CBMTotal:         5, WeightKGTotal: 100,
 		AddedBy: uuid.New(),
 	})
-	if !errors.Is(err, domain.ErrInvalidInput) {
-		t.Errorf("expected ErrInvalidInput on CBM overflow, got %v", err)
+	if !errors.Is(err, domain.ErrInsufficientStock) {
+		t.Errorf("expected ErrInsufficientStock on CBM overflow, got %v", err)
 	}
 }
 
@@ -565,8 +631,8 @@ func TestAddLine_WeightOverflow_Rejected(t *testing.T) {
 		ContainerID: containerID, SKUID: skuID, Qty: 1, SalesOrderLineID: soLine.ID,
 		CBMTotal: 1, WeightKGTotal: 200, AddedBy: uuid.New(),
 	})
-	if !errors.Is(err, domain.ErrInvalidInput) {
-		t.Errorf("expected ErrInvalidInput on weight overflow, got %v", err)
+	if !errors.Is(err, domain.ErrInsufficientStock) {
+		t.Errorf("expected ErrInsufficientStock on weight overflow, got %v", err)
 	}
 }
 
@@ -635,6 +701,94 @@ func TestAddLine_ZeroQty_Rejected(t *testing.T) {
 	}
 }
 
+func TestAddLine_NearCapacity_SetsWarning(t *testing.T) {
+	containerID := uuid.New()
+	skuID := uuid.New()
+	tx := newMockTx()
+	// max_cbm=10; current=8.5; adding 1.0 → projected=9.5 > 90% of 10
+	tx.containersByID[containerID] = Container{
+		ID: containerID, Status: ContainerStatusLoading,
+		MaxCBM: 10, MaxPayloadKG: 28000,
+	}
+	tx.aggregates[containerID] = [2]float64{8.5, 100}
+	soLine := validSOLineInfo(skuID, 10, 0)
+	svc := newSvc(&mockStore{tx: tx}, &mockSKU{}, &mockSOLine{info: soLine}, nil)
+
+	result, err := svc.AddLine(context.Background(), AddLineInput{
+		ContainerID: containerID, SKUID: skuID, Qty: 1, SalesOrderLineID: soLine.ID,
+		CBMTotal: 1.0, WeightKGTotal: 50, AddedBy: uuid.New(),
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result.NearCapacity {
+		t.Error("want NearCapacity=true when projected CBM > 90% of max")
+	}
+}
+
+func TestAddLine_BelowNearCapacity_NoWarning(t *testing.T) {
+	containerID := uuid.New()
+	skuID := uuid.New()
+	tx := newMockTx()
+	// max_cbm=10; current=5; adding 1 → projected=6 < 90%
+	tx.containersByID[containerID] = Container{
+		ID: containerID, Status: ContainerStatusLoading,
+		MaxCBM: 10, MaxPayloadKG: 28000,
+	}
+	tx.aggregates[containerID] = [2]float64{5, 100}
+	soLine := validSOLineInfo(skuID, 10, 0)
+	svc := newSvc(&mockStore{tx: tx}, &mockSKU{}, &mockSOLine{info: soLine}, nil)
+
+	result, err := svc.AddLine(context.Background(), AddLineInput{
+		ContainerID: containerID, SKUID: skuID, Qty: 1, SalesOrderLineID: soLine.ID,
+		CBMTotal: 1.0, WeightKGTotal: 50, AddedBy: uuid.New(),
+	})
+	if err != nil {
+		t.Fatalf("unexpected: %v", err)
+	}
+	if result.NearCapacity {
+		t.Error("want NearCapacity=false when projected CBM < 90% of max")
+	}
+}
+
+func TestAddLine_AdminOverload_BypassesHardLimit(t *testing.T) {
+	containerID := uuid.New()
+	skuID := uuid.New()
+	tx := newMockTx()
+	// max_cbm=10; current=10; adding 5 → would normally fail
+	tx.containersByID[containerID] = Container{
+		ID: containerID, Code: "CONT-X", Status: ContainerStatusLoading,
+		MaxCBM: 10, MaxPayloadKG: 28000,
+	}
+	tx.aggregates[containerID] = [2]float64{10, 100}
+	soLine := validSOLineInfo(skuID, 20, 0)
+	svc := newSvc(&mockStore{tx: tx}, &mockSKU{}, &mockSOLine{info: soLine}, nil)
+
+	result, err := svc.AddLine(context.Background(), AddLineInput{
+		ContainerID: containerID, SKUID: skuID, Qty: 1, SalesOrderLineID: soLine.ID,
+		CBMTotal: 5, WeightKGTotal: 50, AddedBy: uuid.New(),
+		AllowOverload: true, ActorRole: "admin",
+	})
+	if err != nil {
+		t.Fatalf("admin override should succeed, got %v", err)
+	}
+	if result.Line.Qty != 1 {
+		t.Errorf("want line inserted, got %+v", result.Line)
+	}
+}
+
+func TestAddLine_NonAdminOverload_Rejected(t *testing.T) {
+	svc := newSvc(&mockStore{}, nil, nil, nil)
+	_, err := svc.AddLine(context.Background(), AddLineInput{
+		ContainerID: uuid.New(), SKUID: uuid.New(), SalesOrderLineID: uuid.New(),
+		Qty: 1, CBMTotal: 1, WeightKGTotal: 1, AddedBy: uuid.New(),
+		AllowOverload: true, ActorRole: "warehouse",
+	})
+	if !errors.Is(err, domain.ErrPreconditionFailed) {
+		t.Errorf("want ErrPreconditionFailed for non-admin overload, got %v", err)
+	}
+}
+
 // ── DeleteLine ──────────────────────────────────────────────────────────────
 
 func TestDeleteLine_OpenContainer_Allowed(t *testing.T) {
@@ -694,7 +848,8 @@ func TestTransferLine_FullMove(t *testing.T) {
 	svc := newSvc(st, nil, nil, nil)
 
 	res, err := svc.TransferLine(context.Background(), TransferLineInput{
-		ContainerID: srcID, TargetContainerID: tgtID, LineID: lineID, ActorID: uuid.New(),
+		ContainerID: srcID, TargetContainerID: tgtID, LineID: lineID,
+		Reason: "delay on ship A, moving to B", ActorID: uuid.New(),
 	})
 	if err != nil {
 		t.Fatalf("unexpected: %v", err)
@@ -734,7 +889,7 @@ func TestTransferLine_PartialQty_DecrementsSource(t *testing.T) {
 	res, err := svc.TransferLine(context.Background(), TransferLineInput{
 		ContainerID: srcID, TargetContainerID: tgtID, LineID: lineID,
 		Qty: 3, CBMTotal: 1.5, WeightKGTotal: 30,
-		ActorID: uuid.New(),
+		Reason: "delay on ship A, moving to B", ActorID: uuid.New(),
 	})
 	if err != nil {
 		t.Fatalf("unexpected: %v", err)
@@ -765,7 +920,7 @@ func TestTransferLine_SealedSource_Rejected(t *testing.T) {
 	svc := newSvc(st, nil, nil, nil)
 	_, err := svc.TransferLine(context.Background(), TransferLineInput{
 		ContainerID: srcID, TargetContainerID: tgtID, LineID: uuid.New(),
-		ActorID: uuid.New(),
+		Reason: "moving due to vessel change", ActorID: uuid.New(),
 	})
 	if !errors.Is(err, domain.ErrInvalidTransition) {
 		t.Errorf("expected ErrInvalidTransition, got %v", err)
@@ -795,7 +950,8 @@ func TestTransferLine_PartialQtyExceedsLine_Rejected(t *testing.T) {
 	svc := newSvc(st, nil, nil, nil)
 	_, err := svc.TransferLine(context.Background(), TransferLineInput{
 		ContainerID: srcID, TargetContainerID: tgtID, LineID: lineID,
-		Qty: 6, CBMTotal: 1, WeightKGTotal: 10, ActorID: uuid.New(),
+		Qty: 6, CBMTotal: 1, WeightKGTotal: 10,
+		Reason: "capacity rebalance", ActorID: uuid.New(),
 	})
 	if !errors.Is(err, domain.ErrInvalidInput) {
 		t.Errorf("expected ErrInvalidInput, got %v", err)
@@ -814,10 +970,135 @@ func TestTransferLine_PartialMissingCBMWeight_Rejected(t *testing.T) {
 	svc := newSvc(st, nil, nil, nil)
 	_, err := svc.TransferLine(context.Background(), TransferLineInput{
 		ContainerID: srcID, TargetContainerID: tgtID, LineID: lineID,
-		Qty: 2, ActorID: uuid.New(),
+		Qty: 2, Reason: "capacity rebalance", ActorID: uuid.New(),
 	})
 	if !errors.Is(err, domain.ErrInvalidInput) {
 		t.Errorf("expected ErrInvalidInput, got %v", err)
+	}
+}
+
+// ── TransferLine: BR-D07 / BR-D16 / BR-D17 ──────────────────────────────────
+
+// BR-D07: reason is mandatory.
+func TestTransferLine_EmptyReason_Rejected(t *testing.T) {
+	srcID := uuid.New()
+	tgtID := uuid.New()
+	lineID := uuid.New()
+	tx := newMockTx()
+	tx.containersByID[srcID] = Container{ID: srcID, Status: ContainerStatusLoading, MaxCBM: 33, MaxPayloadKG: 28000}
+	tx.containersByID[tgtID] = Container{ID: tgtID, Status: ContainerStatusLoading, MaxCBM: 33, MaxPayloadKG: 28000}
+	tx.linesByID[lineID] = ContainerLine{ID: lineID, ContainerID: srcID, Qty: 2, CBMTotal: 1, WeightKGTotal: 20}
+	svc := newSvc(&mockStore{tx: tx}, nil, nil, nil)
+
+	_, err := svc.TransferLine(context.Background(), TransferLineInput{
+		ContainerID: srcID, TargetContainerID: tgtID, LineID: lineID,
+		Reason: "", ActorID: uuid.New(),
+	})
+	if !errors.Is(err, domain.ErrInvalidInput) {
+		t.Errorf("BR-D07: empty reason must return ErrInvalidInput, got %v", err)
+	}
+}
+
+// BR-D07: audit row written on successful transfer.
+func TestTransferLine_AuditRowWritten(t *testing.T) {
+	srcID := uuid.New()
+	tgtID := uuid.New()
+	lineID := uuid.New()
+	tx := newMockTx()
+	tx.containersByID[srcID] = Container{ID: srcID, Status: ContainerStatusLoading, MaxCBM: 33, MaxPayloadKG: 28000}
+	tx.containersByID[tgtID] = Container{ID: tgtID, Status: ContainerStatusLoading, MaxCBM: 33, MaxPayloadKG: 28000}
+	tx.linesByID[lineID] = ContainerLine{ID: lineID, ContainerID: srcID, Qty: 4, CBMTotal: 2, WeightKGTotal: 40}
+	svc := newSvc(&mockStore{tx: tx}, nil, nil, nil)
+
+	actorID := uuid.New()
+	res, err := svc.TransferLine(context.Background(), TransferLineInput{
+		ContainerID: srcID, TargetContainerID: tgtID, LineID: lineID,
+		Reason: "delay on vessel A", ActorID: actorID, ActorRole: "warehouse",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if tx.insertedTransferAudit == nil {
+		t.Fatal("BR-D07: expected audit row to be written")
+	}
+	a := tx.insertedTransferAudit
+	if a.Reason != "delay on vessel A" {
+		t.Errorf("audit.Reason = %q, want %q", a.Reason, "delay on vessel A")
+	}
+	if a.QtyTransferred != 4 {
+		t.Errorf("audit.QtyTransferred = %d, want 4", a.QtyTransferred)
+	}
+	if a.IsCrossPlan {
+		t.Errorf("BR-D16: no approved plan, IsCrossPlan must be false")
+	}
+	if res.Audit.ID == (uuid.UUID{}) {
+		t.Errorf("result.Audit must be populated")
+	}
+}
+
+// BR-D16: source has no approved plan → worker role allowed.
+func TestTransferLine_SamePlan_WorkerAllowed(t *testing.T) {
+	srcID := uuid.New()
+	tgtID := uuid.New()
+	lineID := uuid.New()
+	tx := newMockTx()
+	tx.containersByID[srcID] = Container{ID: srcID, Status: ContainerStatusLoading, MaxCBM: 33, MaxPayloadKG: 28000}
+	tx.containersByID[tgtID] = Container{ID: tgtID, Status: ContainerStatusLoading, MaxCBM: 33, MaxPayloadKG: 28000}
+	tx.linesByID[lineID] = ContainerLine{ID: lineID, ContainerID: srcID, Qty: 2, CBMTotal: 1, WeightKGTotal: 10}
+	tx.hasApprovedLoadingPlanResult = false // no approved plan
+	svc := newSvc(&mockStore{tx: tx}, nil, nil, nil)
+
+	_, err := svc.TransferLine(context.Background(), TransferLineInput{
+		ContainerID: srcID, TargetContainerID: tgtID, LineID: lineID,
+		Reason: "rebalance", ActorID: uuid.New(), ActorRole: "warehouse",
+	})
+	if err != nil {
+		t.Errorf("BR-D16: worker must be allowed when no approved plan, got %v", err)
+	}
+}
+
+// BR-D17: source has APPROVED plan + worker role → 412.
+func TestTransferLine_CrossPlan_WorkerRejected(t *testing.T) {
+	srcID := uuid.New()
+	tgtID := uuid.New()
+	lineID := uuid.New()
+	tx := newMockTx()
+	tx.containersByID[srcID] = Container{ID: srcID, Status: ContainerStatusLoading, MaxCBM: 33, MaxPayloadKG: 28000}
+	tx.containersByID[tgtID] = Container{ID: tgtID, Status: ContainerStatusLoading, MaxCBM: 33, MaxPayloadKG: 28000}
+	tx.linesByID[lineID] = ContainerLine{ID: lineID, ContainerID: srcID, Qty: 2, CBMTotal: 1, WeightKGTotal: 10}
+	tx.hasApprovedLoadingPlanResult = true // approved plan exists
+	svc := newSvc(&mockStore{tx: tx}, nil, nil, nil)
+
+	_, err := svc.TransferLine(context.Background(), TransferLineInput{
+		ContainerID: srcID, TargetContainerID: tgtID, LineID: lineID,
+		Reason: "rebalance", ActorID: uuid.New(), ActorRole: "warehouse",
+	})
+	if !errors.Is(err, domain.ErrPreconditionFailed) {
+		t.Errorf("BR-D17: worker on cross-plan must return ErrPreconditionFailed, got %v", err)
+	}
+}
+
+// BR-D17: source has APPROVED plan + planner role → allowed.
+func TestTransferLine_CrossPlan_PlannerAllowed(t *testing.T) {
+	srcID := uuid.New()
+	tgtID := uuid.New()
+	lineID := uuid.New()
+	tx := newMockTx()
+	tx.containersByID[srcID] = Container{ID: srcID, Status: ContainerStatusLoading, MaxCBM: 33, MaxPayloadKG: 28000}
+	tx.containersByID[tgtID] = Container{ID: tgtID, Status: ContainerStatusLoading, MaxCBM: 33, MaxPayloadKG: 28000}
+	tx.linesByID[lineID] = ContainerLine{ID: lineID, ContainerID: srcID, Qty: 2, CBMTotal: 1, WeightKGTotal: 10}
+	tx.hasApprovedLoadingPlanResult = true // approved plan exists
+	svc := newSvc(&mockStore{tx: tx}, nil, nil, nil)
+
+	_, err := svc.TransferLine(context.Background(), TransferLineInput{
+		ContainerID: srcID, TargetContainerID: tgtID, LineID: lineID,
+		Reason: "vessel schedule change", ActorID: uuid.New(), ActorRole: "planner",
+	})
+	if err != nil {
+		t.Errorf("BR-D17: planner must be allowed on cross-plan transfer, got %v", err)
+	}
+	if tx.insertedTransferAudit == nil || !tx.insertedTransferAudit.IsCrossPlan {
+		t.Errorf("BR-D17: audit row must have IsCrossPlan=true")
 	}
 }
 
@@ -1494,5 +1775,379 @@ func TestListContainerLinesHistory_PlanFilterPropagated(t *testing.T) {
 	}
 	if st.linesHistoryFilter == nil || *st.linesHistoryFilter != planID {
 		t.Errorf("plan filter not propagated, got %v", st.linesHistoryFilter)
+	}
+}
+
+// ── ListAtRisk (#296) ────────────────────────────────────────────────────────
+
+func TestListAtRisk_HappyPath_ReturnsRowsWithRiskLevel(t *testing.T) {
+	now := time.Date(2026, 6, 1, 10, 0, 0, 0, time.UTC)
+	cutoffRed := now.Add(2 * 24 * time.Hour)    // 2 days → RED
+	cutoffOrange := now.Add(5 * 24 * time.Hour) // 5 days → ORANGE
+	vesselName := "EVER GIVEN"
+	maxCBM := 67.7
+
+	st := &mockStore{
+		atRiskResult: []AtRiskRow{
+			{ContainerID: uuid.New(), ContainerCode: "CONT20260601-001", VesselName: &vesselName, CutoffDate: cutoffRed, UsedCBM: 30, MaxCBM: maxCBM},
+			{ContainerID: uuid.New(), ContainerCode: "CONT20260601-002", VesselName: nil, CutoffDate: cutoffOrange, UsedCBM: 10, MaxCBM: maxCBM},
+		},
+	}
+	svc := newSvc(st, nil, nil, nil)
+	svc.now = func() time.Time { return now }
+
+	rows, err := svc.ListAtRisk(context.Background(), 7)
+	if err != nil {
+		t.Fatalf("ListAtRisk: %v", err)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("rows = %d, want 2", len(rows))
+	}
+
+	if rows[0].RiskLevel != RiskLevelRed {
+		t.Errorf("row[0] risk = %s, want RED", rows[0].RiskLevel)
+	}
+	if rows[1].RiskLevel != RiskLevelOrange {
+		t.Errorf("row[1] risk = %s, want ORANGE", rows[1].RiskLevel)
+	}
+}
+
+func TestListAtRisk_FillPct_ComputedCorrectly(t *testing.T) {
+	now := time.Date(2026, 6, 1, 10, 0, 0, 0, time.UTC)
+	cutoff := now.Add(4 * 24 * time.Hour)
+
+	st := &mockStore{
+		atRiskResult: []AtRiskRow{
+			{ContainerID: uuid.New(), ContainerCode: "CONT-X", CutoffDate: cutoff, UsedCBM: 50, MaxCBM: 100},
+		},
+	}
+	svc := newSvc(st, nil, nil, nil)
+	svc.now = func() time.Time { return now }
+
+	rows, err := svc.ListAtRisk(context.Background(), 7)
+	if err != nil {
+		t.Fatalf("ListAtRisk: %v", err)
+	}
+	if rows[0].FillPctCBM != 50.0 {
+		t.Errorf("FillPctCBM = %v, want 50.0", rows[0].FillPctCBM)
+	}
+}
+
+func TestListAtRisk_ZeroMaxCBM_FillPctIsZero(t *testing.T) {
+	now := time.Date(2026, 6, 1, 10, 0, 0, 0, time.UTC)
+	cutoff := now.Add(3 * 24 * time.Hour)
+
+	st := &mockStore{
+		atRiskResult: []AtRiskRow{
+			{ContainerID: uuid.New(), ContainerCode: "CONT-Y", CutoffDate: cutoff, UsedCBM: 10, MaxCBM: 0},
+		},
+	}
+	svc := newSvc(st, nil, nil, nil)
+	svc.now = func() time.Time { return now }
+
+	rows, err := svc.ListAtRisk(context.Background(), 7)
+	if err != nil {
+		t.Fatalf("ListAtRisk: %v", err)
+	}
+	if rows[0].FillPctCBM != 0 {
+		t.Errorf("FillPctCBM = %v, want 0 when max_cbm=0", rows[0].FillPctCBM)
+	}
+}
+
+func TestListAtRisk_OverdueContainer_IncludedAsRed(t *testing.T) {
+	now := time.Date(2026, 6, 1, 10, 0, 0, 0, time.UTC)
+	cutoff := now.Add(-1 * 24 * time.Hour) // already past
+
+	st := &mockStore{
+		atRiskResult: []AtRiskRow{
+			{ContainerID: uuid.New(), ContainerCode: "CONT-OLD", CutoffDate: cutoff, UsedCBM: 5, MaxCBM: 67.7},
+		},
+	}
+	svc := newSvc(st, nil, nil, nil)
+	svc.now = func() time.Time { return now }
+
+	rows, err := svc.ListAtRisk(context.Background(), 7)
+	if err != nil {
+		t.Fatalf("ListAtRisk: %v", err)
+	}
+	if rows[0].DaysToCutoff >= 0 {
+		t.Errorf("DaysToCutoff = %d, want negative for overdue", rows[0].DaysToCutoff)
+	}
+	if rows[0].RiskLevel != RiskLevelRed {
+		t.Errorf("overdue container risk = %s, want RED", rows[0].RiskLevel)
+	}
+}
+
+func TestListAtRisk_DefaultDays_UsedWhenZero(t *testing.T) {
+	now := time.Date(2026, 6, 1, 10, 0, 0, 0, time.UTC)
+	st := &mockStore{atRiskResult: nil}
+	svc := newSvc(st, nil, nil, nil)
+	svc.now = func() time.Time { return now }
+
+	_, err := svc.ListAtRisk(context.Background(), 0)
+	if err != nil {
+		t.Fatalf("ListAtRisk: %v", err)
+	}
+	wantBefore := now.AddDate(0, 0, atRiskDefaultDays)
+	if !st.atRiskBefore.Equal(wantBefore) {
+		t.Errorf("before = %v, want %v (default %d days)", st.atRiskBefore, wantBefore, atRiskDefaultDays)
+	}
+}
+
+// ── AssignLoader tests (#16) ─────────────────────────────────────────────────
+
+func TestAssignLoader_FirstAssignment_NoReasonRequired(t *testing.T) {
+	cid := uuid.New()
+	loaderID := uuid.New()
+	actor := uuid.New()
+
+	st := &mockStore{
+		selectByIDResult: Container{ID: cid, Status: ContainerStatusOpen},
+	}
+	svc := newSvc(st, nil, nil, nil)
+
+	out, err := svc.AssignLoader(context.Background(), AssignLoaderInput{
+		ContainerID: cid,
+		LoaderID:    &loaderID,
+		AssignedBy:  actor,
+	})
+	if err != nil {
+		t.Fatalf("unexpected: %v", err)
+	}
+	if out.LoaderID == nil || *out.LoaderID != loaderID {
+		t.Errorf("LoaderID = %v, want %v", out.LoaderID, loaderID)
+	}
+}
+
+func TestAssignLoader_Reassignment_RequiresReason(t *testing.T) {
+	cid := uuid.New()
+	oldID := uuid.New()
+	newID := uuid.New()
+
+	st := &mockStore{
+		selectByIDResult: Container{ID: cid, Status: ContainerStatusOpen, LoaderID: &oldID},
+	}
+	svc := newSvc(st, nil, nil, nil)
+
+	// Reassignment without reason
+	_, err := svc.AssignLoader(context.Background(), AssignLoaderInput{
+		ContainerID: cid,
+		LoaderID:    &newID,
+		AssignedBy:  uuid.New(),
+		Reason:      "",
+	})
+	if !errors.Is(err, domain.ErrInvalidInput) {
+		t.Errorf("expected ErrInvalidInput on missing reason, got %v", err)
+	}
+}
+
+func TestAssignLoader_Unassign_Allowed(t *testing.T) {
+	cid := uuid.New()
+	loaderID := uuid.New()
+	st := &mockStore{
+		selectByIDResult: Container{ID: cid, Status: ContainerStatusOpen, LoaderID: &loaderID},
+	}
+	svc := newSvc(st, nil, nil, nil)
+
+	out, err := svc.AssignLoader(context.Background(), AssignLoaderInput{
+		ContainerID: cid,
+		LoaderID:    nil,
+		AssignedBy:  uuid.New(),
+	})
+	if err != nil {
+		t.Fatalf("unexpected: %v", err)
+	}
+	if out.LoaderID != nil {
+		t.Errorf("expected LoaderID to be nil, got %v", out.LoaderID)
+	}
+}
+
+// ── ExportPackingList (#18) ──────────────────────────────────────────────────
+
+func TestExportPackingList_HappyPath_WritesXLSX(t *testing.T) {
+	skuID := uuid.New()
+	sealed := time.Date(2026, 6, 1, 8, 0, 0, 0, time.UTC)
+	st := &mockStore{
+		selectByIDResult: Container{
+			ID: uuid.New(), Code: "CONT20260601-001",
+			Status: ContainerStatusSealed, SealedAt: &sealed,
+		},
+		selectLinesResult: []ContainerLine{
+			{ID: uuid.New(), SKUID: skuID, SKUCode: "SKU-001", SKUName: "Test SKU", Qty: 10, CBMTotal: 1.5, WeightKGTotal: 30},
+		},
+	}
+	svc := newSvc(st, nil, nil, nil)
+
+	var buf bytes.Buffer
+	if err := svc.ExportPackingList(context.Background(), st.selectByIDResult.ID, &buf); err != nil {
+		t.Fatalf("ExportPackingList: %v", err)
+	}
+	if buf.Len() == 0 {
+		t.Error("expected non-empty xlsx bytes")
+	}
+	// Verify it's a valid xlsx (PK zip magic bytes)
+	b := buf.Bytes()
+	if len(b) < 4 || b[0] != 0x50 || b[1] != 0x4B {
+		t.Errorf("output doesn't look like a zip/xlsx file")
+	}
+}
+
+func TestExportPackingList_NotSealed_ReturnsPreconditionFailed(t *testing.T) {
+	st := &mockStore{
+		selectByIDResult: Container{
+			ID: uuid.New(), Code: "CONT-OPEN", Status: ContainerStatusOpen,
+		},
+	}
+	svc := newSvc(st, nil, nil, nil)
+
+	var buf bytes.Buffer
+	err := svc.ExportPackingList(context.Background(), st.selectByIDResult.ID, &buf)
+	if err == nil {
+		t.Fatal("expected error for non-SEALED container")
+	}
+	if !errors.Is(err, domain.ErrPreconditionFailed) {
+		t.Errorf("expected ErrPreconditionFailed, got %v", err)
+	}
+}
+
+func TestExportPackingList_NotFound_ReturnsNotFound(t *testing.T) {
+	st := &mockStore{selectByIDErr: domain.ErrNotFound}
+	svc := newSvc(st, nil, nil, nil)
+
+	var buf bytes.Buffer
+	err := svc.ExportPackingList(context.Background(), uuid.New(), &buf)
+	if !errors.Is(err, domain.ErrNotFound) {
+		t.Errorf("expected ErrNotFound, got %v", err)
+	}
+}
+
+func TestExportPackingList_EmptyLines_WritesValidXLSX(t *testing.T) {
+	sealed := time.Date(2026, 6, 1, 8, 0, 0, 0, time.UTC)
+	st := &mockStore{
+		selectByIDResult: Container{
+			ID: uuid.New(), Code: "CONT-EMPTY",
+			Status: ContainerStatusSealed, SealedAt: &sealed,
+		},
+		selectLinesResult: nil,
+	}
+	svc := newSvc(st, nil, nil, nil)
+
+	var buf bytes.Buffer
+	if err := svc.ExportPackingList(context.Background(), st.selectByIDResult.ID, &buf); err != nil {
+		t.Fatalf("ExportPackingList (empty lines): %v", err)
+	}
+	if buf.Len() == 0 {
+		t.Error("expected non-empty xlsx even with no lines")
+	}
+}
+
+// ── ChangeDestination tests (#17) ────────────────────────────────────────────
+
+func TestChangeDestination_FirstAssignment_NoReasonRequired(t *testing.T) {
+	cid := uuid.New()
+	actor := uuid.New()
+
+	st := &mockStore{
+		selectByIDResult: Container{ID: cid, Status: ContainerStatusOpen},
+	}
+	svc := newSvc(st, nil, nil, nil)
+
+	out, err := svc.ChangeDestination(context.Background(), ChangeDestinationInput{
+		ContainerID:     cid,
+		DestinationCode: "LAX",
+		DestinationName: "Los Angeles",
+		ActorID:         actor,
+	})
+	if err != nil {
+		t.Fatalf("unexpected: %v", err)
+	}
+	if out.DestinationCode != "LAX" {
+		t.Errorf("Dest = %q, want LAX", out.DestinationCode)
+	}
+	if !st.changeDestCalled {
+		t.Error("changeDestinationTx was never called")
+	}
+	if st.changeDestClearVessel {
+		t.Error("first assignment should not clear vessel")
+	}
+}
+
+func TestChangeDestination_Reassignment_RequiresReason(t *testing.T) {
+	cid := uuid.New()
+	st := &mockStore{
+		selectByIDResult: Container{
+			ID: cid, Status: ContainerStatusLoading,
+			DestinationCode: "SGN", DestinationName: "Saigon",
+		},
+	}
+	svc := newSvc(st, nil, nil, nil)
+
+	// Change to HPH without reason
+	_, err := svc.ChangeDestination(context.Background(), ChangeDestinationInput{
+		ContainerID:     cid,
+		DestinationCode: "HPH",
+		ActorID:         uuid.New(),
+		Reason:          "  ",
+	})
+	if !errors.Is(err, domain.ErrInvalidInput) {
+		t.Errorf("expected ErrInvalidInput on missing reason, got %v", err)
+	}
+}
+
+func TestChangeDestination_Reassignment_ClearsVessel(t *testing.T) {
+	cid := uuid.New()
+	vID := uuid.New()
+	st := &mockStore{
+		selectByIDResult: Container{
+			ID: cid, Status: ContainerStatusLoading,
+			DestinationCode: "SGN", VesselID: &vID,
+		},
+	}
+	svc := newSvc(st, nil, nil, nil)
+
+	out, err := svc.ChangeDestination(context.Background(), ChangeDestinationInput{
+		ContainerID:     cid,
+		DestinationCode: "HPH",
+		Reason:          "customer change",
+		ActorID:         uuid.New(),
+	})
+	if err != nil {
+		t.Fatalf("unexpected: %v", err)
+	}
+	if out.VesselID != nil {
+		t.Error("vessel_id must be cleared on destination change")
+	}
+	if !st.changeDestClearVessel {
+		t.Error("clearVessel flag should have been true")
+	}
+}
+
+func TestChangeDestination_SealedContainer_Rejected(t *testing.T) {
+	cid := uuid.New()
+	st := &mockStore{
+		selectByIDResult: Container{ID: cid, Status: ContainerStatusSealed},
+	}
+	svc := newSvc(st, nil, nil, nil)
+	_, err := svc.ChangeDestination(context.Background(), ChangeDestinationInput{
+		ContainerID:     cid,
+		DestinationCode: "HPH",
+		ActorID:         uuid.New(),
+	})
+	if !errors.Is(err, domain.ErrInvalidTransition) {
+		t.Errorf("expected ErrInvalidTransition on SEALED, got %v", err)
+	}
+}
+
+func TestChangeDestination_NotFound_Returns404(t *testing.T) {
+	st := &mockStore{selectByIDErr: domain.ErrNotFound}
+	svc := newSvc(st, nil, nil, nil)
+
+	_, err := svc.ChangeDestination(context.Background(), ChangeDestinationInput{
+		ContainerID:     uuid.New(),
+		DestinationCode: "DC-98",
+		ActorID:         uuid.New(),
+	})
+	if !errors.Is(err, domain.ErrNotFound) {
+		t.Errorf("error = %v, want ErrNotFound", err)
 	}
 }

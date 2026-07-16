@@ -18,4 +18,6 @@ type store interface {
 	// Callers pass limit+1 so the service layer can detect has_more.
 	selectScanEventsByBarcodeKeyset(ctx context.Context, barcodeID uuid.UUID, cur httpkit.Cursor, limit int) ([]ScanEvent, error)
 	selectLastScanEventByBarcode(ctx context.Context, barcodeID uuid.UUID) (ScanEvent, error)
+	insertQCEvent(ctx context.Context, e QCEvent) error
+	selectQCEventsByWorkOrder(ctx context.Context, workOrderID uuid.UUID) ([]QCEvent, error)
 }

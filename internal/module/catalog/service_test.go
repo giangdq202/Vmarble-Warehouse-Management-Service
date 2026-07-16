@@ -82,6 +82,21 @@ type mockStore struct {
 	// selectBOMComponentsByVariantID
 	selectBOMComponentsByVariantIDResult []BOMComponent
 	selectBOMComponentsByVariantIDErr    error
+
+	// updateSKUExportFields
+	updateSKUExportFieldsResult SKU
+	updateSKUExportFieldsErr    error
+
+	// upsertPackingUnit
+	upsertPackingUnitResult PackingUnit
+	upsertPackingUnitErr    error
+
+	// selectPackingUnitsBySkuID
+	selectPackingUnitsBySkuIDResult []PackingUnit
+	selectPackingUnitsBySkuIDErr    error
+
+	// deletePackingUnit
+	deletePackingUnitErr error
 }
 
 func (m *mockStore) insertMaterial(_ context.Context, _ Material) error {
@@ -138,6 +153,27 @@ func (m *mockStore) selectBOMVariantByCode(_ context.Context, _ uuid.UUID, _ str
 }
 func (m *mockStore) selectBOMComponentsByVariantID(_ context.Context, _ uuid.UUID) ([]BOMComponent, error) {
 	return m.selectBOMComponentsByVariantIDResult, m.selectBOMComponentsByVariantIDErr
+}
+func (m *mockStore) updateSKUExportFields(_ context.Context, in UpdateSKUInput) (SKU, error) {
+	return m.updateSKUExportFieldsResult, m.updateSKUExportFieldsErr
+}
+func (m *mockStore) upsertPackingUnit(_ context.Context, _ UpsertPackingUnitInput) (PackingUnit, error) {
+	return m.upsertPackingUnitResult, m.upsertPackingUnitErr
+}
+func (m *mockStore) selectPackingUnitsBySkuID(_ context.Context, _ uuid.UUID) ([]PackingUnit, error) {
+	return m.selectPackingUnitsBySkuIDResult, m.selectPackingUnitsBySkuIDErr
+}
+func (m *mockStore) deletePackingUnit(_ context.Context, _ uuid.UUID, _ string) error {
+	return m.deletePackingUnitErr
+}
+func (m *mockStore) upsertSKUComponent(_ context.Context, _ UpsertSKUComponentInput) (SKUComponent, error) {
+	return SKUComponent{}, nil
+}
+func (m *mockStore) selectSKUComponentsBySkuID(_ context.Context, _ uuid.UUID) ([]SKUComponent, error) {
+	return nil, nil
+}
+func (m *mockStore) deleteSKUComponent(_ context.Context, _ uuid.UUID, _ string) error {
+	return nil
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -404,6 +440,100 @@ func TestCreateMaterial_MissingName_Rejected(t *testing.T) {
 		t.Errorf("expected ErrInvalidInput for missing name, got %v", err)
 	}
 }
+
+// ── UpdateSKU / BR-SKU02 ──────────────────────────────────────────────────────
+
+func TestUpdateSKU_InvalidHSCode_Rejected(t *testing.T) {
+	cases := []struct {
+		name   string
+		hsCode string
+	}{
+		{"too short", "1234"},
+		{"too long", "12345678901"},
+		{"non-numeric", "ABC123"},
+		{"has spaces", "123 456"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			svc := NewService(&mockStore{})
+			_, err := svc.UpdateSKU(context.Background(), UpdateSKUInput{
+				SKUID:  uuid.New(),
+				HSCode: &tc.hsCode,
+			})
+			if !errors.Is(err, domain.ErrInvalidInput) {
+				t.Errorf("expected ErrInvalidInput for hs_code=%q, got %v", tc.hsCode, err)
+			}
+		})
+	}
+}
+
+func TestUpdateSKU_ValidHSCode_Accepted(t *testing.T) {
+	skuID := uuid.New()
+	updated := SKU{ID: skuID, Code: "SKU-001", HSCode: strPtr("850610")}
+	svc := NewService(&mockStore{updateSKUExportFieldsResult: updated})
+	hsCode := "850610"
+	got, err := svc.UpdateSKU(context.Background(), UpdateSKUInput{
+		SKUID:  skuID,
+		HSCode: &hsCode,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got.HSCode == nil || *got.HSCode != hsCode {
+		t.Errorf("got hs_code=%v, want %s", got.HSCode, hsCode)
+	}
+}
+
+func TestUpdateSKU_NegativeHeight_Rejected(t *testing.T) {
+	h := -1
+	svc := NewService(&mockStore{})
+	_, err := svc.UpdateSKU(context.Background(), UpdateSKUInput{SKUID: uuid.New(), HeightMM: &h})
+	if !errors.Is(err, domain.ErrInvalidInput) {
+		t.Errorf("expected ErrInvalidInput for negative height_mm, got %v", err)
+	}
+}
+
+// ── UpsertPackingUnit / BR-SKU04 ──────────────────────────────────────────────
+
+func TestUpsertPackingUnit_InvalidUnit_Rejected(t *testing.T) {
+	svc := NewService(&mockStore{})
+	_, err := svc.UpsertPackingUnit(context.Background(), UpsertPackingUnitInput{
+		SKUID:         uuid.New(),
+		Unit:          "pallet",
+		PiecesPerUnit: 1,
+	})
+	if !errors.Is(err, domain.ErrInvalidInput) {
+		t.Errorf("expected ErrInvalidInput for invalid unit, got %v", err)
+	}
+}
+
+func TestUpsertPackingUnit_ZeroPiecesPerUnit_Rejected(t *testing.T) {
+	svc := NewService(&mockStore{})
+	_, err := svc.UpsertPackingUnit(context.Background(), UpsertPackingUnitInput{
+		SKUID:         uuid.New(),
+		Unit:          "piece",
+		PiecesPerUnit: 0,
+	})
+	if !errors.Is(err, domain.ErrInvalidInput) {
+		t.Errorf("expected ErrInvalidInput for pieces_per_unit=0, got %v", err)
+	}
+}
+
+func TestUpsertPackingUnit_SKUNotFound_Rejected(t *testing.T) {
+	svc := NewService(&mockStore{selectSKUByIDErr: domain.ErrNotFound})
+	_, err := svc.UpsertPackingUnit(context.Background(), UpsertPackingUnitInput{
+		SKUID:         uuid.New(),
+		Unit:          "set",
+		PiecesPerUnit: 5,
+		IsDefault:     true,
+	})
+	if !errors.Is(err, domain.ErrNotFound) {
+		t.Errorf("expected ErrNotFound for unknown SKU, got %v", err)
+	}
+}
+
+// strPtr is a helper for string pointer literals in tests.
+func strPtr(s string) *string { return &s }
 
 func TestCreateSKU_InvalidDimensions_Rejected(t *testing.T) {
 	svc := NewService(&mockStore{})

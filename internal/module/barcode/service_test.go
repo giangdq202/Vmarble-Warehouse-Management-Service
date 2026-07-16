@@ -89,6 +89,11 @@ func (m *mockStore) selectLastScanEventByBarcode(_ context.Context, _ uuid.UUID)
 	return m.selectLastScanEventResult, m.selectLastScanEventErr
 }
 
+func (m *mockStore) insertQCEvent(_ context.Context, _ QCEvent) error         { return nil }
+func (m *mockStore) selectQCEventsByWorkOrder(_ context.Context, _ uuid.UUID) ([]QCEvent, error) {
+	return nil, nil
+}
+
 // ── helpers ───────────────────────────────────────────────────────────────────
 
 func validGenerateInput() GenerateBarcodeInput {
@@ -268,8 +273,8 @@ func TestRecordScan_AllCheckpoints_Succeed(t *testing.T) {
 	if res1.ScanID == uuid.Nil {
 		t.Error("ScanID must be set")
 	}
-	if res1.NextCheckpoint == nil || *res1.NextCheckpoint != CheckpointFinishedGoods {
-		t.Errorf("next checkpoint = %v, want %v", res1.NextCheckpoint, CheckpointFinishedGoods)
+	if res1.NextCheckpoint == nil || *res1.NextCheckpoint != CheckpointQCPassed {
+		t.Errorf("next checkpoint = %v, want %v", res1.NextCheckpoint, CheckpointQCPassed)
 	}
 	if res1.ScannedBy != scannedBy {
 		t.Errorf("ScannedBy = %v, want %v", res1.ScannedBy, scannedBy)
@@ -290,24 +295,34 @@ func TestRecordScan_AllCheckpoints_Succeed(t *testing.T) {
 	st.selectLastScanEventResult = ScanEvent{BarcodeID: barcodeID, Checkpoint: CheckpointCNCComplete}
 	st.selectLastScanEventErr = nil
 	wo.status = domain.WOInProcessing
-	in2 := RecordScanInput{BarcodeID: barcodeID, Checkpoint: CheckpointFinishedGoods, ScannedBy: scannedBy}
+	in2 := RecordScanInput{BarcodeID: barcodeID, Checkpoint: CheckpointQCPassed, ScannedBy: scannedBy}
 	res2, err := svc.RecordScan(context.Background(), in2)
+	if err != nil {
+		t.Fatalf("checkpoint %s: unexpected error: %v", CheckpointQCPassed, err)
+	}
+	if res2.NextCheckpoint == nil || *res2.NextCheckpoint != CheckpointFinishedGoods {
+		t.Errorf("next checkpoint = %v, want %v", res2.NextCheckpoint, CheckpointFinishedGoods)
+	}
+
+	st.selectLastScanEventResult = ScanEvent{BarcodeID: barcodeID, Checkpoint: CheckpointQCPassed}
+	in3 := RecordScanInput{BarcodeID: barcodeID, Checkpoint: CheckpointFinishedGoods, ScannedBy: scannedBy}
+	res3, err := svc.RecordScan(context.Background(), in3)
 	if err != nil {
 		t.Fatalf("checkpoint %s: unexpected error: %v", CheckpointFinishedGoods, err)
 	}
-	if res2.NextCheckpoint == nil || *res2.NextCheckpoint != CheckpointShipped {
-		t.Errorf("next checkpoint = %v, want %v", res2.NextCheckpoint, CheckpointShipped)
+	if res3.NextCheckpoint == nil || *res3.NextCheckpoint != CheckpointShipped {
+		t.Errorf("next checkpoint = %v, want %v", res3.NextCheckpoint, CheckpointShipped)
 	}
 
 	st.selectLastScanEventResult = ScanEvent{BarcodeID: barcodeID, Checkpoint: CheckpointFinishedGoods}
 	wo.status = domain.WOCompleted
-	in3 := RecordScanInput{BarcodeID: barcodeID, Checkpoint: CheckpointShipped, ScannedBy: scannedBy}
-	res3, err := svc.RecordScan(context.Background(), in3)
+	in4 := RecordScanInput{BarcodeID: barcodeID, Checkpoint: CheckpointShipped, ScannedBy: scannedBy}
+	res4, err := svc.RecordScan(context.Background(), in4)
 	if err != nil {
 		t.Fatalf("checkpoint %s: unexpected error: %v", CheckpointShipped, err)
 	}
-	if res3.NextCheckpoint != nil {
-		t.Errorf("next checkpoint = %v, want nil", res3.NextCheckpoint)
+	if res4.NextCheckpoint != nil {
+		t.Errorf("next checkpoint = %v, want nil", res4.NextCheckpoint)
 	}
 	if !st.insertScanEventCalled {
 		t.Error("insertScanEvent must be called")
@@ -472,6 +487,10 @@ func (m *mockWOGateway) AdvanceStatus(_ context.Context, woID uuid.UUID, to doma
 	m.advanceWOID = woID
 	m.advanceTo = to
 	return m.advanceErr
+}
+
+func (m *mockWOGateway) UpdateQCStatus(_ context.Context, _ uuid.UUID, _ string) error {
+	return nil
 }
 
 func TestRecordScan_OutOfOrder_ReturnsErrInvalidTransition(t *testing.T) {

@@ -139,6 +139,13 @@ Only contains value objects and enums shared across modules:
 - PRs: feature → `dev` (approval optional), `dev` → `main` (requires 1 approval).
 - No force-push to protected branches.
 
+## Cross-repo Contract
+
+- BE repo: gitlab.com/529-stu/Vmarble-Warehouse-Management-Service
+- FE repo: gitlab.com/529-stu/Vmarble-Warehouse-Management-Client
+- BE always ships first: new API endpoint -> create FE issue labeled "blocked::be"
+- Shared kanban: https://gitlab.com/groups/529-stu/-/boards
+
 ## Domain invariants (do not violate)
 
 ### WorkOrder state machine
@@ -227,11 +234,12 @@ From spec section 8 — confirm before implementing smart algorithms:
 - Workforce/shift management scope
 - Stone workshop shared entities
 
-## PR expectations
+## MR expectations (GitLab)
 
 - Title: `[module] brief description`
 - Body must include: Summary, Business rule(s) impacted (BR-*), Test plan.
 - Do not merge changes that weaken domain invariants.
+- Use GitLab Merge Requests (MR), not GitHub PRs. Target branch is `dev` for features, `main` for releases.
 
 ---
 
@@ -259,17 +267,18 @@ From spec section 8 — confirm before implementing smart algorithms:
 
 ## Automation Workflow
 
-**Trigger**: user says "Làm task tiếp theo" / "Start next task" / picks an issue from the GitHub Projects Kanban board.
+**Trigger**: user says "Làm task tiếp theo" / "Start next task" / picks an issue from the GitLab Kanban board.
 
 1. **Fetch** — invoke `product-manager` skill to identify the highest-priority open issue:
    ```bash
-   gh issue list --repo giangdq202/Vmarble-Warehouse-Management-Service \
-     --assignee @me --state open --json number,title,labels \
-     | jq 'sort_by(.labels[].name) | .[0]'
+   GL=$(cat /tmp/gl_token | tr -d "\n")
+   curl -s --header "PRIVATE-TOKEN: $GL" \
+     "https://gitlab.com/api/v4/projects/529-stu%2FVmarble-Warehouse-Management-Service/issues?state=opened&assignee_username=thdat-vu&per_page=20&order_by=created_at&sort=asc"
    ```
 2. **Analyze** — read the full requirement and DoD:
    ```bash
-   gh issue view <number> --repo giangdq202/Vmarble-Warehouse-Management-Service
+   curl -s --header "PRIVATE-TOKEN: $GL" \
+     "https://gitlab.com/api/v4/projects/529-stu%2FVmarble-Warehouse-Management-Service/issues/<number>"
    ```
 3. **Audit** — invoke `business-auditor` skill: cross-reference the task against `docs/backend-business-logic-vi.md` and identify all BR-* rules it touches. Block implementation if a rule is unclear.
 4. **Implement** — activate `senior-workflow` skill and start at **Phase 1: Requirements Clarification**. Do not skip to coding.

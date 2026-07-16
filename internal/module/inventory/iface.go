@@ -3,6 +3,7 @@ package inventory
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"time"
 
 	"github.com/google/uuid"
@@ -92,6 +93,32 @@ type RemnantFilter struct {
 	Status domain.RemnantStatus
 }
 
+// RemnantAgingLevel classifies how urgent an AVAILABLE remnant's age is.
+type RemnantAgingLevel string
+
+const (
+	RemnantAgingOK      RemnantAgingLevel = "OK"
+	RemnantAgingAtRisk  RemnantAgingLevel = "AT_RISK"   // age >= warn_days
+	RemnantAgingExpired RemnantAgingLevel = "EXPIRED"   // age >= expire_days (candidate for auto-expire)
+)
+
+// RemnantAgingRow is one AVAILABLE remnant enriched with age metadata.
+type RemnantAgingRow struct {
+	Remnant  Remnant           `json:"remnant"`
+	AgeDays  int               `json:"age_days"`
+	Level    RemnantAgingLevel `json:"level"`
+}
+
+// RemnantAgingSummary is the full response for GET /remnants/aging.
+type RemnantAgingSummary struct {
+	WarnDays   int               `json:"warn_days"`
+	ExpireDays int               `json:"expire_days"`
+	Rows       []RemnantAgingRow `json:"rows"`
+	TotalOK    int               `json:"total_ok"`
+	TotalAtRisk int              `json:"total_at_risk"`
+	TotalExpired int             `json:"total_expired"`
+}
+
 // StorageLocation represents a physical shelf / bin where remnants are stored.
 type StorageLocation struct {
 	ID        uuid.UUID `json:"id"`
@@ -125,19 +152,32 @@ type Remnant struct {
 
 // RemnantSuggestion pairs a candidate remnant with its physical storage
 // location (if stocked) and a 1-based rank. Suggestions are ordered by the
-// Best Fit + FIFO algorithm: smallest bounding-box area first, oldest first
-// among ties.
+// RemnantStrategy controls how candidates are ranked in SuggestRemnants.
+type RemnantStrategy string
+
+const (
+	// RemnantStrategyBestFit picks the smallest remnant that still fits
+	// (minimises leftover waste after the cut).
+	RemnantStrategyBestFit RemnantStrategy = "best_fit"
+	// RemnantStrategyFIFO picks the oldest remnant first (minimises aging risk).
+	RemnantStrategyFIFO RemnantStrategy = "fifo"
+)
+
 type RemnantSuggestion struct {
 	Remnant  Remnant          `json:"remnant"`
 	Location *StorageLocation `json:"location,omitempty"`
 	Rank     int              `json:"rank"`
+	AgeDays  int              `json:"age_days"`
+	Score    float64          `json:"score"`
+	Reason   string           `json:"reason"`
 }
 
-// SuggestRemnantsInput carries the parameters for the Best Fit + FIFO
-// remnant suggestion query.
+// SuggestRemnantsInput carries the parameters for the remnant suggestion query.
 type SuggestRemnantsInput struct {
 	RequiredDimension domain.Dimension
-	Limit             int // defaults to 3; clamped to [1, 10]
+	Limit             int             // defaults to 3; clamped to [1, 10]
+	Strategy          RemnantStrategy // empty → resolve from material default → best_fit
+	MaterialID        *uuid.UUID      // when set, restricts to remnants from this material
 }
 
 type RemnantLabelSize string
@@ -282,8 +322,10 @@ type PostCycleCountInput struct {
 
 type Service interface {
 	ReceiveStock(ctx context.Context, in ReceiveStockInput) (InventoryLot, error)
-	ListLots(ctx context.Context, p httpkit.PageParams) (httpkit.PagedResult[InventoryLot], error)
+	ListLots(ctx context.Context, p httpkit.CursorParams, search string) (httpkit.CursorResult[InventoryLot], error)
 	DeactivateLot(ctx context.Context, lotID uuid.UUID) error
+	// ExportLots writes up to limit InventoryLots as an .xlsx workbook to w.
+	ExportLots(ctx context.Context, p httpkit.PageParams, w io.Writer) error
 
 	// QCPassLot transitions every PENDING_QC sheet of the lot to AVAILABLE
 	// (BR-INV02). Idempotent: 0 PENDING_QC sheets returns ErrPreconditionFailed
@@ -356,6 +398,17 @@ type Service interface {
 	// timestamp is older than `before` back to AVAILABLE. Returns the number
 	// of remnants released. Used by the background auto-release task.
 	ReleaseExpiredAllocations(ctx context.Context, before time.Time) (int, error)
+
+	// GetRemnantAging returns a list of AVAILABLE remnants with their age in
+	// days. Remnants with age_days >= expireDays are tagged as expired
+	// candidates; those with age_days >= warnDays (but < expireDays) are
+	// tagged as at-risk. Both thresholds default when <= 0 (warn=60, expire=90).
+	GetRemnantAging(ctx context.Context, warnDays, expireDays int) (RemnantAgingSummary, error)
+
+	// ExpireStaleRemnants flips AVAILABLE remnants older than ageDays to
+	// EXPIRED. Returns the count updated. Intended to be called by a daily
+	// admin trigger or cron endpoint (RequireAdminOnly).
+	ExpireStaleRemnants(ctx context.Context, ageDays int) (int, error)
 
 	// ListStorageLocations returns all active storage locations.
 	ListStorageLocations(ctx context.Context) ([]StorageLocation, error)
@@ -518,6 +571,8 @@ type UpdateClaimInput struct {
 type RejectionFilter struct {
 	ClaimStatus string
 	LotID       *uuid.UUID
+	From        *time.Time
+	To          *time.Time
 }
 
 // RejectionReport is a per-supplier aggregation row used by /reports/rejections.

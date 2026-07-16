@@ -22,6 +22,7 @@ import (
 	"github.com/vmarble/warehouse-management-service/internal/module/costing"
 	"github.com/vmarble/warehouse-management-service/internal/module/dashboard"
 	"github.com/vmarble/warehouse-management-service/internal/module/delivery"
+	"github.com/vmarble/warehouse-management-service/internal/module/fxrates"
 	"github.com/vmarble/warehouse-management-service/internal/module/inventory"
 	"github.com/vmarble/warehouse-management-service/internal/module/loading_exception"
 	"github.com/vmarble/warehouse-management-service/internal/module/order"
@@ -32,11 +33,13 @@ import (
 	"github.com/vmarble/warehouse-management-service/internal/module/reports"
 	"github.com/vmarble/warehouse-management-service/internal/module/sales"
 	"github.com/vmarble/warehouse-management-service/internal/module/scrap"
+	"github.com/vmarble/warehouse-management-service/internal/module/shipping"
 	"github.com/vmarble/warehouse-management-service/internal/platform/auth"
 	"github.com/vmarble/warehouse-management-service/internal/platform/config"
 	"github.com/vmarble/warehouse-management-service/internal/platform/events"
 	"github.com/vmarble/warehouse-management-service/internal/platform/httpkit"
 	"github.com/vmarble/warehouse-management-service/internal/platform/postgres"
+	"github.com/vmarble/warehouse-management-service/internal/platform/storage"
 
 	_ "github.com/vmarble/warehouse-management-service/docs"
 )
@@ -95,6 +98,8 @@ func main() {
 	packingStore := packing.NewPGStore(pool)
 	loadingExceptionStore := loading_exception.NewPGStore(pool)
 	scrapStore := scrap.NewPGStore(pool)
+	fxratesStore := fxrates.NewPGStore(pool)
+	shippingStore := shipping.NewPGStore(pool)
 
 	// ── Module services ─────────────────────────────────────
 	authnSvc := authn.NewService(authnStore, cfg.AuthSecret)
@@ -104,7 +109,8 @@ func main() {
 	// avoidance, same pattern as woAdvance/costingChecker). It powers the
 	// APPROVED → CANCELED cascade introduced in #249.
 	planningWOCanceller := &planningWOCancellerAdapter{}
-	planningSvc := planning.NewServiceWithDeps(planningStore, planningWOCanceller)
+	planningWOAdvisor := &planningWOAdvisorAdapter{}
+	planningSvc := planning.NewServiceFull(planningStore, planningWOCanceller, planningWOAdvisor)
 	// woAdvanceAdapter is wired after productionSvc is constructed to avoid a
 	// construction-time cycle (inventory → production → inventory).
 	// costingChecker is similarly wired after costingSvc is constructed to avoid
@@ -112,11 +118,13 @@ func main() {
 	woAdvance := &woAdvanceAdapter{}
 	costingChecker := &costingCheckerAdapter{}
 	barcodeGen := &cutBarcodeAdapter{planSvc: planningSvc}
-	inventorySvc := inventory.NewServiceFull(
+	prAdapter := &inventoryPRAdapter{} // wired after purchasingSvc is constructed
+	inventorySvc := inventory.NewServiceWithAllDeps(
 		inventoryStore,
 		woAdvance,
 		barcodeGen,
 		eventPublisher,
+		prAdapter,
 		cfg.RemnantOverflowThresholdPct,
 	)
 
@@ -142,6 +150,7 @@ func main() {
 	// Wire production into the advance adapter now that it exists.
 	woAdvance.svc = productionSvc
 	planningWOCanceller.svc = productionSvc
+	planningWOAdvisor.svc = productionSvc
 	barcodeGen.skuSvc = catalogSvc
 	barcodeGen.woSvc = productionSvc
 	barcodeGen.barcodeSvc = barcodeSvc
@@ -163,6 +172,8 @@ func main() {
 		&purchasingMaterialAdapter{svc: catalogSvc},
 		&purchasingStockAdapter{svc: inventorySvc},
 	)
+	// Wire purchasing into the inventory PR adapter now that both services exist.
+	prAdapter.svc = purchasingSvc
 
 	reportsSvc := reports.NewService(
 		&reportsCostingAdapter{pool: pool},
@@ -222,6 +233,12 @@ func main() {
 	}); ok {
 		hooked.SetFGTracker(&deliveryFGTrackerAdapter{svc: packingSvc})
 	}
+	// Wire SOLineChecker for ReassignFG (BR soft-allocation SKU check).
+	if hooked, ok := packingSvc.(interface {
+		SetSOLineChecker(packing.SOLineChecker)
+	}); ok {
+		hooked.SetSOLineChecker(&packingSOLineCheckerAdapter{svc: salesSvc})
+	}
 	// Loading-plan parser (#301) needs to translate customer-facing SKU codes
 	// via sales.GetCustomerSKUMapping; audit hook records upload + approve.
 	if hooked, ok := deliverySvc.(interface {
@@ -264,9 +281,34 @@ func main() {
 	}); ok {
 		hooked.SetShortShippedAutoCreator(&deliveryShortShippedAdapter{svc: loadingExceptionSvc})
 	}
+	if hooked, ok := packingSvc.(interface {
+		SetSKUComponentResolver(packing.SKUComponentResolver)
+	}); ok {
+		hooked.SetSKUComponentResolver(&packingSKUComponentResolverAdapter{svc: catalogSvc})
+	}
+	if hooked, ok := deliverySvc.(interface {
+		SetFGComponentChecker(delivery.FGComponentChecker)
+	}); ok {
+		hooked.SetFGComponentChecker(&deliveryFGComponentCheckerAdapter{svc: packingSvc})
+	}
 
 	// Scrap sales (#299). No cross-module deps — standalone CRUD.
 	scrapSvc := scrap.NewService(scrapStore)
+	fxratesSvc := fxrates.NewService(fxratesStore)
+	shippingSvc := shipping.NewService(shippingStore)
+
+	// Wire FX rate + SO currency resolvers into costing now that both
+	// fxratesSvc and salesSvc are constructed.
+	if hooked, ok := costingSvc.(interface {
+		SetFXRateResolver(costing.FXRateResolver)
+	}); ok {
+		hooked.SetFXRateResolver(&costingFXRateAdapter{svc: fxratesSvc})
+	}
+	if hooked, ok := costingSvc.(interface {
+		SetSOCurrencyReader(costing.SOCurrencyReader)
+	}); ok {
+		hooked.SetSOCurrencyReader(&costingSOCurrencyAdapter{svc: salesSvc})
+	}
 
 	// ── Background: auto-release expired remnant allocations ─────────────────
 	// Ticks every cfg.RemnantAllocCheckInterval. Remnants that have been
@@ -328,6 +370,25 @@ func main() {
 	packing.NewHandler(packingSvc).Register(api)
 	loading_exception.NewHandler(loadingExceptionSvc).Register(api)
 	scrap.NewHandler(scrapSvc).Register(api)
+	fxrates.NewHandler(fxratesSvc).Register(api)
+	shipping.NewHandler(shippingSvc).Register(api)
+
+	// R2 presign upload — nil presigner when not configured → 503 on call
+	r2Cfg := storage.R2Config{
+		AccountID:     cfg.R2AccountID,
+		AccessKeyID:   cfg.R2AccessKeyID,
+		SecretKey:     cfg.R2SecretKey,
+		BucketName:    cfg.R2BucketName,
+		PublicBaseURL: cfg.R2PublicBaseURL,
+	}
+	var presigner storage.Presigner
+	if r2Cfg.IsConfigured() {
+		presigner = storage.NewR2Presigner(r2Cfg)
+		slog.Info("R2 storage configured", "bucket", r2Cfg.BucketName)
+	} else {
+		slog.Warn("R2 storage not configured — /uploads/presign will return 503")
+	}
+	storage.NewHandler(presigner).Register(api)
 
 	srv := &http.Server{
 		Addr:         ":" + cfg.Port,
@@ -409,7 +470,7 @@ func (a *woAdapter) GetWorkOrder(ctx context.Context, woID uuid.UUID) (costing.W
 	if err != nil {
 		return costing.WOInfo{}, err
 	}
-	return costing.WOInfo{ID: wo.ID, SKUID: wo.SKUID, Status: wo.Status}, nil
+	return costing.WOInfo{ID: wo.ID, SKUID: wo.SKUID, Status: wo.Status, SalesOrderLineID: wo.SalesOrderLineID}, nil
 }
 
 type sheetAssignAdapter struct {
@@ -585,6 +646,10 @@ func (a *barcodeWOGatewayAdapter) AdvanceStatus(ctx context.Context, woID uuid.U
 	return a.svc.AdvanceStatus(ctx, woID, production.AdvanceStatusInput{To: to})
 }
 
+func (a *barcodeWOGatewayAdapter) UpdateQCStatus(ctx context.Context, woID uuid.UUID, status string) error {
+	return a.svc.UpdateQCStatus(ctx, woID, status)
+}
+
 type barcodeUserLookupAdapter struct {
 	svc authn.Service
 }
@@ -671,6 +736,34 @@ func (a *purchasingStockAdapter) ReceiveStock(ctx context.Context, in purchasing
 	return lot.ID, nil
 }
 
+// inventoryPRAdapter bridges inventory.PurchaseRequestCreator → purchasing.Service.
+// The svc field is set after purchasingSvc is constructed to break the
+// inventory → purchasing → inventory construction cycle.
+type inventoryPRAdapter struct {
+	svc purchasing.Service
+}
+
+func (a *inventoryPRAdapter) CreateFromRejection(ctx context.Context, in inventory.PRFromRejectionInput) error {
+	if a.svc == nil {
+		return nil
+	}
+	_, err := a.svc.CreateFromRejection(ctx, purchasing.CreateFromRejectionInput{
+		RejectionID: in.RejectionID,
+		MaterialID:  in.MaterialID,
+		Supplier:    in.Supplier,
+		QtySheets:   in.QtySheets,
+		CreatedBy:   in.ActorID,
+	})
+	return err
+}
+
+func (a *inventoryPRAdapter) CancelFromRejection(ctx context.Context, rejectionID uuid.UUID) error {
+	if a.svc == nil {
+		return nil
+	}
+	return a.svc.CancelFromRejection(ctx, rejectionID)
+}
+
 // costingCheckerAdapter implements production.CostingChecker.
 // The svc field is set after costingSvc is constructed to break the
 // production → costing → production construction cycle.
@@ -706,6 +799,62 @@ func (a *planningWOCancellerAdapter) ListStatusesByPlan(ctx context.Context, pla
 
 func (a *planningWOCancellerAdapter) CancelPlannedByPlan(ctx context.Context, planID uuid.UUID) (int64, error) {
 	return a.svc.CancelPlannedByPlan(ctx, planID)
+}
+
+// planningWOAdvisorAdapter bridges planning → production for smart re-allocation (BE #2).
+type planningWOAdvisorAdapter struct {
+	svc production.Service
+}
+
+func (a *planningWOAdvisorAdapter) CheckFeasibility(ctx context.Context, woID uuid.UUID) (planning.FeasibilityResult, error) {
+	r, err := a.svc.CheckFeasibility(ctx, woID)
+	if err != nil {
+		return planning.FeasibilityResult{}, err
+	}
+	sugg := make([]planning.FeasibilitySuggestion, len(r.Suggestions))
+	for i, s := range r.Suggestions {
+		sugg[i] = planning.FeasibilitySuggestion{
+			WOID: s.WOID, SKUCode: s.SKUCode, Score: s.Score,
+			DaysToDue: s.DaysToDue, FreedQty: s.FreedQty,
+		}
+	}
+	return planning.FeasibilityResult{Feasible: r.Feasible, Reason: r.Reason, Suggestions: sugg}, nil
+}
+
+func (a *planningWOAdvisorAdapter) BoostPriority(ctx context.Context, in planning.BoostPriorityInput) (planning.BoostPriorityResult, error) {
+	r, err := a.svc.BoostWOPriority(ctx, production.BoostWOPriorityInput{
+		WOID: in.WOID, Reason: in.Reason, ActorID: in.ActorID,
+	})
+	if err != nil {
+		return planning.BoostPriorityResult{}, err
+	}
+	return planning.BoostPriorityResult{BoostedAt: r.BoostedAt, AuditID: r.AuditID}, nil
+}
+
+func (a *planningWOAdvisorAdapter) ListPreemptCandidates(ctx context.Context, woID uuid.UUID) ([]planning.PreemptCandidate, error) {
+	rows, err := a.svc.ListWOPreemptCandidates(ctx, woID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]planning.PreemptCandidate, len(rows))
+	for i, r := range rows {
+		out[i] = planning.PreemptCandidate{
+			WOID: r.WOID, Status: r.Status, CurrentSOCode: r.CurrentSOCode,
+			SlackDays: r.SlackDays, FreedQty: r.FreedQty,
+		}
+	}
+	return out, nil
+}
+
+func (a *planningWOAdvisorAdapter) PreemptWorkOrder(ctx context.Context, in planning.PreemptInput) (planning.PreemptResult, error) {
+	r, err := a.svc.PreemptWO(ctx, production.PreemptWOInput{
+		ToWOID: in.ToWOID, FromWOID: in.FromWOID,
+		Reason: in.Reason, ActorID: in.ActorID,
+	})
+	if err != nil {
+		return planning.PreemptResult{}, err
+	}
+	return planning.PreemptResult{PreemptedAt: r.PreemptedAt, AuditID: r.AuditID, FreedQty: r.FreedQty}, nil
 }
 
 // laborDataAdapter implements costing.LaborDataReader by delegating to the
@@ -981,7 +1130,8 @@ func (a *salesSKUAdapter) GetSKU(ctx context.Context, skuID uuid.UUID) (sales.SK
 	if err != nil {
 		return sales.SKUInfo{}, err
 	}
-	return sales.SKUInfo{ID: s.ID, Code: s.Code, Name: s.Name}, nil
+	return sales.SKUInfo{ID: s.ID, Code: s.Code, Name: s.Name,
+		HeightMM: s.HeightMM, WeightKg: s.WeightKg, HSCode: s.HSCode}, nil
 }
 
 // salesProductionSplitterAdapter implements sales.ProductionSplitter. It
@@ -1249,6 +1399,19 @@ func (a *packingDefectNotifierAdapter) NotifyFGDefectResolved(ctx context.Contex
 	return a.publisher.NotifyFGDefectResolved(ctx, fgID.String(), resolution)
 }
 
+// packingSOLineCheckerAdapter implements packing.SOLineChecker by delegating
+// to sales.Service. Needed by ReassignFG to validate SKU match on the target
+// SO line.
+type packingSOLineCheckerAdapter struct{ svc sales.Service }
+
+func (a *packingSOLineCheckerAdapter) GetSOLine(ctx context.Context, soLineID uuid.UUID) (packing.SOLineInfo, error) {
+	sol, _, err := a.svc.GetSOLine(ctx, soLineID)
+	if err != nil {
+		return packing.SOLineInfo{}, err
+	}
+	return packing.SOLineInfo{ID: sol.ID, SKUID: sol.SKUID}, nil
+}
+
 // productionFGHookAdapter implements production.FinishedGoodsHook by
 // delegating to packing.CreateFromCompletedWO. Wired post-construction
 // because the production -> packing path otherwise cycles with the
@@ -1513,4 +1676,55 @@ func (a *catalogPolicyAuditAdapter) LogMinRemnantPolicyChange(ctx context.Contex
 		in.MaterialID, in.ActorID, meta,
 	)
 	return err
+}
+
+// packingSKUComponentResolverAdapter implements packing.SKUComponentResolver by
+// delegating to catalog.Service.ListSKUComponents. Wired to break the
+// packing → catalog import cycle via a local interface.
+type packingSKUComponentResolverAdapter struct{ svc catalog.Service }
+
+func (a *packingSKUComponentResolverAdapter) GetSKUComponents(ctx context.Context, skuID uuid.UUID) ([]packing.SKUComponentInfo, error) {
+	comps, err := a.svc.ListSKUComponents(ctx, skuID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]packing.SKUComponentInfo, len(comps))
+	for i, c := range comps {
+		out[i] = packing.SKUComponentInfo{
+			ComponentType: c.ComponentType,
+			CbmPerUnit:    c.CbmPerUnit,
+			SortOrder:     c.SortOrder,
+		}
+	}
+	return out, nil
+}
+
+// deliveryFGComponentCheckerAdapter implements delivery.FGComponentChecker by
+// delegating to packing.Service.CheckComponentsForSeal (BR-PK-MULTI03).
+type deliveryFGComponentCheckerAdapter struct{ svc packing.Service }
+
+func (a *deliveryFGComponentCheckerAdapter) CheckComponentsForSeal(ctx context.Context, containerID uuid.UUID) error {
+	return a.svc.CheckComponentsForSeal(ctx, containerID)
+}
+
+// costingFXRateAdapter bridges fxrates.Service → costing.FXRateResolver.
+type costingFXRateAdapter struct{ svc fxrates.Service }
+
+func (a *costingFXRateAdapter) GetRateOnDate(ctx context.Context, currency string, date time.Time) (float64, error) {
+	r, err := a.svc.GetRateOnDate(ctx, currency, date)
+	if err != nil {
+		return 0, err
+	}
+	return r.RateToVND, nil
+}
+
+// costingSOCurrencyAdapter bridges sales.Service → costing.SOCurrencyReader.
+type costingSOCurrencyAdapter struct{ svc sales.Service }
+
+func (a *costingSOCurrencyAdapter) GetSOLineCurrency(ctx context.Context, soLineID uuid.UUID) (string, error) {
+	_, so, err := a.svc.GetSOLine(ctx, soLineID)
+	if err != nil {
+		return "", err
+	}
+	return so.Currency, nil
 }

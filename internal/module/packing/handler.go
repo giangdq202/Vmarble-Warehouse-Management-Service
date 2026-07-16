@@ -2,6 +2,7 @@ package packing
 
 import (
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -28,6 +29,9 @@ func (h *Handler) Register(rg *gin.RouterGroup) {
 	rg.POST("/packing/scan", auth.RequireWorkerUp(), h.scan)
 	rg.POST("/packing/defect", auth.RequireWorkerUp(), h.reportDefect)
 	rg.POST("/packing/defect/:id/resolve", auth.RequirePlannerUp(), h.resolveDefect)
+	rg.POST("/fg-pool/:id/reassign", auth.RequirePlannerUp(), h.reassignFG)
+	rg.POST("/allocations/:id/release", auth.RequirePlannerUp(), h.releaseAllocation)
+	rg.GET("/allocations", auth.RequirePlannerUp(), h.listAllocations)
 }
 
 // listFGPool godoc
@@ -41,6 +45,8 @@ func (h *Handler) Register(rg *gin.RouterGroup) {
 // @Param        sku_id        query  string  false  "filter by SKU id (uuid)"
 // @Param        so_line_id    query  string  false  "filter by sales order line id (uuid)"
 // @Param        wo_id         query  string  false  "filter by work order id (uuid)"
+// @Param        from          query  string  false  "filter created_at from (RFC3339 or YYYY-MM-DD)"
+// @Param        to            query  string  false  "filter created_at to (RFC3339 or YYYY-MM-DD, inclusive day-end)"
 // @Success      200  {object}  httpkit.PagedResult[FGPool]
 // @Security     BearerAuth
 // @Router       /api/v1/fg-pool [get]
@@ -70,6 +76,30 @@ func (h *Handler) list(c *gin.Context) {
 			return
 		}
 		f.WorkOrderID = &id
+	}
+	fromStr := c.Query("from")
+	toStr := c.Query("to")
+	if (fromStr != "") != (toStr != "") {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "from and to must be provided together"})
+		return
+	}
+	if fromStr != "" {
+		from, err := parseFGDate(fromStr, false)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid from date, use YYYY-MM-DD or RFC3339"})
+			return
+		}
+		to, err := parseFGDate(toStr, true)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid to date, use YYYY-MM-DD or RFC3339"})
+			return
+		}
+		if !from.Before(to) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "from must be before to"})
+			return
+		}
+		f.From = &from
+		f.To = &to
 	}
 	res, err := h.svc.ListFG(c.Request.Context(), p, f)
 	if err != nil {
@@ -211,6 +241,39 @@ type resolveDefectBody struct {
 	Note       string `json:"note,omitempty"`
 }
 
+type reassignFGBody struct {
+	NewSOLineID string `json:"new_sales_order_line_id" binding:"required"`
+	Reason      string `json:"reason" binding:"required"`
+}
+
+func (h *Handler) reassignFG(c *gin.Context) {
+	fgID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid fg id"})
+		return
+	}
+	var body reassignFGBody
+	if !httpkit.Bind(c, &body) {
+		return
+	}
+	newSOLID, err := uuid.Parse(body.NewSOLineID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid new_sales_order_line_id"})
+		return
+	}
+	result, err := h.svc.ReassignFG(c.Request.Context(), ReassignFGInput{
+		FGID:        fgID,
+		NewSOLineID: newSOLID,
+		Reason:      body.Reason,
+		ActorID:     callerID(c),
+	})
+	if err != nil {
+		httpkit.Error(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, result)
+}
+
 func callerID(c *gin.Context) uuid.UUID {
 	id, ok := auth.FromContext(c)
 	if !ok {
@@ -221,4 +284,53 @@ func callerID(c *gin.Context) uuid.UUID {
 		return uuid.Nil
 	}
 	return uid
+}
+
+func (h *Handler) releaseAllocation(c *gin.Context) {
+	allocID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid allocation id"})
+		return
+	}
+	out, err := h.svc.ReleaseAllocation(c.Request.Context(), ReleaseAllocationInput{
+		AllocationID: allocID,
+		ActorID:      callerID(c),
+	})
+	if err != nil {
+		httpkit.Error(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, out)
+}
+
+func (h *Handler) listAllocations(c *gin.Context) {
+	solStr := c.Query("so_line_id")
+	if solStr == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "so_line_id query param is required"})
+		return
+	}
+	soLineID, err := uuid.Parse(solStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid so_line_id"})
+		return
+	}
+	out, err := h.svc.ListAllocations(c.Request.Context(), soLineID)
+	if err != nil {
+		httpkit.Error(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"items": out})
+}
+
+// parseFGDate parses a date string (RFC3339 or YYYY-MM-DD).
+// When inclusiveEnd is true, a date-only string is bumped to midnight of the
+// next day so the filter is inclusive of the named day.
+func parseFGDate(s string, inclusiveEnd bool) (time.Time, error) {
+	if t, err := time.ParseInLocation(time.DateOnly, s, time.UTC); err == nil {
+		if inclusiveEnd {
+			return t.AddDate(0, 0, 1), nil
+		}
+		return t, nil
+	}
+	return time.Parse(time.RFC3339, s)
 }

@@ -86,6 +86,30 @@ type store interface {
 	// SHORT_SHIPPED auto-creation (BR-D15). Returns an empty report (no
 	// active plan id) when the container has no non-SUPERSEDED plan.
 	selectShortagesForContainer(ctx context.Context, containerID uuid.UUID) (ShortageReport, error)
+
+	// selectAtRiskContainers returns OPEN/LOADING containers with a cutoff_date
+	// at or before (now + days). Overdue containers (cutoff in the past) are
+	// included because they are the most urgent. Each row carries the vessel
+	// name and the aggregated CBM/line_count from container_lines.
+	selectAtRiskContainers(ctx context.Context, before time.Time) ([]AtRiskRow, error)
+
+	// updateContainerLoader sets containers.loader_id = loaderID (nil = unassign)
+	// and inserts an audit row into container_loader_log. Runs in a single tx
+	// so the update and audit are atomic (BR-D22).
+	updateContainerLoader(ctx context.Context, containerID uuid.UUID, loaderID *uuid.UUID, log ContainerLoaderLog) error
+
+	// selectLoaderLog returns container_loader_log rows for one container,
+	// newest first.
+	selectLoaderLog(ctx context.Context, containerID uuid.UUID) ([]ContainerLoaderLog, error)
+
+	// changeDestinationTx atomically: updates destination_code/name, clears
+	// vessel_id + cutoff_date when clearVessel=true, and inserts the BR-D24
+	// audit row — all in a single transaction.
+	changeDestinationTx(ctx context.Context, containerID uuid.UUID, destCode, destName string, clearVessel bool, log ContainerRouteChangeLog) error
+
+	// selectRouteLog returns container_route_change_log rows for one container,
+	// newest first.
+	selectRouteLog(ctx context.Context, containerID uuid.UUID) ([]ContainerRouteChangeLog, error)
 }
 
 // txStore is the subset of operations safe to call from inside a transaction.
@@ -118,6 +142,20 @@ type txStore interface {
 	// matching container_status_log row in the same statement. Returns the
 	// updated container.
 	updateContainerStatus(ctx context.Context, in updateStatusInput) (Container, error)
+
+	// insertTransferAudit writes the BR-D07 mandatory audit row inside the
+	// transfer transaction so the audit is atomically consistent with the
+	// line move.
+	insertTransferAudit(ctx context.Context, a ContainerTransferAudit) error
+
+	// insertOverloadLog writes the BR-D18 admin override audit row atomically
+	// with the line insert when AllowOverload=true bypasses the capacity guard.
+	insertOverloadLog(ctx context.Context, l ContainerOverloadLog) error
+
+	// hasApprovedLoadingPlan returns true when the container has at least one
+	// loading_plan row with status = 'APPROVED'. Used by BR-D17 to decide
+	// whether the transfer is cross-plan and therefore requires a planner.
+	hasApprovedLoadingPlan(ctx context.Context, containerID uuid.UUID) (bool, error)
 }
 
 type updateStatusInput struct {

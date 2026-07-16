@@ -1,64 +1,64 @@
-name: Build & Deploy
-
-on:
-  push:
-    branches: [dev]
-  workflow_dispatch:
-
-concurrency:
-  group: deploy-${{ github.ref }}
-  cancel-in-progress: false
-
-env:
-  IMAGE_NAME: ghcr.io/giangdq202/vmarble-warehouse-management-service
-
-jobs:
-  build-and-deploy:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Compute tags
-        id: vars
-        run: |
-          SHA_SHORT=$(echo "${{ github.sha }}" | cut -c1-7)
-          echo "sha_tag=${IMAGE_NAME}:sha-${SHA_SHORT}" >> "$GITHUB_OUTPUT"
-          echo "stg_tag=${IMAGE_NAME}:stg-latest" >> "$GITHUB_OUTPUT"
-
-      - uses: docker/setup-buildx-action@v3
-
-      - uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - uses: docker/build-push-action@v5
-        with:
-          context: .
-          push: true
-          tags: |
-            ${{ steps.vars.outputs.sha_tag }}
-            ${{ steps.vars.outputs.stg_tag }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-      - name: Trigger Dokploy Redeploy Webhook
-        run: |
-          curl -sS -f -X POST "${{ secrets.DOKPLOY_BE_WEBHOOK_URL }}"
-
-      - name: Discord Notification
-        if: always()
-        env:
-          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_URL }}
-        run: |
-          STATUS="${{ job.status }}"
-          COMMIT_MSG=$(git log -1 --pretty=format:"%s")
-          PROJECT="BE-Staging"
-          
-          curl -sS -X POST "$DISCORD_WEBHOOK" \
-            -H "Content-Type: application/json" \
-            -d "{ \"content\": \"**[$PROJECT]** $STATUS: $COMMIT_MSG (by ${{ github.actor }}) | [Log](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})\" }"
+# name: Build & Deploy
+# 
+# on:
+#   push:
+#     branches: [dev]
+#   workflow_dispatch:
+# 
+# concurrency:
+#   group: deploy-${{ github.ref }}
+#   cancel-in-progress: false
+# 
+# env:
+#   IMAGE_NAME: ghcr.io/giangdq202/vmarble-warehouse-management-service
+# 
+# jobs:
+#   build-and-deploy:
+#     runs-on: ubuntu-latest
+#     permissions:
+#       contents: read
+#       packages: write
+#     steps:
+#       - uses: actions/checkout@v4
+# 
+#       - name: Compute tags
+#         id: vars
+#         run: |
+#           SHA_SHORT=$(echo "${{ github.sha }}" | cut -c1-7)
+#           echo "sha_tag=${IMAGE_NAME}:sha-${SHA_SHORT}" >> "$GITHUB_OUTPUT"
+#           echo "stg_tag=${IMAGE_NAME}:stg-latest" >> "$GITHUB_OUTPUT"
+# 
+#       - uses: docker/setup-buildx-action@v3
+# 
+#       - uses: docker/login-action@v3
+#         with:
+#           registry: ghcr.io
+#           username: ${{ github.actor }}
+#           password: ${{ secrets.GITHUB_TOKEN }}
+# 
+#       - uses: docker/build-push-action@v5
+#         with:
+#           context: .
+#           push: true
+#           tags: |
+#             ${{ steps.vars.outputs.sha_tag }}
+#             ${{ steps.vars.outputs.stg_tag }}
+#           cache-from: type=gha
+#           cache-to: type=gha,mode=max
+# 
+#       - name: Trigger Dokploy Redeploy Webhook
+#         run: |
+#           curl -sS -f -X POST "${{ secrets.DOKPLOY_BE_WEBHOOK_URL }}"
+# 
+#       - name: Discord Notification
+#         if: always()
+#         env:
+#           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_URL }}
+#         run: |
+#           STATUS="${{ job.status }}"
+#           COMMIT_MSG=$(git log -1 --pretty=format:"%s")
+#           PROJECT="BE-Staging"
+#           
+#           curl -sS -X POST "$DISCORD_WEBHOOK" \
+#             -H "Content-Type: application/json" \
+#             -d "{ \"content\": \"**[$PROJECT]** $STATUS: $COMMIT_MSG (by ${{ github.actor }}) | [Log](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})\" }"

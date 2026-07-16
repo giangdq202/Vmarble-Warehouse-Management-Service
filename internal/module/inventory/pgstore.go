@@ -55,6 +55,20 @@ func (s *pgStore) selectLots(ctx context.Context) ([]InventoryLot, error) {
 	return lots, rows.Err()
 }
 
+func (s *pgStore) selectLotByID(ctx context.Context, id uuid.UUID) (InventoryLot, error) {
+	var l InventoryLot
+	err := s.pool.QueryRow(ctx,
+		`SELECT id, material_id, quantity, cost_per_sheet_amount, cost_per_sheet_currency, supplier_ref, is_active, received_at
+		 FROM inventory_lots WHERE id = $1`, id,
+	).Scan(&l.ID, &l.MaterialID, &l.Quantity,
+		&l.CostPerSheet.Amount, &l.CostPerSheet.Currency,
+		&l.SupplierRef, &l.IsActive, &l.ReceivedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return InventoryLot{}, domain.NewBizError(domain.ErrNotFound, "lot not found")
+	}
+	return l, err
+}
+
 // selectLotsPaged returns a page of inventory lots optionally filtered by a
 // case-insensitive keyword match on the supplier_ref column.
 // It returns (items, totalMatchingItems, error).
@@ -103,6 +117,44 @@ func (s *pgStore) selectLotsPaged(ctx context.Context, p httpkit.PageParams) ([]
 		lots = append(lots, l)
 	}
 	return lots, total, rows.Err()
+}
+
+func (s *pgStore) selectLotsKeyset(ctx context.Context, search string, cur httpkit.Cursor, limit int) ([]InventoryLot, error) {
+	searchPat := "%" + search + "%"
+
+	args := []any{searchPat}
+	idx := 2
+
+	q := `SELECT id, material_id, quantity, cost_per_sheet_amount, cost_per_sheet_currency, supplier_ref, is_active, received_at
+		 FROM inventory_lots
+		 WHERE is_active = true AND supplier_ref ILIKE $1`
+
+	if !cur.IsZero() {
+		q += fmt.Sprintf(" AND (received_at, id) < ($%d, $%d)", idx, idx+1)
+		args = append(args, cur.Ts, cur.ID)
+		idx += 2
+	}
+
+	q += fmt.Sprintf(" ORDER BY received_at DESC, id DESC LIMIT $%d", idx)
+	args = append(args, limit)
+
+	rows, err := s.pool.Query(ctx, q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var lots []InventoryLot
+	for rows.Next() {
+		var l InventoryLot
+		if err := rows.Scan(&l.ID, &l.MaterialID, &l.Quantity,
+			&l.CostPerSheet.Amount, &l.CostPerSheet.Currency,
+			&l.SupplierRef, &l.IsActive, &l.ReceivedAt); err != nil {
+			return nil, err
+		}
+		lots = append(lots, l)
+	}
+	return lots, rows.Err()
 }
 
 func (s *pgStore) deactivateLot(ctx context.Context, id uuid.UUID) error {
@@ -293,6 +345,21 @@ func (s *pgStore) selectMinRemnantPolicyByParentBoard(ctx context.Context, board
 		return 0, 0, fmt.Errorf("select min remnant policy: %w", err)
 	}
 	return lengthMM, widthMM, nil
+}
+
+func (s *pgStore) selectMaterialStrategy(ctx context.Context, materialID uuid.UUID) (RemnantStrategy, error) {
+	var strategy string
+	err := s.pool.QueryRow(ctx,
+		`SELECT remnant_selection_strategy FROM materials WHERE id = $1`,
+		materialID,
+	).Scan(&strategy)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", domain.NewBizError(domain.ErrNotFound, "material not found")
+		}
+		return "", fmt.Errorf("select material strategy: %w", err)
+	}
+	return RemnantStrategy(strategy), nil
 }
 
 func (s *pgStore) updateSheetStatus(ctx context.Context, id uuid.UUID, status string, issuedToWO *uuid.UUID) error {
@@ -555,28 +622,38 @@ func (s *pgStore) selectAvailableRemnantsByMinDimension(ctx context.Context, min
 }
 
 // selectTopRemnantSuggestions returns up to `limit` AVAILABLE remnants that
-// fit `minDim`, ranked by Best Fit (smallest bounding-box area) + FIFO
-// (oldest created_at). Each row is LEFT JOINed with storage_locations so the
-// caller gets the shelf position without a second round trip.
-func (s *pgStore) selectTopRemnantSuggestions(ctx context.Context, minDim domain.Dimension, limit int) ([]RemnantSuggestion, error) {
-	rows, err := s.pool.Query(ctx,
-		`SELECT
+// fit `minDim`. Ordering is controlled by strategy: best_fit ranks by smallest
+// bounding-box area first (ties broken by age), fifo ranks oldest first (ties
+// broken by area). materialID optionally restricts results to one material via
+// a JOIN on board_sheets. Each row is LEFT JOINed with storage_locations.
+func (s *pgStore) selectTopRemnantSuggestions(ctx context.Context, minDim domain.Dimension, limit int, strategy RemnantStrategy, materialID *uuid.UUID) ([]RemnantSuggestion, error) {
+	// ORDER BY is built from an enum — never from raw user input.
+	var orderBy string
+	if strategy == RemnantStrategyFIFO {
+		orderBy = `r.created_at ASC, (COALESCE(r.bounding_box_length_mm, r.length_mm) * COALESCE(r.bounding_box_width_mm, r.width_mm)) ASC`
+	} else {
+		orderBy = `(COALESCE(r.bounding_box_length_mm, r.length_mm) * COALESCE(r.bounding_box_width_mm, r.width_mm)) ASC, r.created_at ASC`
+	}
+
+	q := fmt.Sprintf(`
+		SELECT
 			r.id, r.parent_board_id, r.parent_remnant_id,
 			r.length_mm, r.width_mm, r.status, r.shape_type, r.allocated_to_wo_id, r.allocated_at,
 			r.supplier_code, r.lot_batch, r.grain_pattern, r.quality_grade,
 			r.bounding_box_length_mm, r.bounding_box_width_mm, r.bin_location_id, r.created_at,
+			EXTRACT(DAY FROM (NOW() - r.created_at))::int AS age_days,
 			sl.id, sl.zone, sl.rack, sl.shelf, sl.label, sl.barcode, sl.is_active, sl.created_at
-		 FROM remnants r
-		 LEFT JOIN storage_locations sl ON sl.id = r.bin_location_id AND sl.is_active = TRUE
-		 WHERE r.status = 'AVAILABLE'
-		   AND COALESCE(r.bounding_box_length_mm, r.length_mm) >= $1
-		   AND COALESCE(r.bounding_box_width_mm, r.width_mm) >= $2
-		 ORDER BY
-			(COALESCE(r.bounding_box_length_mm, r.length_mm) * COALESCE(r.bounding_box_width_mm, r.width_mm)) ASC,
-			r.created_at ASC
-		 LIMIT $3`,
-		minDim.LengthMM, minDim.WidthMM, limit,
-	)
+		FROM remnants r
+		LEFT JOIN board_sheets bs ON bs.id = r.parent_board_id
+		LEFT JOIN storage_locations sl ON sl.id = r.bin_location_id AND sl.is_active = TRUE
+		WHERE r.status = 'AVAILABLE'
+		  AND COALESCE(r.bounding_box_length_mm, r.length_mm) >= $1
+		  AND COALESCE(r.bounding_box_width_mm, r.width_mm) >= $2
+		  AND ($3::uuid IS NULL OR bs.material_id = $3)
+		ORDER BY %s
+		LIMIT $4`, orderBy)
+
+	rows, err := s.pool.Query(ctx, q, minDim.LengthMM, minDim.WidthMM, materialID, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -592,6 +669,7 @@ func (s *pgStore) selectTopRemnantSuggestions(ctx context.Context, minDim domain
 		var locIsActive sql.NullBool
 		var locCreatedAt sql.NullTime
 		var allocatedAt sql.NullTime
+		var ageDays sql.NullInt32
 
 		var supplierCode, lotBatch, grainPattern, qualityGrade sql.NullString
 		var bbLengthMM, bbWidthMM sql.NullInt32
@@ -603,12 +681,12 @@ func (s *pgStore) selectTopRemnantSuggestions(ctx context.Context, minDim domain
 			&r.Status, &r.ShapeType, &r.AllocatedToWO, &allocatedAt,
 			&supplierCode, &lotBatch, &grainPattern, &qualityGrade,
 			&bbLengthMM, &bbWidthMM, &binLocationID, &r.CreatedAt,
+			&ageDays,
 			&locID, &locZone, &locRack, &locShelf, &locLabel, &locBarcode, &locIsActive, &locCreatedAt,
 		); err != nil {
 			return nil, err
 		}
 
-		// Map nullable remnant fields.
 		r.SupplierCode = nullStringPtr(supplierCode)
 		r.LotBatch = nullStringPtr(lotBatch)
 		r.GrainPattern = nullStringPtr(grainPattern)
@@ -625,8 +703,10 @@ func (s *pgStore) selectTopRemnantSuggestions(ctx context.Context, minDim domain
 		}
 
 		sug := RemnantSuggestion{Remnant: r, Rank: rank}
+		if ageDays.Valid {
+			sug.AgeDays = int(ageDays.Int32)
+		}
 
-		// Map nullable location fields (LEFT JOIN may produce NULLs).
 		if locID.Valid {
 			loc.ID = locID.UUID
 			if locZone.Valid {
@@ -986,6 +1066,75 @@ func (s *pgStore) releaseExpiredAllocations(ctx context.Context, before time.Tim
 	)
 	if err != nil {
 		return 0, fmt.Errorf("release expired allocations: %w", err)
+	}
+	return tag.RowsAffected(), nil
+}
+
+func (s *pgStore) selectRemnantAging(ctx context.Context) ([]remnantAgingRow, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT
+			r.id, r.parent_board_id, r.parent_remnant_id,
+			r.length_mm, r.width_mm, r.status, r.shape_type,
+			r.allocated_to_wo_id, r.allocated_at,
+			r.supplier_code, r.lot_batch, r.grain_pattern, r.quality_grade,
+			r.bounding_box_length_mm, r.bounding_box_width_mm, r.bin_location_id, r.created_at,
+			EXTRACT(DAY FROM (NOW() - r.created_at))::int AS age_days
+		 FROM remnants r
+		 WHERE r.status = 'AVAILABLE'
+		 ORDER BY r.created_at ASC`)
+	if err != nil {
+		return nil, fmt.Errorf("select remnant aging: %w", err)
+	}
+	defer rows.Close()
+
+	var out []remnantAgingRow
+	for rows.Next() {
+		var r Remnant
+		var ageDays int
+		var allocatedAt sql.NullTime
+		var supplierCode, lotBatch, grainPattern, qualityGrade sql.NullString
+		var bbLengthMM, bbWidthMM sql.NullInt32
+		var binLocationID uuid.NullUUID
+
+		if err := rows.Scan(
+			&r.ID, &r.ParentBoardID, &r.ParentRemnantID,
+			&r.Dimensions.LengthMM, &r.Dimensions.WidthMM,
+			&r.Status, &r.ShapeType, &r.AllocatedToWO, &allocatedAt,
+			&supplierCode, &lotBatch, &grainPattern, &qualityGrade,
+			&bbLengthMM, &bbWidthMM, &binLocationID, &r.CreatedAt,
+			&ageDays,
+		); err != nil {
+			return nil, fmt.Errorf("scan remnant aging row: %w", err)
+		}
+		r.SupplierCode = nullStringPtr(supplierCode)
+		r.LotBatch = nullStringPtr(lotBatch)
+		r.GrainPattern = nullStringPtr(grainPattern)
+		r.QualityGrade = nullStringPtr(qualityGrade)
+		r.BoundingBoxLengthMM = nullInt32Ptr(bbLengthMM)
+		r.BoundingBoxWidthMM = nullInt32Ptr(bbWidthMM)
+		if binLocationID.Valid {
+			v := binLocationID.UUID
+			r.BinLocationID = &v
+		}
+		if allocatedAt.Valid {
+			t := allocatedAt.Time
+			r.AllocatedAt = &t
+		}
+		out = append(out, remnantAgingRow{Remnant: r, AgeDays: ageDays})
+	}
+	return out, rows.Err()
+}
+
+func (s *pgStore) expireStaleRemnants(ctx context.Context, ageDays int) (int64, error) {
+	tag, err := s.pool.Exec(ctx,
+		`UPDATE remnants
+		 SET status = $1
+		 WHERE status = $2
+		   AND created_at < NOW() - ($3 || ' days')::INTERVAL`,
+		string(domain.RemnantExpired), string(domain.RemnantAvailable), ageDays,
+	)
+	if err != nil {
+		return 0, fmt.Errorf("expire stale remnants: %w", err)
 	}
 	return tag.RowsAffected(), nil
 }
@@ -1637,6 +1786,16 @@ func (s *pgStore) selectRejectionsKeyset(ctx context.Context, f RejectionFilter,
 	if f.LotID != nil {
 		q += fmt.Sprintf(" AND lot_id = $%d", idx)
 		args = append(args, *f.LotID)
+		idx++
+	}
+	if f.From != nil {
+		q += fmt.Sprintf(" AND reported_at >= $%d", idx)
+		args = append(args, *f.From)
+		idx++
+	}
+	if f.To != nil {
+		q += fmt.Sprintf(" AND reported_at < $%d", idx)
+		args = append(args, *f.To)
 		idx++
 	}
 	if !cur.IsZero() {
