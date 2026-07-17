@@ -43,8 +43,8 @@ func newMockStore() *mockStore {
 	}
 }
 
-func (m *mockStore) insertFGBatch(_ context.Context, rows []FGPool) error {
-	return m.insertFGBatchWithAllocations(nil, rows, nil)
+func (m *mockStore) insertFGBatch(ctx context.Context, rows []FGPool) error {
+	return m.insertFGBatchWithAllocations(ctx, rows, nil)
 }
 
 func (m *mockStore) insertFGBatchWithAllocations(_ context.Context, rows []FGPool, allocs []Allocation) error {

@@ -1,156 +1,91 @@
-# Runbook: Staging CD Pipeline
+# Runbook: Staging / Production CD Pipeline (Dokploy + GitHub Actions)
 
 ## Tổng quan
 
-Pipeline CD tự động deploy BE lên staging server mỗi khi có push (merge PR) vào nhánh `dev`.
+Pipeline CD tự động deploy backend (`vwms-backend`) lên Dokploy mỗi khi có push (merge PR) vào nhánh `dev` hoặc `main`.
 
 | | |
 |---|---|
-| **Trigger** | Push vào nhánh `dev` |
-| **Staging server** | Xem secret `STAGING_HOST` trong GitHub Actions |
-| **Image registry** | GitHub Container Registry (GHCR) |
-| **Workflow file** | `.github/workflows/staging.yml` |
-| **Deploy script** | `/opt/vwms-staging/deploy.sh` (trên server) |
+| **Trigger** | Push vào nhánh `dev` hoặc `main` |
+| **Deploy Engine** | Dokploy (quản lý container, env, logs, health checks) |
+| **Image registry** | GitHub Container Registry (GHCR: `ghcr.io/529-studio/vmarble-warehouse-management-service`) |
+| **Workflow file** | `.github/workflows/deploy.yml` |
+| **Dokploy Webhook** | `secrets.DOKPLOY_BE_WEBHOOK_URL` (`https://dokploy.529studio.site/api/deploy/compose/...`) |
 
 ---
 
-## Setup server (1 lần duy nhất)
+## 1. Kiến Trúc Deploy & Luồng Tự Động
 
-### 1. Cài Docker
+Hệ thống sử dụng **Dokploy Webhook Trigger** và **GHCR Immutable Tags**:
 
-```bash
-ssh root@$STAGING_HOST
-
-curl -fsSL https://get.docker.com | sh
-systemctl enable --now docker
 ```
-
-### 2. Tạo thư mục staging
-
-```bash
-mkdir -p /opt/vwms-staging
-cd /opt/vwms-staging
-```
-
-### 3. Upload files từ repo
-
-Cấu hình `docker-compose.staging.yml` sử dụng **Double Binding**: cho phép truy cập từ chính server (`127.0.0.1`) và qua mạng riêng ảo (`10.8.0.1` - VPN).
-
-```bash
-# Chạy từ máy local
-scp deploy/staging/docker-compose.staging.yml root@$STAGING_HOST:/opt/vwms-staging/
-scp deploy/staging/deploy.sh                  root@$STAGING_HOST:/opt/vwms-staging/
-ssh root@$STAGING_HOST "chmod +x /opt/vwms-staging/*.sh"
-```
-
-### 4. Tạo file `.env.staging`
-
-```bash
-ssh root@$STAGING_HOST
-
-cat > /opt/vwms-staging/.env.staging <<'EOF'
-DATABASE_URL=postgres://vmarble:STRONG_PASSWORD@postgres:5432/vmarble_staging?sslmode=disable
-PORT=8080
-LOG_LEVEL=info
-POSTGRES_USER=vmarble
-POSTGRES_PASSWORD=STRONG_PASSWORD
-POSTGRES_DB=vmarble_staging
-EOF
-chmod 600 /opt/vwms-staging/.env.staging
+Push / Merge PR vào dev (hoặc main)
+      │
+      ▼
+Job: Build & Push (.github/workflows/deploy.yml)
+  ① docker build (multi-stage, alpine + curl)
+  ② docker push tags lên ghcr.io:
+     - ghcr.io/529-studio/...:sha-<short> (Immutable Tag dùng để truy vết/rollback)
+     - ghcr.io/529-studio/...:stg-latest (hoặc :latest)
+      │
+      ▼
+Job: Trigger Dokploy Webhook
+  ① Gọi HTTP POST: curl -X POST "${{ secrets.DOKPLOY_BE_WEBHOOK_URL }}"
+  ② Dokploy nhận webhook ➔ tự động pull image mới (`stg-latest` / `latest`)
+  ③ Dokploy thực hiện Zero-downtime Rolling Restart container `vwms-backend`
 ```
 
 ---
 
-## GitHub Secrets & Variables
+## 2. GitHub Secrets & Variables
 
-Vào **GitHub repo → Settings → Secrets and variables → Actions** và thêm:
+Vào **GitHub repo `529-studio/Vmarble-Warehouse-Management-Service` → Settings → Secrets and variables → Actions** để quản lý:
 
-| Tên | Loại | Giá trị |
+| Tên Secret | Loại | Mô tả |
 |---|---|---|
-| `DISCORD_WEBHOOK_URL` | Secret | Webhook URL của Discord channel |
-| `STAGING_HOST` | Secret | IP của staging server |
-| `STAGING_SSH_KEY` | Secret | Nội dung private key |
-| `STAGING_URL` | **Variable** | `http://<staging-host>:8080` hoặc `http://10.8.0.1:8080` (VPN) |
+| `DOKPLOY_BE_WEBHOOK_URL` | Repository Secret | Webhook URL lấy từ Dokploy UI (`vwms-backend` → Webhook Tab) |
+
+> *Lưu ý:* Biến môi trường lúc ứng dụng chạy (`DATABASE_URL`, `AUTH_SECRET`, `PORT`, `LOG_LEVEL`...) được quản lý trực tiếp tại giao diện Dokploy Environment, **không** cần thêm vào GitHub Actions Secrets.
 
 ---
 
-## Luồng CD tự động (Standard Deployment)
+## 3. Cấu Hình Raw Compose trên Dokploy (`Source of Truth`)
 
-Dự án sử dụng **Immutable Tags** (Git SHA) để đảm bảo tính duy nhất của mỗi bản build.
+Mẫu chuẩn Raw Compose cho `vwms-backend` trên Dokploy (lưu tại `deploy/dokploy/compose.yaml`):
 
-```
-Merge PR vào dev
-      │
-      ▼
-Job: Build & Push
-  ① docker build (multi-stage, alpine)
-  ② docker push 2 tags:
-     - ghcr.io/...:sha-<short> (Dùng để deploy/rollback - KHÔNG ĐỔI)
-     - ghcr.io/...:staging-latest (Dùng để tracking bản mới nhất)
-  ③ Discord: 🔨 Build OK
-      │
-      ▼
-Job: Deploy Staging
-  ① SSH vào staging server ($STAGING_HOST)
-  ② /opt/vwms-staging/deploy.sh <image-path>:sha-<short>
-     - Pull image SHA mới (Không ghi đè lên image cũ)
-     - Restart app container
-     - Health check /healthz mỗi 5s, tối đa 60s
-     - OK  → Lưu SHA vào .last_good_image, exit 0
-     - FAIL→ Lấy SHA cũ từ .last_good_image để rollback, exit 1
-  ③ Discord: 🚀 Deploy OK / 💥 Deploy FAIL + đã rollback
-```
-
----
-
-## Xem logs deploy trên server
-
-```bash
-ssh root@$STAGING_HOST
-
-# Logs của app container
-docker logs vwms-staging-app-1 --tail 100 -f
-
-# Trạng thái deploy gần nhất (Sẽ thấy tag SHA ở đây)
-cat /opt/vwms-staging/.last_good_image
+```yaml
+services:
+  vwms-backend:
+    image: ghcr.io/529-studio/vmarble-warehouse-management-service:stg-latest
+    restart: unless-stopped
+    ports:
+      - "${PORT:-8080}:8080"
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      AUTH_SECRET: ${AUTH_SECRET}
+      PORT: "${PORT:-8080}"
+      LOG_LEVEL: "${LOG_LEVEL:-info}"
+      REMNANT_ALLOC_TIMEOUT: "${REMNANT_ALLOC_TIMEOUT:-24h}"
+      REMNANT_ALLOC_CHECK_INTERVAL: "${REMNANT_ALLOC_CHECK_INTERVAL:-1h}"
+      REMNANT_OVERFLOW_THRESHOLD_PCT: "${REMNANT_OVERFLOW_THRESHOLD_PCT:-15}"
+      CONTAINER_CBM_OVERHEAD_PCT: "${CONTAINER_CBM_OVERHEAD_PCT:-5}"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 ```
 
 ---
 
-## Rollback thủ công
+## 4. Rollback & Xử lý Database
 
-### Rollback app (code)
+### Rollback Container trên Dokploy
+Trong trường hợp cần rollback nhanh về một bản build cũ:
+1. Vào **Dokploy UI → Application/Compose `vwms-backend` → Deployments**.
+2. Hoặc chỉnh trực tiếp `image:` trong ô Raw Compose sang tag SHA cũ (ví dụ: `ghcr.io/529-studio/vmarble-warehouse-management-service:sha-a1b2c3d`) và bấm **Deploy**.
 
-Vì mỗi image có tag SHA riêng, việc rollback rất đơn giản và an toàn:
-
-```bash
-ssh root@$STAGING_HOST
-cd /opt/vwms-staging
-
-# Xem image SHA đang chạy tốt nhất
-cat .last_good_image
-
-# Nếu cần rollback về một SHA cụ thể khác
-APP_IMAGE="ghcr.io/giangdq202/vmarble-warehouse-management-service:sha-a1b2c3d" \
-  docker compose -f docker-compose.staging.yml --env-file .env.staging up -d app
-```
-
-### Xử lý Database & Tương thích ngược
-
-Dự án áp dụng triết lý **"Fix-forward"** và **"Append-only Schema"**:
-
-1.  **Không chạy `migrate down` tự động:** Để đảm bảo an toàn dữ liệu và tính truy vết.
-2.  **Append-only (Chỉ thêm, không xóa/sửa):**
-    *   Trong các migration, ưu tiên thêm cột mới (nullable hoặc có default) thay vì đổi tên hoặc xóa cột cũ.
-    *   Việc này giúp App cũ (sau khi rollback) vẫn tìm thấy cấu hình DB cần thiết và chạy bình thường (Backward Compatibility).
-3.  **Quy trình dọn dẹp:** Chỉ thực hiện xóa cột cũ hoặc migration "phá hủy" sau khi phiên bản App mới đã chạy ổn định trên Production/Staging một thời gian dài.
-
----
-
-## Kiểm tra health staging
-
-```bash
-# Thử từ nội bộ server hoặc qua VPN
-curl http://$STAGING_HOST:8080/healthz
-curl http://10.8.0.1:8080/healthz
-```
+### Triết lý Database ("Fix-forward" & "Append-only Schema")
+1. **Không chạy `migrate down` tự động:** Đảm bảo an toàn dữ liệu và truy vết.
+2. **Append-only (Chỉ thêm, không xóa/sửa):** Trong các migration, ưu tiên thêm cột mới thay vì xóa/sửa cột cũ để đảm bảo tính tương thích ngược (Backward Compatibility) khi cần rollback code app.
