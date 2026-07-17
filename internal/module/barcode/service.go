@@ -85,6 +85,7 @@ func validCheckpoint(c ScanCheckpoint) bool {
 	}
 }
 
+//nolint:unused // BR-TODO: dùng để validate thứ tự scan checkpoint — sẽ integrate vào RecordScan
 func checkpointOrder(c ScanCheckpoint) int {
 	switch c {
 	case CheckpointCNCComplete:
