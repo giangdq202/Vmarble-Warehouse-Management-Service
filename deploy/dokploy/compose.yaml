@@ -4,6 +4,8 @@ services:
     restart: unless-stopped
     ports:
       - "${PORT:-8080}:8080"
+    networks:
+      - dokploy-network
     environment:
       DATABASE_URL: ${DATABASE_URL}
       AUTH_SECRET: ${AUTH_SECRET}
@@ -19,3 +21,7 @@ services:
       timeout: 5s
       retries: 5
       start_period: 10s
+
+networks:
+  dokploy-network:
+    external: true
